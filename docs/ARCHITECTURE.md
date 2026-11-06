@@ -53,12 +53,15 @@ NewKOF/
 │           └── BattleSession.cs        # ★ 阶段 02：调度 + 模拟 + 状态绑定
 │
 ├── tests/
-│   └── BattleCore.Tests/      # 独立 xUnit 测试工程（54 个测试）
+│   └── BattleCore.Tests/      # 独立 xUnit 测试工程（93 个测试）
 │       ├── BattleCore.Tests.csproj
 │       ├── BattleSimulationTests.cs        # 阶段 01：8 个
 │       ├── FixedStepSchedulerTests.cs      # 阶段 02：调度器测试
 │       ├── DeterminismTests.cs             # 阶段 02：确定性与长跑
-│       └── GodotIntegrationContractTests.cs # 阶段 02：Godot 层契约
+│       ├── GodotIntegrationContractTests.cs # 阶段 02：Godot 层契约
+│       ├── FrameSyncRegressionTests.cs     # 阶段 02 补修：问题 1/2 回归
+│       ├── SchedulerAccountingTests.cs     # 阶段 02 补修：丢弃语义、超大 delta、不变量、API 权限
+│       └── SchedulerNumericalRobustnessTests.cs # 阶段 02 补修：NaN/溢出/精度健壮性
 │
 ├── docs/                      # 交接文档（本目录）
 └── shots/                     # 验收截图输出（git 忽略）
@@ -95,10 +98,27 @@ NewKOF (表现层)  ─────────┘
 | `BattleScene` (Godot) | 把 `delta` 交给 `BattleSession`、把状态映射为画面 | 任何权威判定、**任何时间累积逻辑** |
 | `CaptureHelper` (Godot) | 开发期截图验收 | 战斗逻辑（正常运行零副作用） |
 
-**阶段 02 的关键分工**：时间调度逻辑**已全部移出 Godot 层**，位于
+**阶段 02 补修后的关键分工**：时间调度逻辑**已全部移出 Godot 层**，位于
 `core/BattleCore/Simulation/FixedStepScheduler.cs`。`BattleScene._Process`
-现在只有一行调度调用 `_session.Advance(delta, inputProvider: null)`，
-不含任何累加器、补帧或取整代码。这使得调度行为可被纯 C# 测试覆盖。
+只调用 `_session.Advance(delta, inputProvider: null)`。
+
+**记账职责链（阶段 02 补修）**：
+
+```
+BattleScene._Process(delta)
+   └─> BattleSession.Advance(delta, provider)
+         ├─> Scheduler.Advance(delta)        // 只消耗时间预算，返回可推进帧数
+         ├─> 循环: provider(frame) → Step() → Scheduler.CommitStep()   // 提交后才记账
+         └─> 异常时: Scheduler.RecordDroppedSteps(剩余预算) + throw
+```
+
+**核心帧同步不变量**（可用 `BattleSession.IsFrameSyncIntact` 断言）：
+
+```
+CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
+```
+
+该等式在 `Advance`、`StepExact`、暂停、异常后**均成立**。
 
 ---
 
@@ -142,6 +162,30 @@ NewKOF (表现层)  ─────────┘
 | **D14** | **`BattleSession` 强制「输入帧号 == 状态帧号」** | 把配对逻辑收进内核，避免表现层出现"状态推进了但输入用旧帧号"的错帧。`inputProvider` 返回错误帧号时立即抛异常。 |
 | **D15** | **`BattleScene` 不含任何时间逻辑** | `_Process` 只调用 `_session.Advance(delta, null)`，并根据返回值决定是否重绘。 |
 | **D16** | **积压告警只输出一次** | 阶段 02 实现中曾用 `if (DroppedStepCount > 0)` 判断，导致每帧刷屏（实测一次运行输出数十条）。改为 `_backlogWarningIssued` 标志位。 |
+
+### 阶段 02 补修决策（帧同步）
+
+| # | 决策 | 理由 / 证据 |
+|---|---|---|
+| **D17** | **调度器只给「时间预算」，记账由 `CommitStep` 独立完成** | 旧实现 `Advance()` 先加 `TotalSteps` 再执行 `Step()`，中途抛异常会让计数跑在状态前面。现改为：`Advance()` 只消耗预算并返回可推进帧数，**不增加 `TotalSteps`**；每真实提交一帧才 `CommitStep()`。 |
+| **D18** | **异常策略：失败即终止本批次，不回滚、不重试、不吞异常** | 已提交帧保留；未提交帧不计入 `TotalSteps`；剩余预算记入 `DroppedStepCount`；异常原样 `throw`。**不回滚累加器**，因为回滚会让同一段真实时间被重复计费、引入新漂移。 |
+| **D19** | **`StepExact` 与 `Advance` 共用同一记账路径** | 旧 `StepExact` 只改 `Frame` 不改 `TotalSteps`，两种推进方式混用就错位。现在两条路径都调用 `CommitStep()`，可任意交替。 |
+| **D20** | **暂停只阻止时间驱动推进，不阻止显式单步** | `Pause()` 后 `Advance()` 返回 0，但 `StepExact()` 仍生效——逐帧调试需要这个语义。 |
+| **D21** | **`DroppedStepCount` = 被舍弃的时间预算，不是已执行帧** | 语义澄清。满足 `TotalSteps + DroppedStepCount ≈ 累计投入时间 / FixedStepSeconds`。真实执行帧数只看 `TotalSteps`。 |
+| **D22** | **超大 delta 用整除一次算整帧数，禁止循环减步长** | 实测单次 `Advance(3600.0)` 用循环减步长得 **215999** 帧（少 1 帧，浮点残差累积）。改为整除后精确得 216000。复杂度也从 O(帧数) 降到 O(1)。 |
+| **D23** | **整帧数转 `long` 必须饱和保护** | 实测（.NET 8）：`(long)Math.Floor(∞)` 饱和为 **`long.MinValue`（负数）**，于是旧代码的 `if (pending > 0)` 判定为假，**整个丢弃记账被跳过**——`DroppedStepCount` 停在 0，`_accumulator` 永久停在 `4.49e307` 且每次 `Advance` 都返回上限帧数（永久满速追帧、账目不可见）。旧文档曾写作「溢出为负 + NaN」，实测不成立，已更正。现加 `MaxSafeWholeSteps = 1e15` 夹紧 + `SafeAddDropped` 饱和加法 + 末尾余量收敛。 |
+| **D24** | **新增 `IsFrameSyncIntact` 不变量断言属性** | `CurrentState.Frame - 初始帧号 == Scheduler.TotalSteps`。供测试与调试使用，可证明异常后不存在半提交状态。 |
+| **D25** | **记账方法 `CommitStep()` / `RecordDroppedSteps()` 收为 `internal`** | 若保持 public，任何程序集都能 `session.Scheduler.CommitStep(999)`，让 `TotalSteps` 跑到权威状态前面，`IsFrameSyncIntact` 形同虚设（K9）。改为 `internal` + `InternalsVisibleTo("BattleCore.Tests")`：生产代码只有 `BattleSession` 能记账，测试仍可直接驱动调度器。新增反射测试 `AccountingMutators_AreNotPartOfPublicApi` 固定该 API 形状。 |
+
+### 离线原型限定（重要）
+
+**当前丢帧策略与帧同步保证只适用于当前离线原型。**
+
+- 本项目**尚无**回滚联机、输入预测、跨平台确定性验证。
+- `DroppedStepCount > 0` 意味着该段时间**没有**被模拟。在未来的联机回滚场景中，
+  这会造成双方状态分叉，**不能**直接沿用为网络同步策略。
+- 因此：**不得**把当前「补帧上限 + 丢弃预算」的设计承诺为未来回滚联机的确定性保证。
+  联机阶段必须重新设计时间预算策略（如暂停等待、强制重同步），并单独验收。
 
 ### 与 Ikemen GO 研究资料的对应
 

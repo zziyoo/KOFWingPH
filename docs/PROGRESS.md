@@ -1,6 +1,6 @@
 # PROGRESS.md — NewKOF 开发进度
 
-> 最后更新：2026-11-07（阶段 02 完成）
+> 最后更新：2026-11-07（阶段 02 补修完成）
 
 ---
 
@@ -8,8 +8,63 @@
 
 **阶段 01：Godot 工程初始化 — ✅ 已完成**
 **阶段 02：固定逻辑帧与模拟调度验收 — ✅ 已完成**
+**阶段 02 补修：战斗状态与调度器帧同步 — ✅ 已完成**
 
-阶段 02 目标：确保战斗内核具备稳定、可重复、与画面渲染解耦的 60Hz 逻辑模拟能力。
+---
+
+## 阶段 02 补修成果（帧同步）
+
+本轮只解决两个帧同步缺陷，未进入阶段 03。
+
+### 问题 1：异常导致帧计数不同步
+
+**缺陷**：`BattleSession.Advance()` 先调 `Scheduler.Advance()` 增加 `TotalSteps`，
+**之后**才执行输入提供者与 `Step()`。中途抛异常 → 调度器已前进、状态未完成更新 → 半提交状态。
+
+**修复（D17/D18）**：预算与记账分离
+- `Scheduler.Advance()` 改为只**消耗时间预算**并返回可推进帧数，**不再增加 `TotalSteps`**
+- 新增 `Scheduler.CommitStep(count)`：每真正提交一帧才记账
+- 新增 `Scheduler.RecordDroppedSteps(count)`：异常后把未提交预算显式记为丢弃
+- `BattleSession.Advance()` 用 `try/catch`：每帧 `Step()` 成功后才 `CommitStep()`；
+  异常时记录丢弃预算并**原样 `throw`（绝不吞异常）**
+
+**异常后的策略（明确）**：失败即终止本批次，**不回滚、不重试、不忽略**。
+已提交帧保留，未提交帧不计入 `TotalSteps`，剩余预算记入 `DroppedStepCount`。
+**不回滚累加器**——回滚会让同一段真实时间被重复计费，引入新漂移。
+
+### 问题 2：StepExact 与调度器计数不一致
+
+**缺陷**：`StepExact()` 只改 `CurrentState.Frame`，不改 `Scheduler.TotalSteps`。
+与 `Advance` 混用时计数错位。
+
+**修复（D19/D20）**：`StepExact` 改为走**同一记账路径**（`CommitStep`）。
+两条路径可任意交替，帧号关系始终正确。
+暂停语义明确：`Pause()` 阻止时间驱动推进，但**不阻止显式单步**（逐帧调试需要）。
+
+### 额外发现并修复的 2 个数值缺陷
+
+| # | 缺陷 | 实测 | 修复 |
+|---|---|---|---|
+| N1 | 单次巨大 delta 用「循环减步长」累积浮点残差 | `Advance(3600.0)` 得 **215999** 帧（少 1，残留 `acc=0.016666648439`） | 整除一次算整帧数 + 余数（O(1)），精确得 216000（D22） |
+| N2 | 整帧数转 `long` 时 `(long)Math.Floor(∞)` 饱和为 **`long.MinValue`（负数）** | `DroppedStepCount` 停在 **0**（`if (pending > 0)` 为假，丢弃记账被整段跳过）；`_accumulator` 永久停在 **4.49e307**；之后每次 `Advance` 都返回上限帧数（永久满速追帧） | `MaxSafeWholeSteps = 1e15` 夹紧 + `SafeAddDropped` 饱和加法 + 末尾余量收敛（D23） |
+
+> ⚠️ **更正记录（第二轮 Agent 实测）**：上一轮文档把 N2 写成「溢出为负 + `_accumulator` 变 NaN」。
+> 在 .NET 8 上实测**不成立**：`(long)double.PositiveInfinity == long.MinValue`，因此
+> `if (pending > 0)` 直接为假，代码走的是「跳过记录、累加器无限膨胀」路径，全程没有 NaN。
+> 修复方案（夹紧 + 饱和 + 收敛）依然必要且正确，但**失效机理与观测值已按实测改写**。
+
+### 语义澄清（D21）
+
+**`DroppedStepCount` 记录的是被舍弃的模拟时间预算，不代表已经执行的逻辑帧。**
+- 真实执行帧数只看 `TotalSteps`
+- 满足 `TotalSteps + DroppedStepCount ≈ 累计投入时间 / FixedStepSeconds`
+
+### ⚠️ 离线原型限定（重要）
+
+**当前丢帧策略与帧同步保证只适用于当前离线原型。**
+本项目尚无回滚联机、输入预测、跨平台确定性验证。`DroppedStepCount > 0` 表示该段时间
+**没有被模拟**，在联机回滚场景会造成双方状态分叉，**不能**直接沿用为网络同步策略。
+不得把「补帧上限 + 丢弃预算」承诺为未来回滚联机的确定性保证。
 
 ---
 
@@ -107,10 +162,41 @@ cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
 
-**最近一次实际运行结果（2026-11-07）**
+**最近一次实际运行结果（2026-11-07，第二轮 Agent 复核实测）**
 ```
-已通过! - 失败: 0，通过: 54，已跳过: 0，总计: 54，持续时间: 126 ms - BattleCore.Tests.dll (net8.0)
+已通过! - 失败: 0，通过: 93，已跳过: 0，总计: 93，持续时间: 253 ms - BattleCore.Tests.dll (net8.0)
 ```
+
+| 测试文件 | 数量 | 内容 |
+|---|---|---|
+| `BattleSimulationTests.cs` | 8 | 阶段 01 基础 Step 契约 |
+| `FixedStepSchedulerTests.cs` | 19 | 调度器：多帧率一致性、补帧、暂停、非法输入 |
+| `DeterminismTests.cs` | 15 | 确定性、长跑、快照隔离、旧状态重放 |
+| `GodotIntegrationContractTests.cs` | 7 | Godot 层依赖的内核契约 |
+| `FrameSyncRegressionTests.cs` | 12 | **补修**：问题 1/2 回归 |
+| `SchedulerAccountingTests.cs` | 13 | **补修**：丢弃语义、超大 delta、不变量、**记账 API 权限**（本轮 +1） |
+| `SchedulerNumericalRobustnessTests.cs` | 15 | **补修**：NaN/溢出/精度健壮性 |
+
+### 补修回归测试的可信度
+
+**修复前基线（已实测）**：`FrameSyncRegressionTests` 12 个测试中 **10 个失败**，
+两个缺陷均被真实复现，不是推测。
+**修复后**：全部通过。新增的 `SchedulerNumericalRobustnessTests` 又暴露出
+2 个数值缺陷（N1/N2），同样遵循「先失败 → 再修复 → 转绿」的流程。
+
+### 第二轮 Agent 独立复核（2026-11-07）
+
+不照搬上一轮汇报，全部重新执行：
+
+| 复核项 | 方法 | 实测结果 |
+|---|---|---|
+| 测试基线 | `dotnet test`（`tests/BattleCore.Tests`） | **93/93 通过**（原 92 + 本轮新增 1） |
+| 编译 | 根目录 `dotnet build` | 0 警告 0 错误 |
+| 「修复前 10/12 失败」 | `git archive HEAD` 还原修复前代码树，只放入 `FrameSyncRegressionTests.cs` 运行 | **失败 10 / 通过 2 / 总计 12**，与汇报一致 |
+| N1 | 修复前代码树跑 `Advance(3600.0)`（上限 300000） | steps=**215999**、`acc=0.016666648439`，实测复现 |
+| N2 | 修复前代码树跑 `Advance(double.MaxValue/4)` | steps=8、**dropped=0**、`acc=4.49e307`，每次都返回 8 → 与旧文档「NaN / 负数」**不符**，已更正 |
+| 权限风险 K9 | 反射检查 `FixedStepScheduler` 公开 API | 原为 public，可绕过 `BattleSession` 让 `TotalSteps` 跑在状态前面 → **改为 internal**，新增反射测试 |
+| Godot 启动 | `--quit-after 400` 图形模式 | 正常启动（Vulkan 1.4.325 / RTX 3060），首帧丢弃 4 帧、告警仅一次 |
 
 ### 阶段 01 测试（8 个，全部保留通过）
 

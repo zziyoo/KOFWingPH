@@ -37,8 +37,8 @@ public class DeterminismTests
     [Fact]
     public void LongRun_36000Frames_HasNoAccumulatedDrift()
     {
-        // StepExact 直接调用 Step()，不经过时间调度器，因此 TotalSteps 保持 0。
-        // 这里验证的是"帧号精确无漂移"，而不是调度器计数。
+        // 阶段 02 补修后：StepExact 与 Advance 共用同一记账路径，
+        // 因此 TotalSteps 也会同步增加（不再是 0）。
         var session = new BattleSession();
         session.StepExact(LongRunFrames);
 

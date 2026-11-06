@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 54，已跳过: 0，总计: 54`
+期望：`失败: 0，通过: 93，已跳过: 0，总计: 93`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -119,6 +119,45 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 ## 4. 最近完成的修改
 
+### 阶段 02 补修（2026-11-07）战斗状态与调度器帧同步
+
+**修改文件**
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Simulation/FixedStepScheduler.cs` | **`Advance()` 不再增加 `TotalSteps`**，改为只返回预算；新增 `CommitStep()` / `RecordDroppedSteps()`；超大 delta 改整除计算（O(1)）；新增 `MaxSafeWholeSteps` 夹紧 + `SafeAddDropped` 饱和加法防 NaN/溢出 |
+| `core/BattleCore/Simulation/BattleSession.cs` | `Advance()` 加 `try/catch`：提交后才记账，异常时记录丢弃预算并原样抛出；`StepExact()` 改为共用 `CommitStep()` 记账路径；新增 `IsFrameSyncIntact` 不变量属性 |
+
+**新增测试文件**
+
+| 文件 | 测试数 | 内容 |
+|---|---|---|
+| `tests/BattleCore.Tests/FrameSyncRegressionTests.cs` | 12 | 问题 1/2 回归（修复前 10 个失败） |
+| `tests/BattleCore.Tests/SchedulerAccountingTests.cs` | 12 | `DroppedStepCount` 语义、超大 delta、不变量 |
+| `tests/BattleCore.Tests/SchedulerNumericalRobustnessTests.cs` | 15 | NaN/溢出/精度健壮性 |
+
+**修改测试文件**
+
+| 文件 | 变更 |
+|---|---|
+| `tests/BattleCore.Tests/FixedStepSchedulerTests.cs` | 新增 `Tick()` 辅助方法（取得预算后显式 `CommitStep`），替换 12 处直接调用——因 `Advance()` 契约变更，非功能退化 |
+| `tests/BattleCore.Tests/DeterminismTests.cs` | 修正过时注释（`StepExact` 现在会同步 `TotalSteps`） |
+
+**文档**：`ARCHITECTURE.md`（新增 D17–D24、记账职责链、核心不变量、离线原型限定）、`PROGRESS.md`、`AGENT_HANDOFF.md`
+
+**复核追加（2026-11-07 第二轮 Agent，独立重测后）**
+
+| 项 | 变更 |
+|---|---|
+| `FixedStepScheduler.cs` | `CommitStep()` / `RecordDroppedSteps()` 由 **public 收为 internal**（D25）；新增 `InternalsVisibleTo("BattleCore.Tests")` |
+| `SchedulerAccountingTests.cs` | 新增反射测试 `AccountingMutators_AreNotPartOfPublicApi`（+1 → 13） |
+| `SchedulerNumericalRobustnessTests.cs` | N2 失效机理注释按实测更正；`Advance_DroppedCountNeverOverflowsToNegative` 改名并加强为正数 + 饱和断言 |
+| `ARCHITECTURE.md` / `PROGRESS.md` | 更正 D23 与 N2 的实测机理（`(long)∞` 饱和到 `long.MinValue`，不是 `long.MaxValue`；全程无 NaN） |
+
+**未修改**：`C:\Users\32360\Desktop\Ikemen-GO\` 下任何文件。
+
+---
+
 ### 阶段 02（2026-11-07）固定逻辑帧与模拟调度验收
 
 **新增文件**
@@ -159,8 +198,11 @@ cd /d C:\Users\32360\Desktop\NewKOF
 | K6 | 输入固定为 `InputBits.None` | 角色静止，HUD 帧号持续增长 | 属阶段 02 设计边界，输入链路属阶段 03 |
 | K7 | 无 `.sln` 文件 | `dotnet build` 需在具体工程目录执行 | 可选加 `NewKOF.sln`（不必须） |
 | K8 | `BattleState.StateVersion` 恒为 `1` | 仅作快照格式标记，无升级机制 | 见 `ARCHITECTURE.md` 第 5 节问题 1 |
+| K9 | ~~`CommitStep()` / `RecordDroppedSteps()` 为 public~~ **已解决（2026-11-07）** | 原 public 可让外部把 `TotalSteps` 推到状态前面 | 已改为 `internal` + `InternalsVisibleTo("BattleCore.Tests")`，并加反射测试 `AccountingMutators_AreNotPartOfPublicApi` 固定形状（D25）。生产代码只有 `BattleSession` 能记账 |
+| K10 | 单次超大 delta（数百秒级）存在浮点边界行为 | 已用整除 + 饱和保护消除 NaN 与丢帧，但极端值下余量会被归零（记为丢弃） | 正常渲染（16ms 级 delta）完全不受影响；超大 delta 仅出现在挂起/调试场景 |
+| K11 | **丢帧策略仅适用于离线原型** | 未来联机回滚不能沿用 `DroppedStepCount` 丢弃策略（会造成状态分叉） | 联机阶段必须重新设计时间预算策略并单独验收 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，54/54 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，92/92 测试通过，可正常启动运行。
 
 ---
 
@@ -248,7 +290,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 54」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 93」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）

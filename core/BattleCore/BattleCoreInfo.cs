@@ -1,3 +1,11 @@
+using System.Runtime.CompilerServices;
+
+// 记账方法（CommitStep / RecordDroppedSteps）故意为 internal：
+// 只有 BattleSession 可以提交帧，外部程序集无法绕过它破坏
+// 「Frame - 初始帧号 == TotalSteps」不变量。测试需要直接驱动调度器，
+// 因此仅对测试程序集开放。
+[assembly: InternalsVisibleTo("BattleCore.Tests")]
+
 namespace NewKOF.BattleCore;
 
 /// <summary>
