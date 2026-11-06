@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 03A 完成，本地未提交）
+> 最后更新：2026-11-07（阶段 03A 完成并推送 `0be9919`）
 
 ---
 
@@ -119,7 +119,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 ## 4. 最近完成的修改
 
-### 阶段 03A（2026-11-07）基础输入链路 —— 本地未提交
+### 阶段 03A（2026-11-07）基础输入链路 —— 已提交 `0be9919`
 
 **新增文件**
 
@@ -252,9 +252,11 @@ cd /d C:\Users\32360\Desktop\NewKOF
 - **Git**：https://github.com/zziyoo/KOFWingPH，分支 `main`（跟踪 `origin/main`）
   - `9937b3f` — 阶段 01–02 Godot 工程初始化与固定逻辑帧调度
   - `c003dc2` — 记录远程仓库与代理要求
-  - **`850c4db` — 阶段 02 补修（本轮已验收、已推送，远端 HEAD 已核对一致）**
-  - **当前 HEAD = `850c4dbe580342e277cd92a0143aa63e4a54e7cf`**
-  - **工作区：阶段 03A 的改动全部未提交**（本轮授权只到阶段 02 补修）：
+  - `850c4db` — 阶段 02 补修（调度器记账与帧同步）
+  - **`0be9919` — 阶段 03A 基础输入链路（已推送，远端 HEAD 已核对一致）**
+  - **当前 HEAD = `0be9919fda3a23eb0ef15628d7ef13d309ba2b1d`**
+  - **工作区：干净**（`git status --porcelain` 无输出；`.workbuddy/` 与 `shots/` 已被忽略）
+  - `0be9919` 提交内容（19 文件）：
     ```
     新增: core/BattleCore/Input/InputBuffer.cs
           core/BattleCore/Input/DirectionResolver.cs
@@ -263,7 +265,8 @@ cd /d C:\Users\32360\Desktop\NewKOF
           tests/BattleCore.Tests/DirectionResolverTests.cs
           tests/BattleCore.Tests/InputPipelineTests.cs
     修改: scripts/BattleScene.cs  scripts/CaptureHelper.cs
-          scenes/Battle.tscn  docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+          scenes/Battle.tscn  .gitignore
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
   - **网络注意**：本机直连 github.com:443 不通，需本地代理 `http://127.0.0.1:7897`。
     代理**偶发 502**，重试一次即可；最近一次成功命令：
@@ -321,7 +324,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 1. ~~实现阶段 03 输入链路~~ **已完成（03A）**。后续若要改键位/加手柄，只动
    `KeyboardInputMap`（或新增 `GamepadInputMap`），**不要**把映射写进 `BattleScene` 或内核。
-2. **提交阶段 03A** — 代码与测试已就绪，只差用户授权（本轮授权不含提交）。
+2. ~~提交阶段 03A~~ **已提交并推送（`0be9919`）**。下一阶段开工前先跑一遍 `dotnet test` 确认 123 项。
 3. **实现运动系统** — 前提：先确定定点数格式并写入文档；方向直接用
    `DirectionResolver.Resolve(...)` 的结果，不要在运动系统里再解析 `InputBits`。
 4. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
