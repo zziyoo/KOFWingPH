@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>NewKOF.BattleCore</RootNamespace>
+    <AssemblyName>NewKOF.BattleCore</AssemblyName>
+
+    <!-- 核心模拟必须完全独立于 Godot：禁止任何 Godot 引用。 -->
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

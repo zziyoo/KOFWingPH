@@ -1,0 +1,33 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>NewKOF</RootNamespace>
+    <AssemblyName>NewKOF</AssemblyName>
+
+    <!--
+      默认编译项会递归收集 **/*.cs，从而把下面这些目录里的生成文件也纳入编译，
+      造成 AssemblyInfo / TargetFramework 特性重复（CS0579）。
+      显式关闭默认收集并手动指定源码目录，保证编译边界明确。
+    -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 表现层源码：仅 scripts 目录。 -->
+    <Compile Include="scripts\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      依赖方向（强制单向）：
+        NewKOF (Godot 表现层)  ->  NewKOF.BattleCore (纯 C# 权威模拟)
+      BattleCore 绝不引用 Godot。
+    -->
+    <ProjectReference Include="core\BattleCore\BattleCore.csproj" />
+  </ItemGroup>
+
+</Project>

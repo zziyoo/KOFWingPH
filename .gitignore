@@ -1,0 +1,21 @@
+# Godot
+.godot/
+export.cfg
+export_presets.cfg
+*.translation
+
+# .NET / C#
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.csproj.user
+
+# 开发期验收截图（--shot= 参数生成，非项目产物）
+shots/
+
+# 系统
+Thumbs.db
+desktop.ini
+.DS_Store

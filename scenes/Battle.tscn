@@ -1,0 +1,86 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/BattleScene.cs" id="1_battle"]
+[ext_resource type="Script" path="res://scripts/CaptureHelper.cs" id="2_capture"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hud"]
+bg_color = Color(0, 0, 0, 0.45)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 10.0
+content_margin_top = 4.0
+content_margin_right = 10.0
+content_margin_bottom = 4.0
+
+[node name="Battle" type="Node2D"]
+script = ExtResource("1_battle")
+
+[node name="Background" type="ColorRect" parent="."]
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0.09, 0.1, 0.14, 1)
+mouse_filter = 2
+
+[node name="Sky" type="ColorRect" parent="."]
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 1280.0
+offset_bottom = 560.0
+color = Color(0.13, 0.15, 0.21, 1)
+mouse_filter = 2
+
+[node name="Ground" type="ColorRect" parent="."]
+offset_left = 0.0
+offset_top = 560.0
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0.22, 0.24, 0.28, 1)
+mouse_filter = 2
+
+[node name="GroundLine" type="ColorRect" parent="."]
+offset_left = 0.0
+offset_top = 558.0
+offset_right = 1280.0
+offset_bottom = 562.0
+color = Color(0.55, 0.6, 0.7, 1)
+mouse_filter = 2
+
+[node name="Fighter1" type="Node2D" parent="."]
+position = Vector2(520, 500)
+
+[node name="Body" type="ColorRect" parent="Fighter1"]
+offset_left = -30.0
+offset_top = 0.0
+offset_right = 30.0
+offset_bottom = 120.0
+color = Color(0.9, 0.25, 0.3, 1)
+mouse_filter = 2
+
+[node name="Fighter2" type="Node2D" parent="."]
+position = Vector2(760, 500)
+
+[node name="Body" type="ColorRect" parent="Fighter2"]
+offset_left = -30.0
+offset_top = 0.0
+offset_right = 30.0
+offset_bottom = 120.0
+color = Color(0.25, 0.55, 0.95, 1)
+mouse_filter = 2
+
+[node name="CaptureHelper" type="Node" parent="."]
+script = ExtResource("2_capture")
+
+[node name="Hud" type="PanelContainer" parent="."]
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 264.0
+offset_bottom = 60.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
+
+[node name="HudLabel" type="Label" parent="Hud"]
+layout_mode = 2
+text = "Logic Frame: 0"

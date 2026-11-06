@@ -1,0 +1,33 @@
+; Engine configuration file.
+; NewKOF - 新拳皇式 2D 格斗游戏
+; 阶段 01：基础工程与占位战斗场景
+
+config_version=5
+
+[application]
+
+config/name="NewKOF"
+config/description="拳皇式 2D 格斗游戏（Godot 4 .NET + C#）"
+run/main_scene="res://scenes/Battle.tscn"
+config/features=PackedStringArray("4.7", "C#", "Forward Plus")
+config/icon="res://icon.svg"
+
+[dotnet]
+
+project/assembly_name="NewKOF"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+environment/defaults/default_clear_color=Color(0.09, 0.10, 0.14, 1)
