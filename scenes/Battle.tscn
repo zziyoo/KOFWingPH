@@ -77,10 +77,12 @@ script = ExtResource("2_capture")
 [node name="Hud" type="PanelContainer" parent="."]
 offset_left = 24.0
 offset_top = 20.0
-offset_right = 264.0
-offset_bottom = 60.0
+offset_right = 320.0
+offset_bottom = 96.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
 
 [node name="HudLabel" type="Label" parent="Hud"]
 layout_mode = 2
-text = "Logic Frame: 0"
+text = "Logic Frame: 0
+P1: -
+P2: -"

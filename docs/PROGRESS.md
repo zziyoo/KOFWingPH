@@ -1,6 +1,6 @@
 # PROGRESS.md — NewKOF 开发进度
 
-> 最后更新：2026-11-07（阶段 02 补修完成）
+> 最后更新：2026-11-07（阶段 03A 完成，本地未提交）
 
 ---
 
@@ -8,7 +8,74 @@
 
 **阶段 01：Godot 工程初始化 — ✅ 已完成**
 **阶段 02：固定逻辑帧与模拟调度验收 — ✅ 已完成**
-**阶段 02 补修：战斗状态与调度器帧同步 — ✅ 已完成**
+**阶段 02 补修：战斗状态与调度器帧同步 — ✅ 已完成（已提交 `850c4db`）**
+**阶段 03A：基础输入链路 — ✅ 已完成（本地未提交）**
+
+---
+
+## 阶段 03A 成果（基础输入链路）
+
+### 边界
+
+只做「输入进入正确的逻辑帧」，**不做**：↓↘→ / →↓↘ 等指令识别、蓄力、必杀优先级、
+输入缓冲取消、移动/跳跃/攻击/碰撞/伤害、投技、连击、回滚联机。角色位置仍不变。
+
+### 新增模块
+
+| 模块 | 位置 | 职责 | 明确不做 |
+|---|---|---|---|
+| `InputBuffer` | `core/BattleCore/Input/InputBuffer.cs` | 渲染采样 → 逻辑帧输入：电平保持、按下边沿闩锁、逐帧历史 | 键盘 API、SOCD、指令识别 |
+| `DirectionResolver` | `core/BattleCore/Input/DirectionResolver.cs` | 纯函数：SOCD 清理 + 绝对方向 → 相对朝向 | 录制、状态推进 |
+| `KeyboardInputMap` | `scripts/KeyboardInputMap.cs` | 键盘事件 → `InputBits`，唯一接触 Godot 输入 API 的类 | SOCD、权威判定 |
+| `CaptureHelper` 扩展 | `scripts/CaptureHelper.cs` | 新增 `--key=<frame>:<down\|up>:<KeyName>` 合成按键注入（仅调试参数启用） | 正常运行时零副作用 |
+
+### 规则（实现细节见 `ARCHITECTURE.md` D26–D33）
+
+| 项 | 规则 |
+|---|---|
+| SOCD-H | 左右同时按下或都不按 → **水平中立**（相反方向抵消）。不采用「后输入优先」：`FrameInput` 只存电平位，无事件顺序，无法唯一还原 |
+| SOCD-V | 上下同时按下 → **上优先**（跳跃优先） |
+| 绝对 / 相对 | `InputBits` 存**绝对方向**（物理键）；相对朝向只在 `DirectionResolver` 用 `Facing` 换算 |
+| 历史归属 | `InputBuffer.History`（内核层）保存每逻辑帧一条 `FrameInput`，帧号必须连续，否则抛异常 |
+| 边沿传递 | 采样时 `pending \|= (now & ~held)`；`Take(frame)` 消费一次即清零。0 帧不丢、N 帧不重复 |
+| 多次按下 | 两次逻辑帧之间按多次 → 合并为一帧，并累加 `CoalescedPressCount`（可观测，非静默） |
+| 暂停 | 不产生输入帧；已闩锁边沿保留到恢复后第一帧 |
+| 丢弃预算 | 被丢弃的时间不产生逻辑帧，也不产生输入帧 |
+| 双人独立 | 每人独立 `held`/`pending`，互不影响 |
+| 采样方式 | Godot 按**按键事件**采样（非每渲染帧轮询），可捕获同帧内按下又松开；失焦时 `ReleaseAll()` 防卡键 |
+
+### 键位
+
+| 玩家 | 方向 | A / B / C / D |
+|---|---|---|
+| P1 | W / A / S / D | J / K / U / I |
+| P2 | ↑ / ↓ / ← / → | 小键盘 1 / 2 / 4 / 5，或 `,` `.` `/` `;`（无小键盘的笔记本） |
+
+F1 切换暂停（只阻止时间驱动推进，不影响显式单步）。
+
+### 新增测试（30 项，总数 93 → 123）
+
+| 文件 | 数量 | 覆盖 |
+|---|---|---|
+| `InputBufferTests.cs` | 13 | 单方向、按住/松开、点击边沿只出现一帧、多帧批次不重复消费、双人独立、多键组合、历史连续性、非法帧号 |
+| `DirectionResolverTests.cs` | 10 | 单方向、双方向 SOCD（左右中立 / 上优先）、朝向翻转、攻击位透传、双轴不串扰 |
+| `InputPipelineTests.cs` | 7 | 输入与逻辑帧绑定、0/1/N 帧批次、暂停保留边沿、丢弃预算不产帧、抖动 delta 下历史与状态帧号一致、固定输入日志在 30/60/144/240fps 下结果一致 |
+
+**测试有效性验证（变异测试）**：把 `Take()` 改成只用 `held`、丢弃 `pending` 后，
+`InputBufferTests` + `InputPipelineTests` 中 **5 项立即失败**（点击边沿、多帧批次、
+双人独立边沿等），证明断言不是空转；还原后 123/123 通过。
+
+### 真实 Godot 运行证据
+
+| 场景 | 截图 | 实测 HUD |
+|---|---|---|
+| 双人按键（P1 按住 D+J，P2 按住 ←+小键盘1） | `shots/input_p1p2.png` | `Logic Frame: 63` / `P1: R A` / `P2: L A` |
+| 按住 S 后按 F1 暂停 | `shots/input_paused.png` | `Logic Frame: 21 [PAUSED · F1]` / `P1: D` / `P2: -` |
+
+- 按键通过 `Input.ParseInputEvent`（Godot 自身输入管线）注入，与真实键盘走同一条
+  `_Input → KeyboardInputMap → InputBuffer` 路径；OS 级按键注入被安全策略拦截，未使用。
+- 暂停截图在 200 个渲染帧后仍停在逻辑帧 21，证明暂停确实阻止了时间驱动推进。
+- 启动首帧丢弃 1~4 帧（渲染尖峰），告警只输出一次。
 
 ---
 
@@ -118,12 +185,14 @@
   - `Background` / `Sky` / `Ground` / `GroundLine` — 背景与地面
   - `Fighter1` — Node2D 容器，内含 60×120 红色矩形
   - `Fighter2` — Node2D 容器，内含 60×120 蓝色矩形
-  - `Hud` — 左上角显示 `Logic Frame: N`
-- `scripts/BattleScene.cs`（阶段 02 改写）：
-  - 把 `delta` 交给 `BattleSession.Advance()`
+  - `Hud` — 左上角三行：`Logic Frame: N`、`P1:`、`P2:`（显示最近一个已消费逻辑帧的输入）
+- `scripts/BattleScene.cs`（阶段 02 改写 / 阶段 03A 接入输入）：
+  - 把 `delta` 与 `_inputBuffer.Take` 交给 `BattleSession.Advance()`
   - 按返回值决定是否重绘
   - 积压超过上限时告警一次
-- `scripts/CaptureHelper.cs`：开发期截图工具（`--shot=` 参数启用，正常运行时零副作用）
+  - `_Input` 只做两件事：F1 切暂停 + 转发按键事件给 `KeyboardInputMap`
+- `scripts/KeyboardInputMap.cs`（阶段 03A）：键盘事件 → `InputBits`，`ReleaseAll()` 防失焦卡键
+- `scripts/CaptureHelper.cs`：开发期截图 + 合成按键注入工具（`--shot=` / `--key=` 参数启用，正常运行时零副作用）
 
 ### 2. 战斗内核（`core/BattleCore`，纯 C#）
 
@@ -132,6 +201,8 @@
 | `BattleSimulation` | ✅ | `Step(BattleState, FrameInput) → BattleStepResult` |
 | `FixedStepScheduler` | ✅ 阶段 02 | 时间累积与补帧决策，可独立测试 |
 | `BattleSession` | ✅ 阶段 02 | 调度 + 模拟 + 状态绑定 |
+| `InputBuffer` | ✅ 阶段 03A | 渲染采样 → 逻辑帧输入：边沿闩锁、逐帧历史、帧号连续性校验 |
+| `DirectionResolver` | ✅ 阶段 03A | 纯函数：SOCD（左右中立/上优先）+ 绝对方向 → 相对朝向 |
 | `BattleState` | ✅ | `sealed record`，不可变；`Frame` + `Fighters`(只读2人) + `StateVersion` |
 | `FighterState` | ✅ | `readonly record struct` |
 | `FrameInput` | ✅ | `readonly record struct`：Frame + P1/P2 `InputBits` |
@@ -162,20 +233,27 @@ cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
 
-**最近一次实际运行结果（2026-11-07，第二轮 Agent 复核实测）**
+**最近一次实际运行结果（2026-11-07，阶段 03A 完成后实测）**
 ```
-已通过! - 失败: 0，通过: 93，已跳过: 0，总计: 93，持续时间: 253 ms - BattleCore.Tests.dll (net8.0)
+已通过! - 失败: 0，通过: 123，已跳过: 0，总计: 123，持续时间: 117 ms - BattleCore.Tests.dll (net8.0)
 ```
 
-| 测试文件 | 数量 | 内容 |
+| 测试文件 | 用例数（`--list-tests` 实测） | 内容 |
 |---|---|---|
 | `BattleSimulationTests.cs` | 8 | 阶段 01 基础 Step 契约 |
-| `FixedStepSchedulerTests.cs` | 19 | 调度器：多帧率一致性、补帧、暂停、非法输入 |
-| `DeterminismTests.cs` | 15 | 确定性、长跑、快照隔离、旧状态重放 |
-| `GodotIntegrationContractTests.cs` | 7 | Godot 层依赖的内核契约 |
+| `FixedStepSchedulerTests.cs` | 24 | 调度器：多帧率一致性（Theory 展开）、补帧、暂停、非法输入 |
+| `DeterminismTests.cs` | 16 | 确定性、长跑、快照隔离、旧状态重放 |
+| `GodotIntegrationContractTests.cs` | 6 | Godot 层依赖的内核契约 |
 | `FrameSyncRegressionTests.cs` | 12 | **补修**：问题 1/2 回归 |
-| `SchedulerAccountingTests.cs` | 13 | **补修**：丢弃语义、超大 delta、不变量、**记账 API 权限**（本轮 +1） |
-| `SchedulerNumericalRobustnessTests.cs` | 15 | **补修**：NaN/溢出/精度健壮性 |
+| `SchedulerAccountingTests.cs` | 13 | **补修**：丢弃语义、超大 delta、不变量、**记账 API 权限** |
+| `SchedulerNumericalRobustnessTests.cs` | 14 | **补修**：NaN/溢出/精度健壮性 |
+| `InputBufferTests.cs` | 13 | **03A**：电平/边沿/双人独立/历史连续性 |
+| `DirectionResolverTests.cs` | 10 | **03A**：SOCD 与相对朝向 |
+| `InputPipelineTests.cs` | 7 | **03A**：输入与逻辑帧绑定、暂停、多帧批次 |
+| **合计** | **123** | 与 `dotnet test` 的「总计: 123」一致 |
+
+> 说明：上表是 **xUnit 用例数**（`Theory` 的每个 `InlineData` 计一条），不是方法数。
+> 早先版本按方法数填写，与「总计」对不上，已按 `--list-tests` 实测校正。
 
 ### 补修回归测试的可信度
 
@@ -293,28 +371,32 @@ dotnet test
 - 伤害、硬直、combo、取消规则、Hitstop、KO
 - 动画、精灵图、音效、特效
 - 回合 / 计时
-- 键盘手柄输入映射（当前输入固定为 `InputBits.None`）
-- 指令识别与输入缓冲
+- 手柄输入映射（键盘基础输入已在阶段 03A 接入；手柄、键位重绑定 UI 未做）
+- 指令识别（↓↘→ / →↓↘）、蓄力、输入缓冲取消
 - 快照序列化 / 回滚 / 重放
 - 联机、AI、训练模式
 
 ---
 
-## 下一阶段计划（阶段 03 建议）
+## 下一阶段计划（阶段 03B 建议）
 
-**进入前必须先读** `ARCHITECTURE.md` 第 5 节「尚未决定的架构问题」。
+**进入前必须先读** `ARCHITECTURE.md` 第 4 节（D26–D33 输入规则）与第 5 节。
 
-阶段 02 已解决"何时推进逻辑帧"，阶段 03 应当解决"推进时发生什么"：
+阶段 02 解决「何时推进逻辑帧」，阶段 03A 解决「输入如何绑定逻辑帧」，
+阶段 03B 起解决「推进时发生什么」：
 
-1. **决策落定**：定点数格式、SOCD 规则、碰撞几何、P0–P9 阶段划分（至少 P0/P4/P8）。
-   写入 `ARCHITECTURE.md` 第 4 节。
-2. **输入链路**：实现 `InputSystem.Normalize`（SOCD + 相对朝向）；
-   在 `BattleScene` 接入键盘映射，产出真实 `FrameInput`。
-   > 注意：`BattleSession.Advance` 的 `inputProvider` 参数已就绪，接入时直接使用。
-3. **运动系统**：`FighterState` 增加速度字段，实现 `MovementSystem.Integrate`
-   （走/跳/重力 + 地面边界），保持整数/定点。
-4. **碰撞与推挤**：AABB pushbox 推挤，先只做身位不重叠。
-5. **测试扩展**：每项新规则补确定性测试；建立"黄金帧序列"回归测试。
-6. **不要**在阶段 03 引入攻击/伤害（那是后续阶段）。
+1. **决策落定**：定点数格式（Q16.16 / Q8.8）、碰撞几何（AABB/OBB）、
+   帧内阶段划分（至少 P0/P4/P8）。写入 `ARCHITECTURE.md` 第 4 节。
+2. **运动系统**：`FighterState` 增加速度字段，实现 `MovementSystem.Integrate`
+   （走/跳/重力 + 地面边界），保持整数/定点；方向用 `DirectionResolver` 的
+   `RelativeInput`（**不要**在运动系统里再解析原始 `InputBits`）。
+3. **碰撞与推挤**：AABB pushbox 推挤，先只做身位不重叠。
+4. **指令识别**（独立阶段，不要与运动混做）：↓↘→、→↓↘、蓄力、缓冲取消。
+   若需要「后输入优先」SOCD，必须先扩展 `FrameInput` 记录事件顺序。
+5. **测试扩展**：每项新规则补确定性测试；建立「黄金帧序列」回归测试。
+6. **不要**在本阶段引入攻击/伤害（那是后续阶段）。
+
+> ⚠️ 阶段 03A 的改动**尚未提交 Git**（本轮授权只到阶段 02 补修）。接手后先看
+> `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test` 确认 123 项通过再继续。
 
 **每完成一个子任务，立即更新本文件与 `AGENT_HANDOFF.md`。**

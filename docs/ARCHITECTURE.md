@@ -37,13 +37,16 @@ NewKOF/
 │
 ├── scripts/                   # 表现层 C# 源码（唯一被 Godot 编译的目录）
 │   ├── BattleScene.cs         # 战斗场景根节点，驱动逻辑帧并同步画面
-│   └── CaptureHelper.cs       # 开发期截图工具（仅 --shot= 参数启用）
+│   ├── KeyboardInputMap.cs    # ★ 阶段 03A：键盘事件 → InputBits（唯一接触 Godot 输入 API）
+│   └── CaptureHelper.cs       # 开发期截图/按键注入工具（仅 --shot= 参数启用）
 │
 ├── core/
 │   └── BattleCore/            # ★ 权威战斗内核（纯 C#，零 Godot 依赖）
 │       ├── BattleCore.csproj
 │       ├── BattleCoreInfo.cs
 │       ├── Input/FrameInput.cs
+│       ├── Input/InputBuffer.cs        # ★ 阶段 03A：渲染采样 → 逻辑帧输入（边沿闩锁 + 历史）
+│       ├── Input/DirectionResolver.cs  # ★ 阶段 03A：SOCD + 绝对方向 → 相对朝向
 │       ├── State/FighterState.cs
 │       ├── State/BattleState.cs
 │       └── Simulation/
@@ -53,7 +56,7 @@ NewKOF/
 │           └── BattleSession.cs        # ★ 阶段 02：调度 + 模拟 + 状态绑定
 │
 ├── tests/
-│   └── BattleCore.Tests/      # 独立 xUnit 测试工程（93 个测试）
+│   └── BattleCore.Tests/      # 独立 xUnit 测试工程（123 个测试）
 │       ├── BattleCore.Tests.csproj
 │       ├── BattleSimulationTests.cs        # 阶段 01：8 个
 │       ├── FixedStepSchedulerTests.cs      # 阶段 02：调度器测试
@@ -61,7 +64,10 @@ NewKOF/
 │       ├── GodotIntegrationContractTests.cs # 阶段 02：Godot 层契约
 │       ├── FrameSyncRegressionTests.cs     # 阶段 02 补修：问题 1/2 回归
 │       ├── SchedulerAccountingTests.cs     # 阶段 02 补修：丢弃语义、超大 delta、不变量、API 权限
-│       └── SchedulerNumericalRobustnessTests.cs # 阶段 02 补修：NaN/溢出/精度健壮性
+│       ├── SchedulerNumericalRobustnessTests.cs # 阶段 02 补修：NaN/溢出/精度健壮性
+│       ├── InputBufferTests.cs             # 阶段 03A：电平/边沿/双人独立/历史连续性
+│       ├── DirectionResolverTests.cs       # 阶段 03A：SOCD 与相对朝向
+│       └── InputPipelineTests.cs           # 阶段 03A：输入与逻辑帧绑定、暂停、多帧批次
 │
 ├── docs/                      # 交接文档（本目录）
 └── shots/                     # 验收截图输出（git 忽略）
@@ -94,9 +100,12 @@ NewKOF (表现层)  ─────────┘
 | `BattleState` | 权威状态快照（不可变） | 被外部修改 |
 | `FighterState` | 单角色数据（身份 + 初始数据） | 招式、受击、碰撞 |
 | `FrameInput` | 一帧内双方输入（不可变值类型） | 输入归一化、SOCD、命令识别 |
+| `InputBuffer` | **渲染采样 → 逻辑帧输入**：电平保持、按下边沿闩锁、逐帧历史 | 键盘/手柄 API、SOCD、指令识别 |
+| `DirectionResolver` | **SOCD 清理 + 绝对方向 → 相对朝向**（纯函数） | 输入录制、状态推进 |
 | `BattleStepResult` | 单次 Step 的结果描述 | 权威判定 |
-| `BattleScene` (Godot) | 把 `delta` 交给 `BattleSession`、把状态映射为画面 | 任何权威判定、**任何时间累积逻辑** |
-| `CaptureHelper` (Godot) | 开发期截图验收 | 战斗逻辑（正常运行零副作用） |
+| `BattleScene` (Godot) | 把 `delta` 交给 `BattleSession`、把状态映射为画面 | 任何权威判定、**任何时间累积逻辑**、输入历史 |
+| `KeyboardInputMap` (Godot) | 键盘事件 → `InputBits`，喂给 `InputBuffer` | SOCD、指令识别、权威判定 |
+| `CaptureHelper` (Godot) | 开发期截图 / 合成按键注入 | 战斗逻辑（正常运行零副作用） |
 
 **阶段 02 补修后的关键分工**：时间调度逻辑**已全部移出 Godot 层**，位于
 `core/BattleCore/Simulation/FixedStepScheduler.cs`。`BattleScene._Process`
@@ -134,6 +143,11 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
    战斗规则推进（推进后状态如何变化）由 `BattleSimulation` 负责。二者互不知道对方细节。
 8. **时间调度不得留在 Godot 层**：任何 `_Process` 中的累加器、补帧、取整都属于
    架构违规——它们无法被无 GUI 测试覆盖。Godot 层只允许 `_session.Advance(delta, ...)` 一行。
+9. **输入边沿必须绑定逻辑帧**（阶段 03A）：Godot 层只把物理按键转成 `InputBits` 交给
+   `InputBuffer`；「这次按下属于第几帧」由内核按帧号裁决。**禁止**把一次渲染帧采样
+   直接当成一帧输入，也禁止把同一采样复制给整批逻辑帧（会重复消费边沿）。
+10. **录制层保持原始语义**：`InputBits` 存**绝对方向 + 同时按下**，SOCD 与相对朝向
+    只在 `DirectionResolver` 解析时应用。这样同一份输入日志换边后仍可重放。
 
 ---
 
@@ -155,7 +169,7 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | # | 决策 | 理由 / 证据 |
 |---|---|---|
 | **D9** | **时间累积用 `double` 秒，不用整数微秒** | 1/60 秒 = 16666.666... µs 无法用整数精确表示。旧实现 `(int)(delta*1e6)` + `1000000/60` 的截断误差与间隔误差随渲染帧率叠加，实测 600 秒：240FPS **少 5 帧**、144FPS 少 1 帧、30FPS 多 1 帧。改为 double 秒累加后，30/60/144/240/59.94/165 FPS 全部**精确 36000 帧、零漂移**。 |
-| **D10** | **调度器置于 `BattleCore`，不在 Godot 层** | 调度逻辑若留在 `_Process` 内则无法被无 GUI 测试覆盖，只能靠肉眼观察 HUD。抽到纯 C# 后可用 54 个测试逐项验证。 |
+| **D10** | **调度器置于 `BattleCore`，不在 Godot 层** | 调度逻辑若留在 `_Process` 内则无法被无 GUI 测试覆盖，只能靠肉眼观察 HUD。抽到纯 C# 后可用无 GUI 测试逐项验证（当前 123 项）。 |
 | **D11** | **补帧上限 `MaxStepsPerAdvance`，超限显式记录** | 防止卡顿后 `while` 无限补帧造成死亡螺旋。超限部分累加进 `DroppedStepCount`，**绝不静默丢弃**。`BattleScene` 设为 5，并在首次丢弃时告警一次。 |
 | **D12** | **显式 `Pause()/Resume()`，恢复后不回补暂停时间** | 暂停期间 `Advance` 直接返回 0，且不累积 delta。恢复后不会突然补上暂停期间的数百帧。 |
 | **D13** | **`Advance` 拒绝 NaN / ±Infinity / 负 delta** | 这些值会污染累加器（NaN 一旦进入永不恢复），必须立即失败。 |
@@ -176,6 +190,21 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | **D23** | **整帧数转 `long` 必须饱和保护** | 实测（.NET 8）：`(long)Math.Floor(∞)` 饱和为 **`long.MinValue`（负数）**，于是旧代码的 `if (pending > 0)` 判定为假，**整个丢弃记账被跳过**——`DroppedStepCount` 停在 0，`_accumulator` 永久停在 `4.49e307` 且每次 `Advance` 都返回上限帧数（永久满速追帧、账目不可见）。旧文档曾写作「溢出为负 + NaN」，实测不成立，已更正。现加 `MaxSafeWholeSteps = 1e15` 夹紧 + `SafeAddDropped` 饱和加法 + 末尾余量收敛。 |
 | **D24** | **新增 `IsFrameSyncIntact` 不变量断言属性** | `CurrentState.Frame - 初始帧号 == Scheduler.TotalSteps`。供测试与调试使用，可证明异常后不存在半提交状态。 |
 | **D25** | **记账方法 `CommitStep()` / `RecordDroppedSteps()` 收为 `internal`** | 若保持 public，任何程序集都能 `session.Scheduler.CommitStep(999)`，让 `TotalSteps` 跑到权威状态前面，`IsFrameSyncIntact` 形同虚设（K9）。改为 `internal` + `InternalsVisibleTo("BattleCore.Tests")`：生产代码只有 `BattleSession` 能记账，测试仍可直接驱动调度器。新增反射测试 `AccountingMutators_AreNotPartOfPublicApi` 固定该 API 形状。 |
+
+### 阶段 03A 决策（基础输入链路）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D26** | **输入分两层：原始层（`InputBits`）+ 解析层（`DirectionResolver`）** | 原始层是被逐帧录制/重放的数据；解析层是可随规则演进的计算。混在一起会让「规则一改，旧录像全废」。 |
+| **D27** | **SOCD：左右同时 → 水平中立；上下同时 → 上优先** | 左右对称抵消是当前数据格式下唯一无歧义的规则：`FrameInput` 只存电平位，没有事件顺序，「后输入优先」无法从位掩码还原。上下「上优先」符合 2D 格斗跳跃优先的惯例。要改「后输入优先」必须先扩展录制格式（后续阶段）。 |
+| **D28** | **录制绝对方向，相对朝向只在解析时用 `Facing` 换算** | 朝向属于权威状态且会随换边变化；把它烘进输入会让同一份日志在换边后失效，也会让 P1/P2 需要两套录法。 |
+| **D29** | **输入历史由 `BattleCore.Input.InputBuffer` 保存** | 放在表现层就无法无 GUI 测试，也无法保证「历史帧号 == 状态帧号」。`InputBuffer.Take(frame)` 对非连续帧号直接抛异常，把错帧挡在源头。 |
+| **D30** | **按下边沿闩锁：`pending \|= (now & ~held)`，`Take` 时消费一次即清零** | 一个渲染帧可能推进 0/1/N 个逻辑帧。闩锁保证边沿必定落在紧随其后的那一个逻辑帧上：0 帧时不丢，N 帧时不重复消费。 |
+| **D31** | **两次逻辑帧之间的多次按下合并为一帧，并累加 `CoalescedPressCount`** | 电平语义无法表达「同帧内按了两次」。选择显式计数而不是静默丢弃，使合并可观测；逐次事件流留给指令识别阶段。 |
+| **D32** | **暂停与丢弃预算都不产生输入帧；已闩锁的边沿保留到恢复后第一帧** | 不为不存在的逻辑帧伪造输入。暂停期间按键不会丢，恢复后第一帧带上它；被丢弃的时间预算本来就没有模拟，自然没有输入。 |
+| **D33** | **Godot 层按「按键事件」采样，而不是每个渲染帧轮询** | 轮询会漏掉「同一渲染帧内按下又松开」。事件驱动 + `HashSet<Key>` 推导按住状态，还能让一个输入位绑定多个键（小键盘 + 标点键都映射 P2 攻击）。窗口失焦时 `ReleaseAll()` 防止卡键。 |
+
+
 
 ### 离线原型限定（重要）
 
@@ -223,7 +252,7 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 1. **后续状态模型细化**：`BattleState` 内如何组织角色数组（固定 `[2]` 还是可变列表）？引入招式/实体后是否仍保持全量不可变复制，还是改为结构共享（如不可变持久化集合）？
 2. **定点数格式**：位置/速度采用 Q16.16 还是 Q8.8？取整发生点在哪一步？（参考 22 号文档"数值约束"）
 3. **帧内阶段划分**：是否完整采用 22 号文档的 P0–P9？阶段 02 至少需要 P0（帧入口）、P4（运动）、P8（快照）。
-4. **输入归一化策略**：SOCD 采用哪种规则（上优先 / 中立 / 后输入优先）？方向是绝对还是相对朝向？
+4. ~~**输入归一化策略**~~ **阶段 03A 已决定（D26–D28）**：SOCD 左右同时 → 中立、上下同时 → 上优先；录制层存绝对方向，相对朝向只在解析层应用。**仍待决定**：是否改为「后输入优先」——那需要先扩展 `FrameInput` 记录事件顺序。
 5. **碰撞几何**：采用 AABB 还是 OBB？推挤算法（对称分配 vs 墙角余量）尚未定。
 6. **事件流设计**：表现层如何消费 `(frame, eventId)` 事件？阶段 01 尚无事件流，直接轮询状态。
 7. **规则数据格式**：招式定义用 JSON / 自定义文本 / C# 代码？加载期校验策略？

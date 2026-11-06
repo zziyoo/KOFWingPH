@@ -1,3 +1,4 @@
+using System.Text;
 using Godot;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Simulation;
@@ -14,6 +15,12 @@ namespace NewKOF;
 /// - <b>不自己实现时间累积与补帧</b>：全部委托给
 ///   <see cref="FixedStepScheduler"/>（纯 C#、可独立测试）。
 ///   本类只负责把 <c>delta</c> 交给调度器、把状态映射成画面。
+/// - <b>不自己保存输入历史、不做 SOCD/指令识别</b>：键盘事件只转成
+///   <see cref="InputBits"/> 交给 <see cref="InputBuffer"/>（内核层），
+///   由它按逻辑帧号逐帧产出 <see cref="FrameInput"/>。
+///
+/// 阶段 03A：输入链路已接通。键位见 <see cref="KeyboardInputMap"/>，
+/// F1 切换暂停（仅阻止时间驱动推进），HUD 显示最近一个已消费逻辑帧的双人输入。
 ///
 /// 阶段 02 修改原因（阶段 01 缺陷）：
 /// 旧实现用 <c>(int)(delta*1e6)</c> 截断 + 整数 16666us 间隔，
@@ -25,9 +32,21 @@ public partial class BattleScene : Node2D
     /// <summary>战斗会话：调度器 + 模拟 + 权威状态，全部在内核层。</summary>
     private BattleSession _session = null!;
 
+    /// <summary>逻辑帧输入缓冲（内核层）。边沿闩锁与帧号连续性都在这里保证。</summary>
+    private readonly InputBuffer _inputBuffer = new();
+
+    /// <summary>键盘映射（表现层）。本类是唯一接触 Godot 输入 API 的地方。</summary>
+    private KeyboardInputMap _inputMap = null!;
+
+    /// <summary>缓存的方法组委托，避免每帧重新分配。</summary>
+    private Func<int, FrameInput> _inputProvider = null!;
+
     private Node2D? _fighter1Node;
     private Node2D? _fighter2Node;
     private Label? _hudLabel;
+
+    /// <summary>F1 切换的暂停状态（仅阻止时间驱动推进，不影响显式单步）。</summary>
+    private bool _paused;
 
     /// <summary>
     /// 单次渲染最多补的逻辑帧数。超过则欠帧被计入
@@ -48,13 +67,44 @@ public partial class BattleScene : Node2D
             initialState: BattleState.CreateDefault(),
             scheduler: new FixedStepScheduler(MaxStepsPerAdvance));
 
+        _inputMap = new KeyboardInputMap(_inputBuffer);
+        _inputProvider = _inputBuffer.Take;
+
         SyncViewFromState();
+    }
+
+    /// <summary>
+    /// 键盘事件入口。按事件（而不是每渲染帧轮询）采样，
+    /// 才能捕获「同一渲染帧内按下又松开」的边沿。
+    /// </summary>
+    public override void _Input(InputEvent @event)
+    {
+        if (@event is InputEventKey key && !key.Echo && key.Pressed && key.Keycode == Key.F1)
+        {
+            _paused = !_paused;
+            if (_paused)
+                _session.Scheduler.Pause();
+            else
+                _session.Scheduler.Resume();
+
+            SyncViewFromState();
+            return;
+        }
+
+        _inputMap.Handle(@event);
+    }
+
+    /// <summary>窗口失焦时清空按住状态，避免松开事件丢失导致「永远按住」。</summary>
+    public override void _Notification(int what)
+    {
+        if (what == NotificationApplicationFocusOut)
+            _inputMap?.ReleaseAll();
     }
 
     public override void _Process(double delta)
     {
-        // 阶段 02：输入仍为空（输入链路属后续阶段）。调度与帧号配对在内核内完成。
-        int steps = _session.Advance(delta, inputProvider: null);
+        // 输入已接入：每个逻辑帧的输入由内核缓冲按帧号逐帧产出。
+        int steps = _session.Advance(delta, _inputProvider);
 
         if (steps > 0)
             SyncViewFromState();
@@ -88,6 +138,34 @@ public partial class BattleScene : Node2D
             _fighter2Node.Position = new Vector2(originX + state.Fighter(1).PositionX, groundY);
 
         if (_hudLabel is not null)
-            _hudLabel.Text = $"Logic Frame: {state.Frame}";
+        {
+            // 显示「最近一个已消费逻辑帧」的输入，而不是此刻的物理按键状态：
+            // 本阶段要证明的是输入进入了正确的逻辑帧，HUD 必须反映已提交的数据。
+            FrameInput last = _inputBuffer.LastInput ?? FrameInput.Empty(state.Frame);
+            string pauseTag = _paused ? "  [PAUSED · F1]" : string.Empty;
+            _hudLabel.Text =
+                $"Logic Frame: {state.Frame}{pauseTag}\n" +
+                $"P1: {Describe(last.Player1)}\n" +
+                $"P2: {Describe(last.Player2)}";
+        }
+    }
+
+    /// <summary>把输入位渲染成紧凑的调试文本；无输入显示 "-"。</summary>
+    private static string Describe(InputBits bits)
+    {
+        if (bits == InputBits.None)
+            return "-";
+
+        var text = new StringBuilder(16);
+        if ((bits & InputBits.Up) != 0) text.Append("U ");
+        if ((bits & InputBits.Down) != 0) text.Append("D ");
+        if ((bits & InputBits.Left) != 0) text.Append("L ");
+        if ((bits & InputBits.Right) != 0) text.Append("R ");
+        if ((bits & InputBits.LightPunch) != 0) text.Append("A ");
+        if ((bits & InputBits.HeavyPunch) != 0) text.Append("B ");
+        if ((bits & InputBits.LightKick) != 0) text.Append("C ");
+        if ((bits & InputBits.HeavyKick) != 0) text.Append("D ");
+
+        return text.ToString(0, text.Length - 1);
     }
 }

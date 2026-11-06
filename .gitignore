@@ -15,6 +15,9 @@ obj/
 # 开发期验收截图（--shot= 参数生成，非项目产物）
 shots/
 
+# Agent 工作记录（交接文档在 docs/，这里只放本地记忆）
+.workbuddy/
+
 # 系统
 Thumbs.db
 desktop.ini
