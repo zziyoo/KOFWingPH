@@ -152,6 +152,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 |---|---|---|---|
 | K1 | 本机桌面另有**标准版** Godot（`Godot_v4.7.2-stable_win64.exe\`），不支持 C# | 误用会报编译 C# 失败 | 始终使用 mono 版路径（见第 2 节） |
 | K2 | **Git 不在系统 PATH** | 直接 `git` 命令失败 | 使用第 3.9 节的完整路径 |
+| K2b | **GitHub 直连被重置**，需本地代理 `127.0.0.1:7897` | `git push/fetch` 报 `Connection was reset` | push 前 `set HTTPS_PROXY=http://127.0.0.1:7897`（见第 6 节） |
 | K3 | `CaptureHelper.cs` 位于 `scripts/`，会打进游戏程序集 | 正常运行零副作用 | 见 `ARCHITECTURE.md` 第 5 节问题 9 |
 | K4 | `--headless --import` 末尾打印 `ERROR: Parameter "singleton" is null` | Godot 4.7 headless 已知无害告警，导入成功（`[ DONE ]`） | 忽略，勿误判 |
 | K5 | 启动首帧有 3 帧被丢弃（`DroppedStepCount = 3`） | 资源加载尖峰导致，900 帧稳态不再增加 | 属正常现象；若稳态持续增长才是性能问题 |
@@ -166,7 +167,16 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ## 6. 未提交文件与工作区状态
 
 - **Git**：项目已初始化并推送到 https://github.com/zziyoo/KOFWingPH
-  （分支与提交状态见 `git log` / `git status` 实际输出）。
+  - 分支：`main`（跟踪 `origin/main`）
+  - 首次提交：`9937b3f` — `feat: 阶段01-02 Godot工程初始化与固定逻辑帧调度`
+  - 工作区：干净（`git status` 无未跟踪/未暂存改动）
+  - **网络注意**：本机直连 GitHub 会 `Connection was reset`，需走本地代理
+    `http://127.0.0.1:7897`。推送前设置：
+    ```bat
+    set HTTPS_PROXY=http://127.0.0.1:7897
+    set HTTP_PROXY=http://127.0.0.1:7897
+    ```
+  - **已提交内容**（39 文件，含 `.uid` Godot 资源 ID 文件与 `icon.svg.import`）
 - **`.gitignore` 覆盖**：`.godot/`、`bin/`、`obj/`、`shots/`、`.vs/`、`*.user` 等。
 - **构建产物**（被忽略，不影响源码）：
   - `bin/`、`obj/`（根目录、`core/BattleCore/`、`tests/BattleCore.Tests/`）
