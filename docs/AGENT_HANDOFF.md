@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 03A 专项补修完成，本地未提交）
+> 最后更新：2026-11-07（阶段 03A 专项补修完成并推送 `f145275`）
 
 ---
 
@@ -119,7 +119,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 ## 4. 最近完成的修改
 
-### 阶段 03A 专项补修（2026-11-07）输入一致性与调试工具 —— 本地未提交
+### 阶段 03A 专项补修（2026-11-07）输入一致性与调试工具 —— 已提交 `f145275`
 
 **修改文件**
 
@@ -291,11 +291,13 @@ cd /d C:\Users\32360\Desktop\NewKOF
   - `9937b3f` — 阶段 01–02 Godot 工程初始化与固定逻辑帧调度
   - `c003dc2` — 记录远程仓库与代理要求
   - `850c4db` — 阶段 02 补修（调度器记账与帧同步）
-  - `0be9919` — 阶段 03A 基础输入链路（**最近一次已推送的功能基线**）
+  - `0be9919` — 阶段 03A 基础输入链路
+  - **`f145275` — 阶段 03A 专项补修（只读历史、两阶段提交、容量、调试帧语义），已推送**
   - `1538395` / `083abd5` — 仅文档
-  - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本轮补修**尚未提交**，
-    远端仍停在 `083abd5`。本节记录的是写文档时的状态，不要当作实时 HEAD。
-  - **工作区：有未提交改动**（阶段 03A 专项补修）：
+  - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：其后若只有 `docs:` 提交，
+    功能代码等同 `f145275`。本节记录的是写文档时的状态，不要当作实时 HEAD。
+  - **工作区：干净**（`git status --porcelain` 无输出；`.workbuddy/`、`shots/` 已被忽略）
+  - `f145275` 提交内容（12 文件）：
     ```
     新增: core/BattleCore/Input/IInputSource.cs（+ .uid）
           tests/BattleCore.Tests/InputIntegrityTests.cs（+ .uid）
@@ -305,7 +307,6 @@ cd /d C:\Users\32360\Desktop\NewKOF
           tests/BattleCore.Tests/InputPipelineTests.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-    `git status --porcelain` 应恰好输出上面这组文件。
   - `0be9919` 提交内容（19 文件）：
     ```
     新增: core/BattleCore/Input/InputBuffer.cs
@@ -334,7 +335,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
   （阶段 03A 开始前的完整工作区，含当时未提交的补修代码）
 - **清理建议**：`bin/obj/.godot` 可安全删除，重新 `dotnet build` + `--import` 即可重建。
 - **工作区状态判读**：以 `git status --porcelain` 的**实际输出**为准，不要凭文档猜。
-  提交本轮补修后应无输出；提交前应恰好输出第 6 节列出的那组文件。
+  提交后应无输出；有新改动时它会如实列出，以它为准而不是以本节文字为准。
   若出现 `bin/`、`obj/`、`.godot/`、`shots/`、`.workbuddy/`，说明 `.gitignore` 被改坏。
 
 ---
@@ -377,8 +378,8 @@ cd /d C:\Users\32360\Desktop\NewKOF
 1. ~~实现阶段 03 输入链路~~ **已完成（03A）**。后续若要改键位/加手柄，只动
    `KeyboardInputMap`（或新增 `GamepadInputMap`），**不要**把映射写进 `BattleScene` 或内核。
 2. ~~提交阶段 03A~~ **已提交并推送（`0be9919`）**。
-   **本轮 03A 专项补修尚未提交**——需用户明确授权后再 `git add/commit/push`。
-3. **提交本轮补修** — 测试 141/141、Godot 已验证；授权后按第 6 节文件清单提交。
+   **本轮 03A 专项补修已提交并推送（`f145275`）**。
+3. ~~提交本轮补修~~ **已提交并推送（`f145275`）**。下一阶段开工前先跑 `dotnet test` 确认 141 项。
 4. **实现运动系统** — 前提：先确定定点数格式并写入文档；方向直接用
    `DirectionResolver.Resolve(...)` 的结果，不要在运动系统里再解析 `InputBits`。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
