@@ -1,6 +1,7 @@
 ﻿# PROGRESS.md — NewKOF 开发进度
 
-> 最后更新：2026-11-07（阶段 07C：击退/击飞/空中受击/倒地起身——D92/D93——阶段 07 结项）
+> 最后更新：2026-11-07（阶段 07 最终专项补修：空中受击推挤资格 / 防御击退摩擦不变式——D94/D95——
+> 阶段 07 正式结项，**646** 项测试）
 
 ---
 
@@ -8,7 +9,8 @@
 
 **阶段 07A：KO 裁决与基础回合终局 — ✅ 已完成（已提交并推送）**
 **阶段 07B：连段统计与招式取消 — ✅ 已完成（已提交并推送）**
-**阶段 07C：击退、击飞、空中受击与起身 — ✅ 已完成（已提交并推送，阶段 07 正式结项）**
+**阶段 07C：击退、击飞、空中受击与起身 — ✅ 已完成（已提交并推送）**
+**阶段 07 最终专项补修：空中受击推挤与防御击退配置 — ✅ 已完成（已提交并推送，阶段 07 正式结项）**
 
 历史阶段（全部 ✅）：阶段 01–02（工程与调度）、02 补修（帧同步）、03A 及其三轮补修（输入链路）、
 03B-1 及其补修（指令识别）、03B-2 及其最终补修（蓄力/双重）、03B 边界补修（D54）、
@@ -1623,13 +1625,65 @@ KO 事件只出现一次且 EventId 合法、中间快照重放一致、RoundSta
 
 ---
 
+## 阶段 07 最终专项补修（空中受击推挤与防御击退配置，2026-11-07）—— D94/D95
+
+### 修复前的真实缺陷（先复现再改）
+
+| # | 缺陷 | 复现实测 |
+|---|---|---|
+| P1-A | `ApplySeparation` 的空中早退与 `bothGroundAtFrameStart` 都只判断 `Airborne`，07C 新增的 `AirHitstun` 被当成地面角色 | 重叠不推挤场景：P1（AirHitstun, x=0）被推成 **−15**（期望 0）、P2 由 30 → **45**；越身场景：候选 15 被回投成 **−22.5**（期望 15），镜像 **22.5**（期望 −15）；落地建序：期望 35 / −25，实际 **−25 / 35** |
+| P1-B | `AttackDefinition` 只校验 `GroundKnockback` 与摩擦的搭配，`BlockKnockback` 也产生速度却不受约束 | `groundKnockback:0, blockKnockback:4, friction:0` 构造通过；真实 `Step` 在防御结算抛 `InvalidOperationException：角色 1 处于 Blockstun，击退速度 4 与摩擦 0 必须同时为零或同时非零。` |
+
+### 修复（最小改动）
+
+1. **D94**：`FighterLogicStateExtensions.IsAirborneLike()` = `Airborne | AirHitstun`，作为唯一空中判定；
+   `Step` 的 `bothGroundAtFrameStart` 与 `ApplySeparation` 早退共用它（`ResolveSettlement` 的
+   `defenderAirborne` 也改用它，消除重复列表）。判定只看逻辑状态，**不看 `PositionY`**
+   （击飞当帧 Y=0 且 vy>0，D93）。D70 场地边界照旧作用于空中角色。
+2. **D95**：`AttackDefinition` 构造期改为
+   `(GroundKnockback > 0 || BlockKnockback > 0) && Friction <= 0 → ArgumentException`；
+   `GroundKnockbackFriction` 明确为「地面击退通用摩擦」，命中与防御击退共用。
+   不放宽 `FighterState.Validate`，不新增第二个摩擦字段。
+
+### 测试与验收
+
+新增 **25 项**（621 → **646**）：
+`AirSeparationTests`（12）——空中受击 vs 站立/硬直/双方空中均不推挤、左→右与右→左越身、
+落地转 Knockdown、落地建立新顺序（35 / −25，间距恰 60）、落地后不能穿回、普通 `Airborne` 越身不变、
+地面击退仍禁穿越（−22.5 / 37.5）、空中仍受场地边界钳制（640）、同输入逐位一致；
+`BlockKnockbackTests`（13）——构造期接受/拒绝矩阵（0/4、4/0、4/4、0/0）、
+真实 `Step` 防御不扣血 + 进 Blockstun + 速度 4/摩擦 1、逐帧 4/3/2/1/0（累计 10）、
+镜像方向（−4）、贴墙钳制且不穿越、硬直结束无残留、StepExact 与 Advance 一致、中间快照续跑一致。
+
+**变异验证**：临时把两处判断改回「只排除 Airborne」→ `AirSeparationTests` **7 项失败**；
+临时把构造校验改回只查 `GroundKnockback` → `BlockKnockbackTests` **1 项失败**。均已恢复源码。
+
+| 项 | 结果 |
+|---|---|
+| `dotnet test`（Debug / Release） | **646/646 通过**（0 失败 0 跳过） |
+| 四构建 | BattleCore / Godot × Debug / Release 均 0 警告 0 错误 |
+| Godot 无头导入 | `[ DONE ]`，无错误 |
+| Godot 图形运行 | `shots/p07fix_air_cross.png`（逻辑 117：P1 `AirHitstun` (120, 16.5)，已在 P2 (118.25) 右侧）、
+`shots/p07fix_air_landing.png`（逻辑 120：落地后 P1 154.13 / P2 92.63，新顺序建立）、
+`shots/p07fix_block_knockback.png`（逻辑 118：`Blockstun(6)`、P2 Vel 0.5、HP 1000/1000）、
+`shots/p07fix_block_decay_done.png`（逻辑 121：`Blockstun(4)`、Vel 0）、
+`shots/p07fix_wall_corner.png`（持续顶墙 680 帧后 **580 / 640**）、
+`shots/p07fix_jump.png`（普通跳跃 `Airborne` (−69, 34) Jump HighJump 不变） |
+| 既有 621 项 | 全部通过，未修改、未删除、未削弱 |
+
+**残留风险**：空中受击与地面角色重叠时不再推挤，因此视觉上可以完全重合（本阶段无 Pushbox 碰撞，
+符合「空中允许越身」的既有语义）；击退摩擦仍只有一套配置，命中与防御需要不同摩擦时必须另立决策。
+
+---
+
 ## 阶段 07 总结（2026-11-07）—— 正式结项
 
 | 子阶段 | 结果 | 测试 | 提交 |
 |---|---|---|---|
 | 07A | KO 与回合终局（D89） | 566 → 583 | `9848744` |
 | 07B | 连段与招式取消（D90/D91） | 583 → 605 | `d3e4ddc` |
-| 07C | 击退/击飞/空中受击/倒地起身（D92/D93） | 605 → 621 | 见本轮推送 |
+| 07C | 击退/击飞/空中受击/倒地起身（D92/D93） | 605 → 621 | `d567f53` |
+| 07 补修 | 空中受击推挤资格 + 防御击退摩擦（D94/D95） | 621 → 646 | 见本轮推送 |
 
 **未完成 / 明确留到后续**：三局两胜与回合计时、选人界面、KO 演出与音效、空中防御、
 受身、浮空连段限制、击退撞墙反弹、起身无敌、Hitstop、投技、飞行道具、AI、联机回滚、
@@ -1667,7 +1721,7 @@ KO 事件只出现一次且 EventId 合法、中间快照重放一致、RoundSta
 **注意**：若要「后输入优先」SOCD，必须先扩展 `FrameInput` 记录事件顺序（D27 仍有效）。
 
 > 阶段 05 已连同 05B 结项。接手后先看 `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test`
-> 确认 **621** 项通过再继续。
+> 确认 **646** 项通过再继续。
 
 **每完成一个子任务，立即更新本文件与 `AGENT_HANDOFF.md`。**
 

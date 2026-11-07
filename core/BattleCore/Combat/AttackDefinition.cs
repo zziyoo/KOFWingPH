@@ -31,7 +31,9 @@ public sealed class AttackDefinition
     /// <param name="hitstunFrames">命中硬直帧数（≥ 1；06B）。</param>
     /// <param name="blockstunFrames">防御硬直帧数（≥ 1；06B）。</param>
     /// <param name="groundKnockback">地面命中击退初速（世界单位/帧，≥ 0；方向 = 远离攻击者，07C/D92）。</param>
-    /// <param name="groundKnockbackFriction">击退摩擦（世界单位/帧²，&gt; 0 当 <paramref name="groundKnockback"/> &gt; 0）。</param>
+    /// <param name="groundKnockbackFriction">地面击退<b>通用</b>摩擦（世界单位/帧²，向 0 衰减）：
+    /// 命中击退与防御击退共用；<paramref name="groundKnockback"/> 或
+    /// <paramref name="blockKnockback"/> 任一为正时它必须为正（D95）。</param>
     /// <param name="blockKnockback">被防御时的击退初速（≥ 0；默认 0 = 防御不掉位）。</param>
     /// <param name="launchVelocityX">击飞水平初速（≥ 0；方向 = 远离攻击者）。</param>
     /// <param name="launchVelocityY">击飞垂直初速（≥ 0；&gt; 0 即「这一击会击飞」）。</param>
@@ -90,9 +92,14 @@ public sealed class AttackDefinition
         ValidateMagnitude(launchVelocityX, nameof(launchVelocityX), MaxLaunchUnits);
         ValidateMagnitude(launchVelocityY, nameof(launchVelocityY), MaxLaunchUnits);
 
-        if (knockback > FixedPoint.Zero && friction <= FixedPoint.Zero)
+        // D95：摩擦是<b>地面击退通用</b>配置——命中击退（GroundKnockback）与
+        // 防御击退（BlockKnockback）都会在结算时产生水平速度，两者任一为正就必须有正摩擦。
+        // 只校验 GroundKnockback 会让「仅防御击退 + 零摩擦」通过构造，在对局中触发
+        // FighterState.Validate 的「速度与摩擦必须同时为零或同时非零」而整帧失败。
+        if ((knockback > FixedPoint.Zero || blockPush > FixedPoint.Zero) && friction <= FixedPoint.Zero)
             throw new ArgumentException(
-                "配置了地面击退就必须配置正的击退摩擦，否则角色会无限滑行。", nameof(groundKnockbackFriction));
+                "配置了地面击退或防御击退就必须配置正的击退摩擦，否则角色会无限滑行。",
+                nameof(groundKnockbackFriction));
         if (knockdownFrames < 0)
             throw new ArgumentOutOfRangeException(nameof(knockdownFrames), knockdownFrames, "倒地帧数不能为负。");
         if (wakeupFrames < 0)
@@ -153,7 +160,8 @@ public sealed class AttackDefinition
     /// <summary>地面命中击退初速（世界单位/帧，≥ 0；方向 = 远离攻击者）。0 = 不击退。</summary>
     public FixedPoint GroundKnockback { get; }
 
-    /// <summary>击退摩擦（世界单位/帧²，向 0 衰减）；配置击退时必须为正。</summary>
+    /// <summary>地面击退<b>通用</b>摩擦（世界单位/帧²，向 0 衰减）：命中击退与防御击退共用；
+    /// 配置了任一地面击退（命中或防御）时必须为正（D95）。</summary>
     public FixedPoint GroundKnockbackFriction { get; }
 
     /// <summary>被防御时的击退初速（≥ 0；默认 0）。</summary>

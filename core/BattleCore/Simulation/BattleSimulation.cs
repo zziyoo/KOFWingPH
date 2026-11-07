@@ -304,9 +304,10 @@ public sealed class BattleSimulation
             candidates[i].PositionX = _stage.ClampX(candidates[i].PositionX);
 
         // ── 第 4 阶段：双人最小间距（D71 修订：帧开始顺序约束 + 墙角残差再分配）。
+        // 「双方都在地面」= 双方都不是空中状态（D94 统一判定：Airborne | AirHitstun）。
         bool bothGroundAtFrameStart =
-            state.Fighters[0].LogicState != FighterLogicState.Airborne &&
-            state.Fighters[1].LogicState != FighterLogicState.Airborne;
+            !state.Fighters[0].LogicState.IsAirborneLike() &&
+            !state.Fighters[1].LogicState.IsAirborneLike();
         ApplySeparation(candidates, bothGroundAtFrameStart,
             state.Fighters[0].PositionX, state.Fighters[1].PositionX);
 
@@ -615,8 +616,7 @@ public sealed class BattleSimulation
         bool backHeld)
     {
         FighterState defenderState = fighters[defender];
-        bool defenderAirborne = defenderState.LogicState
-            is FighterLogicState.Airborne or FighterLogicState.AirHitstun;
+        bool defenderAirborne = defenderState.LogicState.IsAirborneLike();
 
         // 取针对该被击者的第一条接触（Detect 顺序确定：攻击者 0→1、攻击序号升序）。
         AttackContact contact = default;
@@ -884,11 +884,13 @@ public sealed class BattleSimulation
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。
     ///
-    /// <para><b>顺序约束（防地面穿越）</b>：帧开始双方都在地面（非 Airborne）时，
+    /// <para><b>顺序约束（防地面穿越）</b>：帧开始双方都在地面（非空中，见
+    /// <see cref="FighterLogicStateExtensions.IsAirborneLike"/>，D94）时，
     /// 以<b>帧开始相对顺序</b>为约束——地面角色禁止在一个逻辑帧内交换左右；
     /// 完全重叠的初态平局规则保持确定（P1 视为在左）。涉及空中（一方帧开始为
     /// Airborne——合法越身或落地帧）时以<b>候选顺序</b>为准，新地面顺序在落地帧建立；
-    /// 空中越身不被本约束禁止。</para>
+    /// 空中越身不被本约束禁止；空中状态（Airborne / AirHitstun）<b>完全不参与</b>
+    /// 本求解（D94：击飞当帧 Y 可能为 0，因此判定只看逻辑状态，不看高度）。</para>
     ///
     /// <para><b>求解（闭式，同帧双方统一计算，无迭代、无逐帧震荡）</b>：</para>
     /// <list type="number">
@@ -917,11 +919,9 @@ public sealed class BattleSimulation
         FixedPoint frameStartP2X)
     {
         // 仅双方候选都非空中时强制（有一方在空中 → 不推挤，允许越身）。
-        if (candidates[0].LogicState == FighterLogicState.Airborne ||
-            candidates[1].LogicState == FighterLogicState.Airborne)
-        {
+        // D94：空中状态 = Airborne | AirHitstun（击飞当帧 Y 可能为 0，不能靠高度判断）。
+        if (candidates[0].LogicState.IsAirborneLike() || candidates[1].LogicState.IsAirborneLike())
             return;
-        }
 
         FixedPoint separation = _stage.MinimumFighterSeparation;
         FixedPoint p1Cand = candidates[0].PositionX;

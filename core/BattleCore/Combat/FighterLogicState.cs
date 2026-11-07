@@ -115,6 +115,21 @@ public static class FighterLogicStateExtensions
             or FighterLogicState.Knockdown
             or FighterLogicState.Wakeup;
 
+    /// <summary>
+    /// 是否属于<b>空中状态</b>（阶段 07 最终补修，D94）：
+    /// <see cref="FighterLogicState.Airborne"/> 与 <see cref="FighterLogicState.AirHitstun"/>。
+    ///
+    /// <para>这是「是否参与地面双人最小间距推挤（D73）」与「帧开始是否在地面」的
+    /// <b>唯一</b>判定依据——各调用点复制一份状态列表会让新增空中状态被静默漏掉
+    /// （07C 的 <see cref="FighterLogicState.AirHitstun"/> 就是这样被当成地面角色的）。
+    /// <b>不能</b>改用 <c>PositionY &gt; 0</c>：击飞当帧允许 Y=0 且垂直速度为正（D93）。</para>
+    ///
+    /// <para>D73 顺序约束、D70 场地边界仍然作用于空中角色；本判定只决定
+    /// 「是否执行双人最小间距求解」与「是否可用候选顺序建立新地面顺序」。</para>
+    /// </summary>
+    public static bool IsAirborneLike(this FighterLogicState state) =>
+        state is FighterLogicState.Airborne or FighterLogicState.AirHitstun;
+
     /// <summary>是否处于招式三阶段（Startup/Active/Recovery）。</summary>
     public static bool IsInMove(this FighterLogicState state) =>
         state is FighterLogicState.Startup or FighterLogicState.Active or FighterLogicState.Recovery;
