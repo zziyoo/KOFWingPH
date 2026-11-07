@@ -27,6 +27,27 @@ public static class CommandCatalog
     /// <summary>→→（双击前方向）。</summary>
     public const string DoubleTapForward = "66";
 
+    /// <summary>[4]6A（后蓄前 + 轻拳）。</summary>
+    public const string ChargeBackForwardLightPunch = "46A";
+
+    /// <summary>[2]8B（下蓄上 + 重拳）。</summary>
+    public const string ChargeDownUpHeavyPunch = "28B";
+
+    /// <summary>[4]6C（后蓄前 + 轻脚）。</summary>
+    public const string ChargeBackForwardLightKick = "46C";
+
+    /// <summary>↓↘→↓↘→ + A（双重波动 / 超必杀）。</summary>
+    public const string DoubleQuarterCircleForwardLightPunch = "236236A";
+
+    /// <summary>↓↙←↓↙← + B（双重反波动 / 超必杀）。</summary>
+    public const string DoubleQuarterCircleBackHeavyPunch = "214214B";
+
+    /// <summary>→↓↘→↓↘ + A（双重升龙 / 超必杀）。</summary>
+    public const string DoubleDragonPunchLightPunch = "623623A";
+
+    /// <summary>蓄力指令默认保持帧数（60Hz 下 30 帧 ≈ 0.5 秒）。</summary>
+    public const int DefaultChargeHoldFrames = 30;
+
     /// <summary>构造默认指令表；每次返回新实例，调用方可自行增删。</summary>
     public static IReadOnlyList<CommandDefinition> CreateDefault() => new[]
     {
@@ -85,6 +106,108 @@ public static class CommandCatalog
             maxSequenceFrames: 18,
             buttonToleranceFrames: 0,
             priority: 0,
+            bufferLifetimeFrames: 8),
+
+        // ── 蓄力指令（03B-2）────────────────────────────────────
+        // [4]6A：后蓄 DefaultChargeHoldFrames 帧 → 前 + A。
+        // 蓄力只认纯方向（斜方向打断蓄力）。序列跨度上限放宽，容纳蓄力保持时长。
+        new CommandDefinition(
+            ChargeBackForwardLightPunch,
+            new[]
+            {
+                CommandDirection.Back,
+                CommandDirection.Forward,
+            },
+            InputBits.LightPunch,
+            maxSequenceFrames: 60,
+            buttonToleranceFrames: 3,
+            priority: 30,
+            bufferLifetimeFrames: 8,
+            chargeHoldFrames: DefaultChargeHoldFrames),
+
+        // [2]8B：下蓄 → 上 + B。
+        new CommandDefinition(
+            ChargeDownUpHeavyPunch,
+            new[]
+            {
+                CommandDirection.Down,
+                CommandDirection.Up,
+            },
+            InputBits.HeavyPunch,
+            maxSequenceFrames: 60,
+            buttonToleranceFrames: 3,
+            priority: 30,
+            bufferLifetimeFrames: 8,
+            chargeHoldFrames: DefaultChargeHoldFrames),
+
+        // [4]6C：与 [4]6A 同模板，不同攻击键。
+        new CommandDefinition(
+            ChargeBackForwardLightKick,
+            new[]
+            {
+                CommandDirection.Back,
+                CommandDirection.Forward,
+            },
+            InputBits.LightKick,
+            maxSequenceFrames: 60,
+            buttonToleranceFrames: 3,
+            priority: 30,
+            bufferLifetimeFrames: 8,
+            chargeHoldFrames: DefaultChargeHoldFrames),
+
+        // ── 双重方向 / 超必杀指令（03B-2）──────────────────────
+        // 236236A：↓↘→↓↘→ + A。优先级高于单段 236A，序列长度也作为次级键。
+        new CommandDefinition(
+            DoubleQuarterCircleForwardLightPunch,
+            new[]
+            {
+                CommandDirection.Down,
+                CommandDirection.DownForward,
+                CommandDirection.Forward,
+                CommandDirection.Down,
+                CommandDirection.DownForward,
+                CommandDirection.Forward,
+            },
+            InputBits.LightPunch,
+            maxSequenceFrames: 40,
+            buttonToleranceFrames: 3,
+            priority: 15,
+            bufferLifetimeFrames: 8),
+
+        // 214214B：↓↙←↓↙← + B。
+        new CommandDefinition(
+            DoubleQuarterCircleBackHeavyPunch,
+            new[]
+            {
+                CommandDirection.Down,
+                CommandDirection.DownBack,
+                CommandDirection.Back,
+                CommandDirection.Down,
+                CommandDirection.DownBack,
+                CommandDirection.Back,
+            },
+            InputBits.HeavyPunch,
+            maxSequenceFrames: 40,
+            buttonToleranceFrames: 3,
+            priority: 15,
+            bufferLifetimeFrames: 8),
+
+        // 623623A：→↓↘→↓↘ + A。
+        new CommandDefinition(
+            DoubleDragonPunchLightPunch,
+            new[]
+            {
+                CommandDirection.Forward,
+                CommandDirection.Down,
+                CommandDirection.DownForward,
+                CommandDirection.Forward,
+                CommandDirection.Down,
+                CommandDirection.DownForward,
+            },
+            InputBits.LightPunch,
+            maxSequenceFrames: 40,
+            buttonToleranceFrames: 3,
+            priority: 25,
             bufferLifetimeFrames: 8),
     };
 }

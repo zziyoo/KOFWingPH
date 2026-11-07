@@ -147,10 +147,17 @@ public sealed class CommandRecognizer
     {
         PlayerState player = _players[playerIndex];
 
-        // 1) 方向：只在「变化」时追加条目（按住不重复计数）。
+        // 1) 方向：只在「变化」时追加条目（按住不重复计数），
+        //    否则实时更新最后一个条目的持续结束帧（供蓄力保持时长计算）。
         CommandDirection direction = ToCommandDirection(DirectionResolver.Resolve(bits, facing));
         if (player.Directions.Count == 0 || player.Directions[^1].Direction != direction)
-            player.Directions.Add(new DirectionEntry(frame, direction));
+        {
+            player.Directions.Add(new DirectionEntry(frame, direction, frame));
+        }
+        else
+        {
+            player.Directions[^1] = player.Directions[^1] with { EndFrame = frame };
+        }
 
         // 2) 按键：只认按下边沿（本帧有、上帧无）。
         InputBits attacks = bits & DirectionResolver.AttackButtons;
@@ -248,6 +255,17 @@ public sealed class CommandRecognizer
 
             if (!MatchesEndingAt(directions, endIndex, sequence))
                 continue;
+
+            // 蓄力检查（03B-2）：方向序列第一个元素必须被连续保持 ≥ ChargeHoldFrames 帧。
+            // 蓄力只认纯方向——斜方向是独立的条目，会打断「纯方向」的连续保持，
+            // 因此不满足蓄力（明确规则，不依赖位运算）。
+            if (definition.ChargeHoldFrames > 0)
+            {
+                int firstIndex = endIndex - sequence.Count + 1;
+                DirectionEntry first = directions[firstIndex];
+                if (first.EndFrame - first.Frame + 1 < definition.ChargeHoldFrames)
+                    continue;
+            }
 
             // 纯方向指令：只在末方向进入的那一帧触发，避免按住重复触发。
             if (definition.RequiredButtons == InputBits.None)
@@ -401,8 +419,8 @@ public sealed class CommandRecognizer
             : CommandDirection.Neutral;
     }
 
-    /// <summary>压缩后的方向条目：只在方向变化时产生。</summary>
-    private readonly record struct DirectionEntry(int Frame, CommandDirection Direction);
+    /// <summary>压缩后的方向条目：只在方向变化时产生；<see cref="EndFrame"/> 记录该方向持续到的最后一帧（供蓄力保持时长计算）。</summary>
+    private readonly record struct DirectionEntry(int Frame, CommandDirection Direction, int EndFrame);
 
     /// <summary>一次按键按下边沿；<see cref="Consumed"/> 保证同一次按下不重复触发。</summary>
     private sealed class ButtonPress

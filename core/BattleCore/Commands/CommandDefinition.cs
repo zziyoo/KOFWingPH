@@ -44,6 +44,10 @@ public sealed class CommandDefinition
     /// <param name="buttonToleranceFrames">按键与末方向的最大帧差，不能为负。</param>
     /// <param name="priority">冲突时的优先键，大者优先。</param>
     /// <param name="bufferLifetimeFrames">识别结果保留帧数，不能为负。</param>
+    /// <param name="chargeHoldFrames">
+    /// 蓄力保持帧数：方向序列<b>第一个元素</b>必须被连续保持的最少逻辑帧数。
+    /// 0 表示普通指令（无蓄力）。例如 [4]6A（后蓄前）设 &gt; 0 表示「后」需保持该帧数。
+    /// </param>
     /// <exception cref="ArgumentException">ID 为空 / 序列为空 / 含非攻击键位。</exception>
     /// <exception cref="ArgumentOutOfRangeException">帧数参数为负。</exception>
     public CommandDefinition(
@@ -53,7 +57,8 @@ public sealed class CommandDefinition
         int maxSequenceFrames = 20,
         int buttonToleranceFrames = 3,
         int priority = 0,
-        int bufferLifetimeFrames = 8)
+        int bufferLifetimeFrames = 8,
+        int chargeHoldFrames = 0)
     {
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("指令 ID 不能为空。", nameof(commandId));
@@ -91,6 +96,9 @@ public sealed class CommandDefinition
         if (bufferLifetimeFrames < 0)
             throw new ArgumentOutOfRangeException(nameof(bufferLifetimeFrames), bufferLifetimeFrames,
                 "缓冲有效期不能为负。");
+        if (chargeHoldFrames < 0)
+            throw new ArgumentOutOfRangeException(nameof(chargeHoldFrames), chargeHoldFrames,
+                "蓄力保持帧数不能为负。");
 
         CommandId = commandId;
         DirectionSequence = Array.AsReadOnly(sequence);
@@ -99,6 +107,7 @@ public sealed class CommandDefinition
         ButtonToleranceFrames = buttonToleranceFrames;
         Priority = priority;
         BufferLifetimeFrames = bufferLifetimeFrames;
+        ChargeHoldFrames = chargeHoldFrames;
     }
 
     /// <summary>唯一标识，如 <c>236A</c>。</summary>
@@ -121,4 +130,11 @@ public sealed class CommandDefinition
 
     /// <summary>识别结果在缓冲中的保留帧数。</summary>
     public int BufferLifetimeFrames { get; }
+
+    /// <summary>
+    /// 蓄力保持帧数：方向序列第一个元素必须被连续保持的最少逻辑帧数。
+    /// 0 表示普通指令（无蓄力）。例如 [4]6A 的「后」需保持该帧数。
+    /// 蓄力只认<b>纯方向</b>（斜方向不计入），见 <see cref="CommandRecognizer"/> 的匹配规则。
+    /// </summary>
+    public int ChargeHoldFrames { get; }
 }

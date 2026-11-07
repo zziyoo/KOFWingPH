@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 03B-1 最终补修：跨末方向帧幽灵指令 / 观察者失败封闭）
+> 最后更新：2026-11-07（阶段 03B-2 蓄力与扩展指令）
 
 ---
 
@@ -119,7 +119,29 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 ## 4. 最近完成的修改
 
-### 阶段 03B-1 最终补修（2026-11-07）跨末方向帧幽灵指令 / 观察者失败封闭 —— 本地提交（待推送）
+### 阶段 03B-2（2026-11-07）蓄力与扩展指令 —— 本地提交（待推送）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Commands/CommandDefinition.cs` | 新增 `ChargeHoldFrames`（序列第一个元素蓄力保持帧数，默认 0） |
+| `core/BattleCore/Commands/CommandRecognizer.cs` | `DirectionEntry` 增加 `EndFrame`；蓄力保持检查；方向不变时实时更新持续结束帧 |
+| `core/BattleCore/Commands/CommandCatalog.cs` | 新增默认指令：46A / 28B / 46C（蓄力）、236236A / 214214B / 623623A（双重） |
+| `tests/BattleCore.Tests/ChargeCommandTests.cs` | 新增 16 项蓄力测试 |
+| `tests/BattleCore.Tests/DoubleMotionCommandTests.cs` | 新增 9 项双重方向测试 |
+
+**蓄力规则（D49）**：蓄力 = 方向序列第一个元素连续保持 ≥ `ChargeHoldFrames` 帧；
+`DirectionEntry.EndFrame` 记录持续结束帧。**蓄力只认纯方向**，斜方向是独立条目会打断保持。
+默认蓄力 30 帧（0.5 秒 @60Hz）。
+
+**双重规则（D50）**：双重指令用更长方向序列表达（如 236236A = 6 元素），复用同一冲突裁决
+（优先级/长度）与手势消费；`MaxSequenceFrames` 放宽到 40 帧。双重优先级（15/25）> 单段（10/20），
+长指令完成不借同一历史重复触发短指令。
+
+**验收**：227/227 测试通过；核心与表现层 0 警告 0 错误；Godot 无头导入 `[ DONE ]`；
+图形运行 HUD 实测 `P1 Command: 46A`（蓄力）与 `P1 Command: 236236A`（双重）。
+变异验证：移除蓄力检查 → `ChargeBackForward_HoldNMinusOneFrames` 失败。
+
+### 阶段 03B-1 最终补修（2026-11-07）跨末方向帧幽灵指令 / 观察者失败封闭 —— 已提交 `33444f0` 并推送
 
 | 文件 | 变更 |
 |---|---|
@@ -397,18 +419,20 @@ cd /d C:\Users\32360\Desktop\NewKOF
   - `bc048c8` — 仅文档（同步 `f145275` 状态）
   - **`0bd0c6d` — 阶段 03A 最终补修（输入与战斗状态原子提交顺序），已推送**
   - **上一轮 03B-1 补修：`fix(input): finalize phase 03B-1 command recognition`（`3bd1388`），已推送。**
-  - **本轮 03B-1 最终补修：`fix(input): resolve command conflicts and observer faults`（待推送）。**
+  - **03B-1 最终补修：`fix(input): resolve command conflicts and observer faults`（`33444f0`），已推送。**
+  - **本轮 03B-2：`feat(input): implement charge and advanced commands`（待推送）。**
     SHA 用 `git log --oneline -1` 读取。提交内容：
     ```
-    修改: core/BattleCore/Commands/CommandRecognizer.cs
-          core/BattleCore/Simulation/BattleSession.cs
-          tests/BattleCore.Tests/CommandRecognitionTests.cs
-          tests/BattleCore.Tests/InputIntegrityTests.cs
-          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    修改: core/BattleCore/Commands/CommandDefinition.cs
+          core/BattleCore/Commands/CommandRecognizer.cs
+          core/BattleCore/Commands/CommandCatalog.cs
+    新增: tests/BattleCore.Tests/ChargeCommandTests.cs
+          tests/BattleCore.Tests/DoubleMotionCommandTests.cs
+    修改: docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
   - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本节记录的是写文档时的状态，
     不要当作实时 HEAD。
-  - **工作区：干净**（03B-1 最终补修已创建本地提交，待推送）。
+  - **工作区：干净**（03B-2 已创建本地提交，待推送）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -498,9 +522,13 @@ cd /d C:\Users\32360\Desktop\NewKOF
    相对朝向与换边、冲突优先级、按键边沿消费、结果缓冲。
 3b. ~~阶段 03B-1 补修~~ **已完成并创建本地提交**：手势消费抑制幽灵指令（D43）、
    帧连续性（D44）、构造期校验（D45）、朝向时序（D46）、观察者异常安全。
-4. **阶段 03B-2：蓄力与扩展指令** — 蓄力保持帧、超必杀重复序列、按角色拆分指令表、
-   招式系统消费接口。**只处理输入与整数逻辑帧**：不需要运动系统、不需要改 `FighterState`、
-   不需要先定运动定点数格式。
+3c. ~~阶段 03B-1 最终补修~~ **已完成并推送 `33444f0`**：跨末方向帧幽灵指令（D47）、
+   观察者失败封闭 `IsFaulted`/`Recover()`（D48）。
+4. ~~阶段 03B-2：蓄力与扩展指令~~ **已完成并创建本地提交**：蓄力指令（46A/28B/46C，D49）、
+   双重/超必杀指令（236236A/214214B/623623A，D50）。**只处理输入与整数逻辑帧**。
+4b. **阶段 03B-2 后续**：按角色拆分指令表（`CommandCatalog` 目前是全局默认表）、
+   招式系统消费接口（`TryConsume` 语义）。**仍未做**：蓄力「斜方向计入」的放宽配置、
+   蓄力转向窗口的独立配置（当前复用 `ButtonToleranceFrames`）。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
 6. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
    与 `NewKOF.csproj` 的 `Compile Include`。
