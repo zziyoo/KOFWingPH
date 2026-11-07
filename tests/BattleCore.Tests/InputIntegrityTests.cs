@@ -568,9 +568,10 @@ public class InputIntegrityTests
     }
 
     [Fact]
-    public void FrameCommittedObserver_Throwing_ThenRetryContinuesWithCorrectFrame()
+    public void FrameCommittedObserver_Throwing_ThenRecoverContinuesWithCorrectFrame()
     {
-        // 观察者抛一次后，恢复用正常观察者继续推进，帧号不得跳变/漏帧。
+        // 观察者抛一次后会话进入故障封闭；调用方恢复派生状态一致性后 Recover()，
+        // 后续帧从正确的连续帧号继续，无跳变/漏帧。
         var buffer = new InputBuffer();
         var failOnce = true;
         var recognized = new List<int>();
@@ -592,14 +593,182 @@ public class InputIntegrityTests
 
         // 第一次推进：帧 0 触发一次性故障。
         Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: buffer));
+        Assert.True(session.IsFaulted);
+        Assert.Equal(0, session.FaultedFrame);
 
-        // 继续推进：观察者已恢复，后续帧正常。
+        // 未恢复前直接继续被拒绝。
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: buffer));
+
+        // 显式恢复后，从帧 1 继续。
+        session.Recover();
+        Assert.False(session.IsFaulted);
+
         buffer.Sample(InputBits.Right, InputBits.None);
         session.Advance(Step, inputSource: buffer);
 
-        // 帧 0 已提交（尽管观察者抛了），后续帧从 1 开始，无跳变。
-        Assert.True(recognized.Count > 0);
         Assert.Equal(1, recognized[0]);
+        Assert.True(session.IsFrameSyncIntact);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段 03B-1 最终补修：P2 观察者异常后的失败封闭（Faulted）
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ObserverFault_FirstObservationThrows_EntersFaultedAndKeepsFrameAccounted()
+    {
+        var buffer = new InputBuffer();
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (_, _) => throw new InvalidOperationException("首次观察故障"));
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+
+        // 首帧提交后观察者立即抛：该帧战斗状态与记账已落定，但会话进入故障封闭。
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: buffer));
+
+        Assert.True(session.IsFaulted);
+        Assert.Equal(0, session.FaultedFrame);
+        Assert.Equal(1, session.CurrentState.Frame);      // 帧 0 已提交
+        Assert.Equal(1, session.Scheduler.TotalSteps);    // 记账一致
+        Assert.True(session.IsFrameSyncIntact);
+        Assert.True(buffer.IsAlignedWith(session.CurrentState.Frame));
+    }
+
+    [Fact]
+    public void ObserverFault_MidObservationThrows_StateAndAccountingStaySynchronized()
+    {
+        var buffer = new InputBuffer();
+        var observed = new List<int>();
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (input, _) =>
+            {
+                observed.Add(input.Frame);
+                if (input.Frame == 2)
+                    throw new InvalidOperationException("中途观察故障");
+            });
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+
+        Assert.Throws<InvalidOperationException>(() => session.StepExact(5, inputSource: buffer));
+
+        // 帧 0/1/2 已提交（帧 2 观察者抛），帧 3/4 未提交。
+        Assert.True(session.IsFaulted);
+        Assert.Equal(2, session.FaultedFrame);
+        Assert.Equal(3, session.CurrentState.Frame);
+        Assert.Equal(3, session.Scheduler.TotalSteps);
+        Assert.Equal(new[] { 0, 1, 2 }, observed);
+        Assert.True(session.IsFrameSyncIntact);
+        Assert.True(buffer.IsAlignedWith(session.CurrentState.Frame));
+    }
+
+    [Fact]
+    public void ObserverFault_ContinuingWithoutRecover_IsRejectedByBothPaths()
+    {
+        var buffer = new InputBuffer();
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (_, _) => throw new InvalidOperationException("观察故障"));
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: buffer));
+        Assert.True(session.IsFaulted);
+
+        // Advance 与 StepExact 都拒绝在未恢复时继续。
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: buffer));
+        Assert.Throws<InvalidOperationException>(() => session.StepExact(1, inputSource: buffer));
+
+        // 状态与记账未被拒绝操作推进。
+        Assert.Equal(1, session.CurrentState.Frame);
+        Assert.Equal(1, session.Scheduler.TotalSteps);
+    }
+
+    [Fact]
+    public void ObserverFault_AdvanceUncommittedBudget_IsRecordedAsDropped()
+    {
+        // 观察者在首帧抛：本批次其余预算（>=1 帧）未提交，记为丢弃。
+        var buffer = new InputBuffer();
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (_, _) => throw new InvalidOperationException("观察故障"));
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+
+        long droppedBefore = session.Scheduler.DroppedStepCount;
+        Assert.Throws<InvalidOperationException>(() => session.Advance(4 * Step, inputSource: buffer));
+
+        Assert.True(session.IsFaulted);
+        Assert.Equal(1, session.CurrentState.Frame);
+        Assert.True(session.Scheduler.DroppedStepCount > droppedBefore);
+        Assert.True(session.IsFrameSyncIntact);
+    }
+
+    [Fact]
+    public void ObserverFault_RecoverThenContinue_DoesNotSkipFrames()
+    {
+        var buffer = new InputBuffer();
+        var recognized = new List<int>();
+        var shouldThrow = true;
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (input, _) =>
+            {
+                if (shouldThrow && input.Frame == 0)
+                {
+                    shouldThrow = false;
+                    throw new InvalidOperationException("观察故障");
+                }
+
+                recognized.Add(input.Frame);
+            });
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: buffer));
+        Assert.True(session.IsFaulted);
+
+        session.Recover();
+        Assert.False(session.IsFaulted);
+        Assert.Equal(-1, session.FaultedFrame);
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+        session.StepExact(2, inputSource: buffer);
+
+        // 恢复后从帧 1 开始，无跳变（帧 1、2 连续）。
+        Assert.Equal(new[] { 1, 2 }, recognized);
+        Assert.Equal(3, session.CurrentState.Frame);
+        Assert.True(session.IsFrameSyncIntact);
+    }
+
+    [Fact]
+    public void ObserverFault_StepOrCommitFailure_DoesNotTriggerFaulted()
+    {
+        // 只有「观察者」异常才触发故障封闭；Step/Commit 的失败不应误标 Faulted。
+        var session = OverflowingSession();  // Step 会在首帧因帧号溢出失败
+        var buffer = new InputBuffer();
+        buffer.Sample(InputBits.Right, InputBits.None);
+
+        Assert.ThrowsAny<Exception>(() => session.Advance(Step, inputSource: buffer));
+
+        Assert.False(session.IsFaulted);
+    }
+
+    [Fact]
+    public void NormalObserver_DoesNotFaultAndSimulationProceedsNormally()
+    {
+        var buffer = new InputBuffer();
+        var recognized = new List<int>();
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (input, _) => recognized.Add(input.Frame));
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+        session.StepExact(5, inputSource: buffer);
+
+        Assert.False(session.IsFaulted);
+        Assert.Equal(new[] { 0, 1, 2, 3, 4 }, recognized);
+        Assert.Equal(5, session.CurrentState.Frame);
         Assert.True(session.IsFrameSyncIntact);
     }
 }

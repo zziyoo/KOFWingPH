@@ -928,4 +928,163 @@ public class CommandRecognitionTests
         Assert.Equal(CommandCatalog.QuarterCircleForwardLightPunch, match.CommandId);
         Assert.Equal(new[] { 0, 1, 2 }, match.DirectionFrames);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段 03B-1 最终补修：P1 跨末方向帧幽灵指令
+    // ─────────────────────────────────────────────────────────────
+    //
+    // 之前的 ConsumedEndFrames 只按「末方向帧号」锁定手势，能抑制「共享同一末方向帧」
+    // 的竞争（如 236A vs 236B 都结束在同一个 → 帧）。但任务书指出：当两条指令的
+    // 末方向帧**不同**、却实际参与同一次裁决时（623A 结束在 ↘，236B 结束在 →），
+    // 末方向帧号无法覆盖落败指令的手势，仍可能在下一帧幽灵触发。
+
+    /// <summary>
+    /// 复现：623A（末方向 ↘）与 236B（末方向 →）末方向帧不同，
+    /// 623A 在帧 6 胜出后，236B 不得在帧 7 借残留 B 边沿幽灵触发。
+    /// </summary>
+    [Fact]
+    public void CrossEndFrameConflict_LosingCandidate_DoesNotGhostTrigger()
+    {
+        // 623A：→ ↓ ↘ + A，优先级 20。
+        var dp = new CommandDefinition(
+            "623A",
+            new[] { CommandDirection.Forward, CommandDirection.Down, CommandDirection.DownForward },
+            BtnA,
+            maxSequenceFrames: 20,
+            buttonToleranceFrames: 3,
+            priority: 20,
+            bufferLifetimeFrames: 8);
+
+        // 236B：↓ ↘ → + B，优先级 10。
+        var fb = new CommandDefinition(
+            "236B",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnB,
+            maxSequenceFrames: 20,
+            buttonToleranceFrames: 3,
+            priority: 10,
+            bufferLifetimeFrames: 8);
+
+        var recognizer = new CommandRecognizer(new[] { dp, fb });
+
+        // 帧 0-1 →；2-3 ↓；4 ↘；5 ↘+B；6 →+A；7 →（A/B 均松开）。
+        // 帧 6：623A（末方向 ↘@4）与 236B（末方向 →@6）同时成立，623A 按优先级胜出。
+        // 帧 7：方向仍是 →，236B 若借「帧 6 的末方向 → + 帧 5 残留的 B 边沿」会幽灵触发。
+        Run(recognizer, new[]
+        {
+            Right,               // 0
+            Right,               // 1
+            Down,                // 2
+            Down,                // 3
+            Down | Right,        // 4  ↘
+            Down | Right | BtnB, // 5  ↘ + B
+            Right | BtnA,        // 6  → + A（623A 胜出）
+            Right,               // 7  →（A/B 松开）
+        });
+
+        IReadOnlyList<CommandMatch> matches = recognizer.BufferedMatches(0);
+        Assert.Single(matches);
+        Assert.Equal("623A", matches[0].CommandId);
+        Assert.Equal(6, matches[0].RecognizedFrame);
+    }
+
+    /// <summary>跨末方向帧冲突的抑制必须与定义顺序无关。</summary>
+    [Fact]
+    public void CrossEndFrameConflict_Suppression_IsIndependentOfDefinitionOrder()
+    {
+        static CommandDefinition Dp() => new(
+            "623A",
+            new[] { CommandDirection.Forward, CommandDirection.Down, CommandDirection.DownForward },
+            BtnA, priority: 20);
+
+        static CommandDefinition Fb() => new(
+            "236B",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnB, priority: 10);
+
+        InputBits[] input =
+        {
+            Right, Right, Down, Down, Down | Right, Down | Right | BtnB, Right | BtnA, Right,
+        };
+
+        var orderFbFirst = new CommandRecognizer(new[] { Fb(), Dp() });
+        Run(orderFbFirst, input);
+
+        var orderDpFirst = new CommandRecognizer(new[] { Dp(), Fb() });
+        Run(orderDpFirst, input);
+
+        Assert.Equal("623A", Single(orderFbFirst).CommandId);
+        Assert.Equal("623A", Single(orderDpFirst).CommandId);
+    }
+
+    /// <summary>跨末方向帧冲突后，独立的第二手势仍能正常识别（不误吞连续输入）。</summary>
+    [Fact]
+    public void CrossEndFrameConflict_IndependentGestureAfterwards_StillRecognized()
+    {
+        var dp = new CommandDefinition(
+            "623A",
+            new[] { CommandDirection.Forward, CommandDirection.Down, CommandDirection.DownForward },
+            BtnA, priority: 20);
+
+        var fb = new CommandDefinition(
+            "236B",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnB, priority: 10);
+
+        var recognizer = new CommandRecognizer(new[] { dp, fb });
+
+        // 第一段：→ ↓ ↘(↘+B) →+A →   → 623A 胜出。
+        // 第二段：独立的 ↓ ↘ → + B   → 必须仍能识别为 236B。
+        Run(recognizer, new[]
+        {
+            Right,               // 0
+            Right,               // 1
+            Down,                // 2
+            Down,                // 3
+            Down | Right,        // 4
+            Down | Right | BtnB, // 5
+            Right | BtnA,        // 6  → 623A
+            Right,               // 7
+            Down,                // 8
+            Down | Right,        // 9
+            Right,               // 10
+            Right | BtnB,        // 11 → 236B（独立手势）
+        });
+
+        IReadOnlyList<CommandMatch> matches = recognizer.BufferedMatches(0);
+        Assert.Equal(2, matches.Count);
+        Assert.Equal("623A", matches[0].CommandId);
+        Assert.Equal("236B", matches[1].CommandId);
+        Assert.Equal(6, matches[0].RecognizedFrame);
+        Assert.Equal(11, matches[1].RecognizedFrame);
+    }
+
+    /// <summary>不同按键的竞争：623A 与 236C 用不同攻击键，末方向帧不同，仍只出一个胜者。</summary>
+    [Fact]
+    public void CrossEndFrameConflict_DifferentButtons_StillSingleWinner()
+    {
+        var dp = new CommandDefinition(
+            "623A",
+            new[] { CommandDirection.Forward, CommandDirection.Down, CommandDirection.DownForward },
+            BtnA, priority: 20);
+
+        var fb = new CommandDefinition(
+            "236C",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            InputBits.LightKick, priority: 10);
+
+        var recognizer = new CommandRecognizer(new[] { dp, fb });
+
+        Run(recognizer, new[]
+        {
+            Right, Right, Down, Down, Down | Right,
+            Down | Right | InputBits.LightKick, // 5  ↘ + C
+            Right | BtnA,                        // 6  → + A
+            Right,                               // 7
+        });
+
+        IReadOnlyList<CommandMatch> matches = recognizer.BufferedMatches(0);
+        Assert.Single(matches);
+        Assert.Equal("623A", matches[0].CommandId);
+    }
 }

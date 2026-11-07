@@ -165,19 +165,24 @@ public sealed class CommandRecognizer
         player.Buffer.RemoveAll(match => match.IsExpiredAt(frame));
 
         // 4) 同一帧所有指令一起评估，再按稳定优先级取唯一胜者。
+        //    同时收集本次裁决中**所有合法候选的按键边沿**：胜者与落败候选
+        //    都属于「同一次冲突」，它们的按键边沿都要一次性消费，否则落败候选
+        //    （即使末方向帧号与胜者不同）仍能用残留边沿在后续帧幽灵触发。
         CommandMatch? best = null;
-        ButtonPress? bestPress = null;
         int bestEndFrame = -1;
+        var candidatePresses = new List<ButtonPress>();
         foreach (CommandDefinition definition in _definitions)
         {
             if (!TryMatch(player, playerIndex, definition, frame, out CommandMatch? match,
                     out ButtonPress? press, out int endFrame))
                 continue;
 
+            if (press is not null)
+                candidatePresses.Add(press);
+
             if (best is null || IsBetterThan(match, best))
             {
                 best = match;
-                bestPress = press;
                 bestEndFrame = endFrame;
             }
         }
@@ -185,9 +190,10 @@ public sealed class CommandRecognizer
         if (best is null)
             return;
 
-        // 一次按键边沿只允许完成一条指令。
-        if (bestPress is not null)
-            bestPress.Consumed = true;
+        // 一次按键边沿只允许完成一条指令：胜者与落败候选的边沿都消费，
+        // 落败候选不会在后续帧借残留边沿补完（幽灵指令）。
+        foreach (ButtonPress press in candidatePresses)
+            press.Consumed = true;
 
         // 抑制「同一手势」被其他指令在后续帧补完（幽灵指令）：
         // 该手势的方向序列末方向帧号标记为已消费，之后任何指令都不能

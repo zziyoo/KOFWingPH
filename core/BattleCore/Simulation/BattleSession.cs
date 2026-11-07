@@ -57,6 +57,18 @@ public sealed class BattleSession
     /// <summary>当前权威状态。外部只读；更新只能经由 <see cref="Advance"/> 或 <see cref="StepExact"/>。</summary>
     public BattleState CurrentState { get; private set; }
 
+    /// <summary>
+    /// 会话是否处于<b>故障封闭</b>状态。当提交后观察者（<see cref="_frameCommitted"/>）
+    /// 抛异常时置为 <see langword="true"/>：该帧的战斗状态、输入历史、记账均已落定，
+    /// 但<b>派生的指令识别状态可能没有完成该帧的观察</b>（观察者在识别器完整消费该帧
+    /// 之前抛出）。此时不得继续正常模拟——继续推进会把下一帧误当成识别器的下一个历史帧，
+    /// 造成派生状态静默漏帧。
+    /// </summary>
+    public bool IsFaulted { get; private set; }
+
+    /// <summary>进入 <see cref="IsFaulted"/> 时的帧号（未故障时为 -1）。</summary>
+    public int FaultedFrame { get; private set; } = -1;
+
     /// <param name="initialState">初始状态；null 表示 <see cref="BattleState.CreateDefault"/>。</param>
     /// <param name="scheduler">调度器；null 表示默认调度器。</param>
     /// <param name="frameCommitted">
@@ -111,6 +123,7 @@ public sealed class BattleSession
         Func<int, FrameInput>? inputProvider = null,
         IInputSource? inputSource = null)
     {
+        ThrowIfFaulted();
         RejectTwoInputSources(inputProvider, inputSource);
 
         // 只取「允许推进几帧」的时间预算，此处不增加 TotalSteps。
@@ -154,7 +167,17 @@ public sealed class BattleSession
 
                 // 本帧已完整提交：通知只读观察者（如指令识别）。
                 // 传入「帧开始状态」，其 Facing 是本帧输入被消费时的朝向。
-                _frameCommitted?.Invoke(input, stateBefore);
+                // 观察者异常单独捕获：战斗状态/记账已落定，但派生状态（识别器）可能
+                // 未完成本帧观察 → 置故障封闭后照常向上抛，不吞异常。
+                try
+                {
+                    _frameCommitted?.Invoke(input, stateBefore);
+                }
+                catch
+                {
+                    MarkFaulted(input.Frame);
+                    throw;
+                }
             }
         }
         catch
@@ -195,6 +218,8 @@ public sealed class BattleSession
         Func<int, FrameInput>? inputProvider = null,
         IInputSource? inputSource = null)
     {
+        ThrowIfFaulted();
+
         if (count < 0)
             throw new ArgumentOutOfRangeException(nameof(count), count, "步数不能为负。");
 
@@ -222,7 +247,16 @@ public sealed class BattleSession
             Scheduler.CommitStep();
 
             // 与 Advance 相同：完整提交后才通知观察者，传帧开始状态。
-            _frameCommitted?.Invoke(input, stateBefore);
+            // 观察者异常置故障封闭后照常向上抛。
+            try
+            {
+                _frameCommitted?.Invoke(input, stateBefore);
+            }
+            catch
+            {
+                MarkFaulted(input.Frame);
+                throw;
+            }
         }
     }
 
@@ -250,4 +284,34 @@ public sealed class BattleSession
     /// 供测试与调试断言使用，不改变任何状态。
     /// </summary>
     public bool IsFrameSyncIntact => CurrentState.Frame - _initialFrame == Scheduler.TotalSteps;
+
+    /// <summary>
+    /// 清除故障封闭状态，允许继续模拟。调用方必须在<b>恢复派生状态与战斗状态的一致性</b>
+    /// 之后才能调用——例如重建指令识别器，或把识别器重新同步到已提交帧。
+    /// 本方法不负责自动重放漏帧：如何补上那帧的派生观察由调用方决定，
+    /// 会话只保证恢复后从正确的下一帧继续，不再被故障锁死。
+    /// </summary>
+    public void Recover()
+    {
+        IsFaulted = false;
+        FaultedFrame = -1;
+    }
+
+    /// <summary>在 Faulted 状态下拒绝继续模拟，防止派生状态静默漏帧。</summary>
+    private void ThrowIfFaulted()
+    {
+        if (IsFaulted)
+        {
+            throw new InvalidOperationException(
+                $"会话已进入故障封闭状态（帧 {FaultedFrame} 提交后观察者抛异常）。" +
+                "必须先恢复派生状态的一致性并调用 Recover()，之后才能继续模拟。");
+        }
+    }
+
+    /// <summary>记录观察者故障：进入故障封闭，标记故障帧。</summary>
+    private void MarkFaulted(int frame)
+    {
+        IsFaulted = true;
+        FaultedFrame = frame;
+    }
 }

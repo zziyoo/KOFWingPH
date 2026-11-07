@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 03B-1 补修与结项：指令竞争 / 校验 / 连续性 / 朝向时序）
+> 最后更新：2026-11-07（阶段 03B-1 最终补修：跨末方向帧幽灵指令 / 观察者失败封闭）
 
 ---
 
@@ -118,6 +118,28 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 03B-1 最终补修（2026-11-07）跨末方向帧幽灵指令 / 观察者失败封闭 —— 本地提交（待推送）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Commands/CommandRecognizer.cs` | P1 同帧冲突裁决消费「所有合法候选」的按键边沿（D47） |
+| `core/BattleCore/Simulation/BattleSession.cs` | P2 观察者异常后 `IsFaulted` 故障封闭 + `Recover()` + 拒绝未恢复继续（D48） |
+| `tests/BattleCore.Tests/CommandRecognitionTests.cs` | 新增跨末方向帧幽灵指令复现/定义顺序/独立手势/不同按键 4 项 |
+| `tests/BattleCore.Tests/InputIntegrityTests.cs` | 更新 1 项（Recover 语义）；新增观察者失败封闭 7 项 |
+
+**P1 根因**：`ConsumedEndFrames` 只按「末方向帧号」锁定手势，无法抑制「末方向帧不同却
+参与同一次裁决」的落败候选。623A（末方向 ↘）胜出后，236B（末方向 →）仍能借残留 B 边沿
+在下一帧幽灵触发。修复：同帧收集全部合法候选，胜者与落败候选的按键边沿一次性全部消费
+（D47）；不消费落败候选的方向手势，保留给独立手势。
+
+**P2 失败封闭**：观察者（`frameCommitted`）抛异常时，战斗帧已提交但派生识别状态可能漏帧。
+现改为 `Advance`/`StepExact` 在观察者调用处单独捕获，置 `IsFaulted` 后照常 `throw`（不吞异常）；
+两者开头拒绝未恢复继续。只有观察者异常触发 Faulted，Step/Commit 失败不误标。
+调用方恢复一致性后 `Recover()` 清障（D48）。
+
+**验收**：202/202 测试通过；核心与表现层 0 警告 0 错误；Godot 无头导入 `[ DONE ]`。
+变异验证：只消费胜者边沿 → 4 项失败。
 
 ### 阶段 03B-1 补修（2026-11-07）指令竞争 / 校验 / 连续性 / 朝向时序 —— 本地提交（未推送）
 
@@ -355,9 +377,9 @@ cd /d C:\Users\32360\Desktop\NewKOF
 | K18 | **`Commit()` 失败「无副作用」靠输入源自己实现** | 会话能保证自己的状态/计数不前进，但无法回滚第三方源内部已发生的写入 | `InputBuffer` 把校验放在写入前；自定义 `IInputSource` 必须遵守该契约，否则只有它自己脏，帧同步仍不被破坏 |
 | K19 | **快速双击（松开 + 再按落在同一逻辑帧之间）被合并** | 逻辑输入日志中没有中立帧，`66` 不会触发（Godot 实测复现） | 属电平格式的已知合并语义（K14/D31）；真实手感需要逐次事件流，属后续输入格式扩展 |
 | K20 | **指令方向序列要求严格连续** | 跳过 ↘ 的快速 236（↓ 直接到 →）不会被 `236A` 匹配 | 当前刻意严格，避免误判；若需宽松匹配，应在 `CommandDefinition` 增加显式配置，而不是放宽识别器默认行为 |
-| K21 | ~~**`frameCommitted` 观察者不得抛异常**~~ **已澄清（03B-1 补修）** | 观察者抛异常时该帧已记账、状态已推进、历史对齐，异常照常传播；`Advance` 会把剩余预算记入丢弃 | 安全；但实现方仍应避免塞入可能失败的业务逻辑，异常会中断本次调度批次（已补 3 项回归测试） |
+| K21 | ~~**`frameCommitted` 观察者不得抛异常**~~ **已解决（03B-1 最终补修）** | 观察者抛异常时该帧已记账、状态已推进、历史对齐；现在会话进入 `IsFaulted` 故障封闭，`Recover()` 前拒绝继续模拟（防止派生识别状态漏帧），异常照常传播、不吞 | 安全；调用方恢复派生状态一致性后 `Recover()` 再继续（已补 7 项回归测试） |
 | K22 | 识别结果缓冲按逻辑帧过期，暂停时不流逝 | 暂停期间 `ExpiresAtFrame` 不会推进 | 设计如此：缓冲是逻辑帧语义，不是真实时间语义 |
-| K23 | **手势消费用「末方向帧号」锁定** | 同一方向手势被某指令消费后，其他指令不能再借它匹配；帧号随方向条目淘汰时清理 | 属 D43 刻意行为，避免幽灵指令；若未来需要「同一手势先后触发多条指令」需重新设计 |
+| K23 | **手势消费用「末方向帧号」锁定** | 同一方向手势被某指令消费后，其他指令不能再借它匹配；帧号随方向条目淘汰时清理 | 属 D43 刻意行为，避免幽灵指令；最终补修（D47）补上「落败候选按键边沿」也消费，覆盖末方向帧不同的竞争 |
 
 **无阻塞性问题。** 编译 0 警告 0 错误，阶段 03B-1 补修验收时 191/191 测试通过，可正常启动运行。
 
@@ -374,29 +396,19 @@ cd /d C:\Users\32360\Desktop\NewKOF
   - `1538395` / `083abd5` — 仅文档
   - `bc048c8` — 仅文档（同步 `f145275` 状态）
   - **`0bd0c6d` — 阶段 03A 最终补修（输入与战斗状态原子提交顺序），已推送**
-  - **本轮 03B-1 补修：本地提交 `fix(input): finalize phase 03B-1 command recognition`（未推送）。**
-    SHA 用 `git log --oneline -1` 读取。提交内容（5 文件）：
+  - **上一轮 03B-1 补修：`fix(input): finalize phase 03B-1 command recognition`（`3bd1388`），已推送。**
+  - **本轮 03B-1 最终补修：`fix(input): resolve command conflicts and observer faults`（待推送）。**
+    SHA 用 `git log --oneline -1` 读取。提交内容：
     ```
     修改: core/BattleCore/Commands/CommandRecognizer.cs
-          core/BattleCore/Commands/CommandDefinition.cs
           core/BattleCore/Simulation/BattleSession.cs
           tests/BattleCore.Tests/CommandRecognitionTests.cs
           tests/BattleCore.Tests/InputIntegrityTests.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **上一轮 03B-1：本地提交 `feat(input): implement phase 03B-1 command recognition`（未推送）。**
-    SHA `4d4835b`。提交内容（19 文件）：
-    ```
-    新增: core/BattleCore/Commands/（5 个 .cs + 5 个 .uid）
-          tests/BattleCore.Tests/CommandRecognitionTests.cs（+ .uid）
-    修改: core/BattleCore/Input/DirectionResolver.cs
-          core/BattleCore/Simulation/BattleSession.cs
-          scripts/BattleScene.cs  scenes/Battle.tscn
-          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
-    ```
   - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本节记录的是写文档时的状态，
     不要当作实时 HEAD。
-  - **工作区：干净**（03B-1 补修已创建本地提交，未推送）。
+  - **工作区：干净**（03B-1 最终补修已创建本地提交，待推送）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
