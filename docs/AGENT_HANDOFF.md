@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 03B-2 蓄力与扩展指令）
+> 最后更新：2026-11-07（阶段 03B-2 最终补修：长蓄力 / 释放窗口 / 双重超时边界 —— 结项）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 191，已跳过: 0，总计: 191`
+期望：`失败: 0，通过: 257，已跳过: 0，总计: 257`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -119,7 +119,38 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 ## 4. 最近完成的修改
 
-### 阶段 03B-2（2026-11-07）蓄力与扩展指令 —— 本地提交（待推送）
+### 阶段 03B-2 最终补修（2026-11-07）长蓄力失效 / 释放窗口 / 双重超时边界 —— 结项
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Commands/CommandRecognizer.cs` | **D51**：每条蓄力指令一个 `ChargePendingState`「释放挂起」槽位（离开蓄力方向时快照蓄力量与释放帧，与历史条目解耦）；蓄力匹配改读挂起状态（历史只需容纳尾段），`MaxSequenceFrames` 不再约束蓄力。**D52**：释放窗口检查（中立/尾段容忍、无关方向立即失效）。**D53**：产生过候选的蓄力指令挂起立即作废（防重复触发） |
+| `core/BattleCore/Commands/CommandDefinition.cs` | 新增 `ChargeReleaseToleranceFrames`（默认 3，构造期校验 ≥ 0）；蓄力指令序列至少 2 元素校验；`MaxSequenceFrames` 文档改为「仅普通指令」 |
+| `core/BattleCore/Commands/CommandCatalog.cs` | 新增 `DefaultChargeReleaseToleranceFrames = 3`；三条蓄力指令显式传入释放窗口 |
+| `scripts/CaptureHelper.cs` | 新增 `--maxfps=` 调试参数（锁定渲染帧率，使注入时序可复现；正常启动零副作用） |
+| `tests/BattleCore.Tests/ChargeCommandTests.cs` | +28 项：超长蓄力 29/30/45/60/61/120/600/3600、释放窗口 0/1/2/3/4/20 边界（46A+28B）、SOCD 中立释放、无关方向失效、不足不补、重蓄重置、防重复、独立重蓄、P1/P2、换边、按键容差不延长窗口；修正 1 项测试缺陷（`AfterIndependentRecharge` 忽略 8 帧缓冲有效期） |
+| `tests/BattleCore.Tests/DoubleMotionCommandTests.cs` | +2 项：真正 40/41 帧跨度超时边界（方向完整连续、仅首尾超限） |
+
+**修复前失败复现（实测）**：256 项中 13 项失败——长蓄力 61/120/600/3600 共 5 项
+（> 60 帧被 `MaxSequenceFrames` 与 `Prune()` 双重杀死）、释放窗口 7 项（中立 1 帧即失效）、
+1 项测试缺陷断言。**修复后 257/257 通过。**
+
+**变异验证**：移除普通指令跨度判断 → 1 项失败（41 帧边界）；
+移除释放窗口判断 → 5 项失败（4/20 帧边界、长释放、按键容差不得延长窗口）。均已恢复。
+
+**Godot HUD 实测**（`--maxfps=60` 锁帧注入）：
+长蓄力 80 帧 + 松开 2 帧 → `46A`（`shots/charge_long.png`）；
+蓄力 40 帧 + 松开 2 帧 → `46A`（`shots/charge_release_ok.png`）；
+松开 6 帧 → `-`（`shots/charge_release_expired.png`）；
+`236236A` HUD 无退化（`shots/command_236236a.png`）。
+
+**蓄力规则（最终语义，D49/D51/D52/D53）**：蓄力 = 蓄力方向（序列首元素，纯方向）
+连续保持 ≥ `ChargeHoldFrames`；保持任意久不失效、内存不随时长增长、不被 `Prune()` 清除；
+离开蓄力方向时进入释放挂起（快照蓄力量），窗口内容忍中立（含 SOCD 中立）与尾段方向，
+无关方向立即失效；末方向须在 `释放帧 + ChargeReleaseToleranceFrames(3)` 内进入；
+蓄力不足不能靠窗口补足；窗口内按回蓄力方向 → 重新计数；一次蓄力只能触发一次，
+重新蓄满才能再次识别。普通/双重指令超时规则不变（首尾跨度 ≤ `MaxSequenceFrames`）。
+
+### 阶段 03B-2（2026-11-07）蓄力与扩展指令
 
 | 文件 | 变更 |
 |---|---|
@@ -402,8 +433,11 @@ cd /d C:\Users\32360\Desktop\NewKOF
 | K21 | ~~**`frameCommitted` 观察者不得抛异常**~~ **已解决（03B-1 最终补修）** | 观察者抛异常时该帧已记账、状态已推进、历史对齐；现在会话进入 `IsFaulted` 故障封闭，`Recover()` 前拒绝继续模拟（防止派生识别状态漏帧），异常照常传播、不吞 | 安全；调用方恢复派生状态一致性后 `Recover()` 再继续（已补 7 项回归测试） |
 | K22 | 识别结果缓冲按逻辑帧过期，暂停时不流逝 | 暂停期间 `ExpiresAtFrame` 不会推进 | 设计如此：缓冲是逻辑帧语义，不是真实时间语义 |
 | K23 | **手势消费用「末方向帧号」锁定** | 同一方向手势被某指令消费后，其他指令不能再借它匹配；帧号随方向条目淘汰时清理 | 属 D43 刻意行为，避免幽灵指令；最终补修（D47）补上「落败候选按键边沿」也消费，覆盖末方向帧不同的竞争 |
+| K24 | **蓄力匹配不检查 `MaxSequenceFrames`**（D51） | 蓄力指令的超时语义 = 释放窗口（默认 3 帧）+ 按键容差；定义里的 60 帧跨度值对蓄力无效 | 设计如此：保持时长与序列跨度是两个概念；若要限制蓄力指令整体时长，应另加显式配置而不是复用跨度 |
+| K25 | **释放窗口只容忍中立与尾段方向**（D52） | 蓄力释放后输入任何无关方向（含斜方向）立即失效，不能在窗口内「绕路」 | 设计如此（明确规则）；若要放宽需在 `CommandDefinition` 加显式配置 |
+| K26 | **`CaptureHelper --maxfps=` 只影响调试验收运行** | 锁定渲染帧率使注入时序可复现；正常启动不传参则零改动 | 仅与 `--shot=` 同用时生效（`_Ready` 里解析，无 `--shot=` 时节点直接禁用） |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 03B-1 补修验收时 191/191 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 03B-2 最终补修验收时 257/257 测试通过，可正常启动运行。
 
 ---
 
@@ -420,19 +454,21 @@ cd /d C:\Users\32360\Desktop\NewKOF
   - **`0bd0c6d` — 阶段 03A 最终补修（输入与战斗状态原子提交顺序），已推送**
   - **上一轮 03B-1 补修：`fix(input): finalize phase 03B-1 command recognition`（`3bd1388`），已推送。**
   - **03B-1 最终补修：`fix(input): resolve command conflicts and observer faults`（`33444f0`），已推送。**
-  - **本轮 03B-2：`feat(input): implement charge and advanced commands`（待推送）。**
-    SHA 用 `git log --oneline -1` 读取。提交内容：
+  - **03B-2：`feat(input): implement charge and advanced commands`（`c098f40`），已推送。**
+  - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本节记录的是写文档时的状态，
+    不要当作实时 HEAD。
+  - **本轮 03B-2 最终补修：`fix(input): finalize charge timing and command timeout`**
+    （创建后用 `git rev-parse HEAD` 读取 SHA）。提交内容：
     ```
     修改: core/BattleCore/Commands/CommandDefinition.cs
           core/BattleCore/Commands/CommandRecognizer.cs
           core/BattleCore/Commands/CommandCatalog.cs
-    新增: tests/BattleCore.Tests/ChargeCommandTests.cs
+          scripts/CaptureHelper.cs
+          tests/BattleCore.Tests/ChargeCommandTests.cs
           tests/BattleCore.Tests/DoubleMotionCommandTests.cs
-    修改: docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本节记录的是写文档时的状态，
-    不要当作实时 HEAD。
-  - **工作区：干净**（03B-2 已创建本地提交，待推送）。
+  - **工作区：干净**（03B-2 最终补修已提交并推送后）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -483,7 +519,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 **按顺序阅读：**
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
-2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D42 决策）与第 5 节（未决定问题）
+2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D53 决策）与第 5 节（未决定问题）
 3. `docs/PROGRESS.md` — 已完成/未完成边界、191 项测试、下一阶段计划
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
@@ -524,11 +560,13 @@ cd /d C:\Users\32360\Desktop\NewKOF
    帧连续性（D44）、构造期校验（D45）、朝向时序（D46）、观察者异常安全。
 3c. ~~阶段 03B-1 最终补修~~ **已完成并推送 `33444f0`**：跨末方向帧幽灵指令（D47）、
    观察者失败封闭 `IsFaulted`/`Recover()`（D48）。
-4. ~~阶段 03B-2：蓄力与扩展指令~~ **已完成并创建本地提交**：蓄力指令（46A/28B/46C，D49）、
+4. ~~阶段 03B-2：蓄力与扩展指令~~ **已完成并推送 `c098f40`**：蓄力指令（46A/28B/46C，D49）、
    双重/超必杀指令（236236A/214214B/623623A，D50）。**只处理输入与整数逻辑帧**。
-4b. **阶段 03B-2 后续**：按角色拆分指令表（`CommandCatalog` 目前是全局默认表）、
-   招式系统消费接口（`TryConsume` 语义）。**仍未做**：蓄力「斜方向计入」的放宽配置、
-   蓄力转向窗口的独立配置（当前复用 `ButtonToleranceFrames`）。
+4b. ~~阶段 03B-2 最终补修~~ **已完成并推送**（长蓄力解耦 D51、释放窗口 D52、
+   一次性消费 D53、双重超时边界测试）。**03B-2 正式结项**。
+4c. **阶段 04 入口**：按角色拆分指令表（`CommandCatalog` 目前是全局默认表）、
+   招式系统消费接口（`TryConsume` 语义）。**仍未做**：蓄力「斜方向计入」的放宽配置
+   （当前严格纯方向，释放窗口已独立配置）。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
 6. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
    与 `NewKOF.csproj` 的 `Compile Include`。
@@ -571,11 +609,15 @@ cd /d C:\Users\32360\Desktop\NewKOF
 - [ ] 输入只有两条合法路径：`IInputSource`（两阶段）或幂等委托；`Take()` 不得被表现层当委托用
 - [ ] 指令识别只在 `core/BattleCore/Commands/`；`scripts/` 只读取 `LastMatch` 显示，不做判定
 - [ ] 方向历史按「变化」压缩，每个条目用**当帧朝向**解析；换边不得重算历史条目
+- [ ] 蓄力匹配读「释放挂起」槽位而不是历史首条目（D51）：长蓄力条目被裁剪仍能识别，
+      `MaxSequenceFrames` 不约束蓄力；挂起槽位 = 每指令一个，内存恒定
+- [ ] 释放窗口语义（D52）：中立/尾段容忍、无关方向立即失效、不足不补、按回蓄力方向重新计数
+- [ ] 产生过候选的蓄力指令挂起立即作废（D53）：同一蓄力不得二次触发
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向
 - [ ] `Observe` 帧号严格逐帧连续（首次任意非负），非法帧先抛后不改内部状态
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D46）与代码实现一致
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D53）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

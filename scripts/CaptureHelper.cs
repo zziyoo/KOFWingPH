@@ -12,6 +12,10 @@ namespace NewKOF;
 /// <item><term>--renderkey=&lt;frame&gt;:&lt;down|up&gt;:&lt;KeyName&gt;</term>
 ///       <description>第 frame 个<b>渲染帧</b>注入合成按键，可重复；
 ///       日志同时打印当时的<b>逻辑帧号</b>，便于对照</description></item>
+/// <item><term>--maxfps=&lt;n&gt;</term>
+///       <description>把 <c>Engine.MaxFps</c> 夹到 n（仅本次运行）。验收脚本用它锁 60，
+///       使渲染帧 ≈ 逻辑帧（差一个固定启动偏移），按键时序可复现；
+///       不指定则不改动引擎帧率。</description></item>
 /// <item><term>--key=...</term><description>旧名，等价于 <c>--renderkey=</c>（保留兼容，会告警一次）</description></item>
 /// </list>
 ///
@@ -48,6 +52,12 @@ public partial class CaptureHelper : Node
                 _renderFramesToWait = f;
             else if (arg.StartsWith("--renderkey="))
                 ParseKeyStep(arg["--renderkey=".Length..]);
+            else if (arg.StartsWith("--maxfps=")
+                     && int.TryParse(arg["--maxfps=".Length..], out int maxFps) && maxFps > 0)
+            {
+                // 仅调试验收：锁定渲染帧率，让「渲染帧 → 逻辑帧」的映射可复现。
+                Engine.MaxFps = maxFps;
+            }
             else if (arg.StartsWith("--key="))
             {
                 GD.PushWarning("[CaptureHelper] --key= 已改名为 --renderkey=（语义：渲染帧，不是逻辑帧）。");

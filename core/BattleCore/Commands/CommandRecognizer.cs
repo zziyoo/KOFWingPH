@@ -26,10 +26,29 @@ namespace NewKOF.BattleCore.Commands;
 /// <item>序列末元素允许「稍早完成」：只要它距当前帧不超过该指令的
 ///       <see cref="CommandDefinition.ButtonToleranceFrames"/>，仍可被本帧按键补完。
 ///       这是 623 与 236 能在同一帧竞争的原因（见测试）。</item>
-/// <item>首尾跨度超过 <see cref="CommandDefinition.MaxSequenceFrames"/> → 超时。</item>
+/// <item>首尾跨度超过 <see cref="CommandDefinition.MaxSequenceFrames"/> → 超时。
+///       <b>仅约束普通方向指令</b>；蓄力指令的保持时长不受它约束（D51）。</item>
 /// <item>按键边沿与末方向进入帧的帧差必须在容差内（可提前或延后）。</item>
 /// <item>纯方向指令（<see cref="CommandDefinition.RequiredButtons"/> 为
 ///       <see cref="InputBits.None"/>）只在其末方向<b>进入的那一帧</b>触发。</item>
+/// </list>
+///
+/// <para><b>蓄力规则（D49/D51/D52/D53）</b>：<see cref="CommandDefinition.ChargeHoldFrames"/>
+/// &gt; 0 的指令按「释放挂起」状态机匹配，与方向历史条目解耦：</para>
+/// <list type="number">
+/// <item><b>保持</b>：蓄力方向（序列第一个元素，只认纯方向）连续保持
+///       ≥ ChargeHoldFrames 帧；保持多久都不失效，内存不随时长增长。</item>
+/// <item><b>释放</b>：离开蓄力方向的瞬间，从历史条目快照蓄力量与释放开始帧，
+///       进入「释放挂起」；直接进入无关方向则蓄力立即失效。</item>
+/// <item><b>释放窗口</b>：挂起期间容忍<b>中立</b>（含 SOCD 中立）与序列尾部方向；
+///       其他任何方向立即失效。序列末方向须在「释放帧 +
+///       <see cref="CommandDefinition.ChargeReleaseToleranceFrames"/>」内进入。</item>
+/// <item><b>不足不补</b>：蓄力量不足 ChargeHoldFrames 时释放窗口不能补足。</item>
+/// <item><b>重新计数</b>：挂起期间重新按回蓄力方向 → 挂起作废、从 0 重新计数。</item>
+/// <item><b>一次性</b>：产生过候选的蓄力指令挂起立即作废——同一蓄力不得借
+///       第二次按键边沿反复触发；重新蓄满后才可再次识别（D53）。</item>
+/// <item><b>超时分离</b>：蓄力匹配不检查 MaxSequenceFrames；释放窗口与按键容差
+///       分别约束方向完成与按键时机。普通方向指令超时规则不变。</item>
 /// </list>
 ///
 /// <para><b>冲突优先级（稳定、与遍历顺序无关）</b></para>
@@ -67,7 +86,7 @@ public sealed class CommandRecognizer
     private readonly CommandDefinition[] _definitions;
     private readonly int _maxSequenceFrames;
     private readonly int _maxButtonTolerance;
-    private readonly PlayerState[] _players = { new(), new() };
+    private readonly PlayerState[] _players;
     private int _lastObservedFrame = -1;
 
     /// <param name="definitions">指令定义集合；ID 必须唯一。</param>
@@ -85,6 +104,8 @@ public sealed class CommandRecognizer
             if (!seen.Add(definition.CommandId))
                 throw new ArgumentException($"指令 ID 重复：{definition.CommandId}。", nameof(definitions));
         }
+
+        _players = new[] { new PlayerState(_definitions.Length), new PlayerState(_definitions.Length) };
 
         _maxSequenceFrames = _definitions.Length == 0 ? 0 : _definitions.Max(d => d.MaxSequenceFrames);
         _maxButtonTolerance = _definitions.Length == 0 ? 0 : _definitions.Max(d => d.ButtonToleranceFrames);
@@ -148,9 +169,10 @@ public sealed class CommandRecognizer
         PlayerState player = _players[playerIndex];
 
         // 1) 方向：只在「变化」时追加条目（按住不重复计数），
-        //    否则实时更新最后一个条目的持续结束帧（供蓄力保持时长计算）。
+        //    否则实时更新最后一个条目的持续结束帧。
         CommandDirection direction = ToCommandDirection(DirectionResolver.Resolve(bits, facing));
-        if (player.Directions.Count == 0 || player.Directions[^1].Direction != direction)
+        bool directionChanged = player.Directions.Count == 0 || player.Directions[^1].Direction != direction;
+        if (directionChanged)
         {
             player.Directions.Add(new DirectionEntry(frame, direction, frame));
         }
@@ -158,6 +180,11 @@ public sealed class CommandRecognizer
         {
             player.Directions[^1] = player.Directions[^1] with { EndFrame = frame };
         }
+
+        // 1b) 蓄力进度（D51/D52）：在方向历史更新后、裁剪前更新。
+        //     释放瞬间从历史条目快照蓄力量与释放帧，此后蓄力信息不再依赖历史条目，
+        //     长时间蓄力不会被 Prune() 提前清除，内存也不随蓄力时长增长。
+        UpdateChargeStates(player, frame, direction, directionChanged);
 
         // 2) 按键：只认按下边沿（本帧有、上帧无）。
         InputBits attacks = bits & DirectionResolver.AttackButtons;
@@ -178,14 +205,18 @@ public sealed class CommandRecognizer
         CommandMatch? best = null;
         int bestEndFrame = -1;
         var candidatePresses = new List<ButtonPress>();
-        foreach (CommandDefinition definition in _definitions)
+        var candidateChargeIndices = new List<int>();
+        for (int definitionIndex = 0; definitionIndex < _definitions.Length; definitionIndex++)
         {
-            if (!TryMatch(player, playerIndex, definition, frame, out CommandMatch? match,
+            CommandDefinition definition = _definitions[definitionIndex];
+            if (!TryMatch(player, playerIndex, definitionIndex, definition, frame, out CommandMatch? match,
                     out ButtonPress? press, out int endFrame))
                 continue;
 
             if (press is not null)
                 candidatePresses.Add(press);
+            if (definition.ChargeHoldFrames > 0)
+                candidateChargeIndices.Add(definitionIndex);
 
             if (best is null || IsBetterThan(match, best))
             {
@@ -202,6 +233,11 @@ public sealed class CommandRecognizer
         foreach (ButtonPress press in candidatePresses)
             press.Consumed = true;
 
+        // 蓄力是一次性资源（D53）：产生过候选的蓄力指令其释放挂起立即作废。
+        // 同一蓄力不得在释放窗口内借第二次按键边沿反复触发；重新蓄满后才可再次识别。
+        foreach (int definitionIndex in candidateChargeIndices)
+            player.ChargePendings[definitionIndex].Clear();
+
         // 抑制「同一手势」被其他指令在后续帧补完（幽灵指令）：
         // 该手势的方向序列末方向帧号标记为已消费，之后任何指令都不能
         // 再借它匹配。两个独立手势的末方向帧号不同，互不影响。
@@ -209,6 +245,80 @@ public sealed class CommandRecognizer
 
         player.Buffer.Add(best);
         player.Last = best;
+    }
+
+    /// <summary>
+    /// 更新每条蓄力指令的「释放挂起」状态（D51/D52）。
+    ///
+    /// <para>状态规则（每帧、每条蓄力指令）：</para>
+    /// <list type="number">
+    /// <item>当前方向 == 蓄力方向：挂起作废，重新计数（保持时长从历史条目现算）——
+    ///       「释放后重新按回蓄力方向」即重新计数。</item>
+    /// <item>本帧刚离开蓄力方向（方向变化且前一末条目是蓄力方向）：从该条目快照
+    ///       蓄力量与释放开始帧（= 本帧，第一个未保持蓄力方向的帧），进入释放挂起。</item>
+    /// <item>挂起期间：中立（含 SOCD 中立）容忍；序列尾部方向容忍（正在走尾段）；
+    ///       其他任何方向 → 挂起立即作废（蓄力完全失效，须重新蓄满）。</item>
+    /// </list>
+    /// 挂起不按时间自行过期——匹配时用「末方向进入帧 − 释放帧 ≤ 释放窗口」判定，
+    /// 因此超时的挂起自然无法完成匹配，也无需随时间清理（状态为每指令一个固定槽位）。
+    /// </summary>
+    private void UpdateChargeStates(
+        PlayerState player, int frame, CommandDirection current, bool directionChanged)
+    {
+        for (int definitionIndex = 0; definitionIndex < _definitions.Length; definitionIndex++)
+        {
+            CommandDefinition definition = _definitions[definitionIndex];
+            if (definition.ChargeHoldFrames <= 0)
+                continue; // 非蓄力指令没有蓄力进度。
+
+            ChargePendingState state = player.ChargePendings[definitionIndex];
+            CommandDirection chargeDirection = definition.DirectionSequence[0];
+
+            if (current == chargeDirection)
+            {
+                // 正在（重新）保持蓄力方向：挂起作废，重新计数。
+                state.Clear();
+                continue;
+            }
+
+            if (directionChanged && player.Directions.Count >= 2 &&
+                player.Directions[^2].Direction == chargeDirection)
+            {
+                // 本帧刚从蓄力方向离开：进入中立（含 SOCD 中立）或尾段方向 → 释放挂起；
+                // 直接进入无关方向 → 蓄力立即失效（不产生挂起，明确规则）。
+                if (current == CommandDirection.Neutral || IsTailDirection(definition, current))
+                {
+                    // 快照蓄力量（该条目持续帧数）与释放开始帧（= 本帧，第一个未保持的帧）。
+                    DirectionEntry held = player.Directions[^2];
+                    state.MarkReleased(held.EndFrame - held.Frame + 1, frame);
+                }
+                else
+                {
+                    state.Clear();
+                }
+
+                continue;
+            }
+
+            if (state.HasPending && current != CommandDirection.Neutral && !IsTailDirection(definition, current))
+            {
+                // 释放窗口内出现无关方向 → 立即失效（明确规则，不允许蒙混）。
+                state.Clear();
+            }
+        }
+    }
+
+    /// <summary><paramref name="direction"/> 是否在该指令方向序列的尾部（第 2 个及以后元素）中。</summary>
+    private static bool IsTailDirection(CommandDefinition definition, CommandDirection direction)
+    {
+        IReadOnlyList<CommandDirection> sequence = definition.DirectionSequence;
+        for (int i = 1; i < sequence.Count; i++)
+        {
+            if (sequence[i] == direction)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -220,6 +330,7 @@ public sealed class CommandRecognizer
     private bool TryMatch(
         PlayerState player,
         int playerIndex,
+        int definitionIndex,
         CommandDefinition definition,
         int frame,
         out CommandMatch match,
@@ -232,12 +343,18 @@ public sealed class CommandRecognizer
 
         IReadOnlyList<CommandDirection> sequence = definition.DirectionSequence;
         List<DirectionEntry> directions = player.Directions;
-        if (directions.Count < sequence.Count)
+
+        // 蓄力指令（D51）：蓄力方向来自释放挂起状态（与历史条目解耦，长蓄力条目
+        // 被裁剪也能匹配），历史只需容纳「尾段」（第 2 个及以后元素）；
+        // 普通指令需要完整序列都在历史中。
+        bool isCharge = definition.ChargeHoldFrames > 0;
+        int matchElementCount = isCharge ? sequence.Count - 1 : sequence.Count;
+        if (directions.Count < matchElementCount)
             return false;
 
         // 从最近的方向条目向前尝试：末方向不必是「当前方向」——
         // 允许在容差窗口内稍早完成（例如 623 的 ↘ 结束后继续滚到 →）。
-        for (int endIndex = directions.Count - 1; endIndex >= sequence.Count - 1; endIndex--)
+        for (int endIndex = directions.Count - 1; endIndex >= matchElementCount - 1; endIndex--)
         {
             int endFrame = directions[endIndex].Frame;
 
@@ -249,23 +366,35 @@ public sealed class CommandRecognizer
             if (player.ConsumedEndFrames.Contains(endFrame))
                 continue;
 
-            int startFrame = directions[endIndex - sequence.Count + 1].Frame;
-            if (endFrame - startFrame > definition.MaxSequenceFrames)
-                continue;
-
-            if (!MatchesEndingAt(directions, endIndex, sequence))
-                continue;
-
-            // 蓄力检查（03B-2）：方向序列第一个元素必须被连续保持 ≥ ChargeHoldFrames 帧。
-            // 蓄力只认纯方向——斜方向是独立的条目，会打断「纯方向」的连续保持，
-            // 因此不满足蓄力（明确规则，不依赖位运算）。
-            if (definition.ChargeHoldFrames > 0)
+            int startFrame;
+            if (isCharge)
             {
-                int firstIndex = endIndex - sequence.Count + 1;
-                DirectionEntry first = directions[firstIndex];
-                if (first.EndFrame - first.Frame + 1 < definition.ChargeHoldFrames)
+                // 蓄力检查（D51/D52）：蓄力量与释放窗口来自释放挂起状态。
+                // 保持时长不受 MaxSequenceFrames 约束（否则长蓄力反而失效）；
+                // 蓄力不足不能靠释放窗口补足；释放窗口已过则不得匹配。
+                ChargePendingState pending = player.ChargePendings[definitionIndex];
+                if (!pending.HasPending)
+                    continue;
+                if (pending.AmountHeld < definition.ChargeHoldFrames)
+                    continue;
+                if (endFrame - pending.ReleasedAtFrame > definition.ChargeReleaseToleranceFrames)
+                    continue;
+
+                // 蓄力起始帧 = 释放帧 − 蓄力量（即使起始条目已被裁剪也可还原）。
+                startFrame = pending.ReleasedAtFrame - pending.AmountHeld;
+            }
+            else
+            {
+                startFrame = directions[endIndex - matchElementCount + 1].Frame;
+
+                // 首尾跨度超时——仅普通方向指令（D51：蓄力不适用）。
+                if (endFrame - startFrame > definition.MaxSequenceFrames)
                     continue;
             }
+
+            // 蓄力 = 尾段、普通 = 完整序列：必须在压缩历史中连续且顺序一致。
+            if (!MatchesEndingAt(directions, endIndex, sequence, matchElementCount))
+                continue;
 
             // 纯方向指令：只在末方向进入的那一帧触发，避免按住重复触发。
             if (definition.RequiredButtons == InputBits.None)
@@ -273,7 +402,8 @@ public sealed class CommandRecognizer
                 if (endFrame != frame)
                     continue;
 
-                match = CreateMatch(definition, playerIndex, frame, directions, endIndex, buttonFrame: -1);
+                match = CreateMatch(definition, playerIndex, frame, startFrame, directions,
+                    endIndex, matchElementCount, buttonFrame: -1);
                 matchedEndFrame = endFrame;
                 return true;
             }
@@ -283,7 +413,8 @@ public sealed class CommandRecognizer
             if (candidate is null)
                 continue;
 
-            match = CreateMatch(definition, playerIndex, frame, directions, endIndex, candidate.Frame);
+            match = CreateMatch(definition, playerIndex, frame, startFrame, directions,
+                endIndex, matchElementCount, candidate.Frame);
             press = candidate;
             matchedEndFrame = endFrame;
             return true;
@@ -292,13 +423,15 @@ public sealed class CommandRecognizer
         return false;
     }
 
-    /// <summary>检查压缩历史的 <paramref name="endIndex"/> 结尾是否恰好等于方向序列。</summary>
+    /// <summary>检查压缩历史的 <paramref name="endIndex"/> 结尾是否恰好等于序列的最后
+    /// <paramref name="elementCount"/> 个元素（蓄力 = 尾段，普通 = 完整序列）。</summary>
     private static bool MatchesEndingAt(
         List<DirectionEntry> directions,
         int endIndex,
-        IReadOnlyList<CommandDirection> sequence)
+        IReadOnlyList<CommandDirection> sequence,
+        int elementCount)
     {
-        for (int k = 0; k < sequence.Count; k++)
+        for (int k = 0; k < elementCount; k++)
         {
             if (directions[endIndex - k].Direction != sequence[sequence.Count - 1 - k])
                 return false;
@@ -346,26 +479,32 @@ public sealed class CommandRecognizer
         CommandDefinition definition,
         int playerIndex,
         int recognizedFrame,
+        int sequenceStartFrame,
         List<DirectionEntry> directions,
         int endIndex,
+        int matchElementCount,
         int buttonFrame)
     {
-        int sequenceLength = definition.DirectionSequence.Count;
-        int startIndex = endIndex - sequenceLength + 1;
+        bool isCharge = definition.ChargeHoldFrames > 0;
+        int directionFrameCount = isCharge ? matchElementCount + 1 : matchElementCount;
 
-        var directionFrames = new int[sequenceLength];
-        for (int k = 0; k < sequenceLength; k++)
-            directionFrames[k] = directions[startIndex + k].Frame;
+        // 蓄力：首帧 = 蓄力方向进入帧（从挂起状态还原），其后是尾段各元素进入帧；
+        // 普通：逐元素进入帧。
+        var directionFrames = new int[directionFrameCount];
+        for (int k = 0; k < matchElementCount; k++)
+            directionFrames[directionFrameCount - 1 - k] = directions[endIndex - k].Frame;
+        if (isCharge)
+            directionFrames[0] = sequenceStartFrame;
 
         return new CommandMatch(
             definition.CommandId,
             playerIndex,
             recognizedFrame,
-            sequenceStartFrame: directionFrames[0],
+            sequenceStartFrame,
             sequenceEndFrame: directionFrames[^1],
             buttonFrame,
             definition.Priority,
-            sequenceLength,
+            sequenceLength: definition.DirectionSequence.Count,
             expiresAtFrame: recognizedFrame + definition.BufferLifetimeFrames,
             directionFrames);
     }
@@ -441,9 +580,15 @@ public sealed class CommandRecognizer
     /// <summary>单名玩家的识别状态。</summary>
     private sealed class PlayerState
     {
-        public PlayerState()
+        public PlayerState(int definitionCount)
         {
             BufferView = new ReadOnlyCollection<CommandMatch>(Buffer);
+
+            // 每条指令一个固定蓄力槽位（非蓄力指令的槽位永不使用）。
+            // 状态总量 = 蓄力指令数 × 常数，不随蓄力时长、历史或会话时长增长（D51）。
+            ChargePendings = new ChargePendingState[definitionCount];
+            for (int i = 0; i < definitionCount; i++)
+                ChargePendings[i] = new ChargePendingState();
         }
 
         public List<DirectionEntry> Directions { get; } = new();
@@ -455,6 +600,13 @@ public sealed class CommandRecognizer
         public ReadOnlyCollection<CommandMatch> BufferView { get; }
 
         /// <summary>
+        /// 每条指令的蓄力「释放挂起」槽位（按定义索引对齐）。
+        /// 蓄力量与释放帧在离开蓄力方向的瞬间从历史条目快照，此后不再依赖
+        /// 方向历史——长蓄力的起始条目被裁剪也不影响识别（D51）。
+        /// </summary>
+        public ChargePendingState[] ChargePendings { get; }
+
+        /// <summary>
         /// 已被某条指令消费的方向手势末方向帧号。用于抑制「同一手势」被
         /// 其他指令在后续容差窗口内补完（幽灵指令）。帧号与方向条目一一对应，
         /// 随方向条目淘汰时一并清理。
@@ -464,5 +616,30 @@ public sealed class CommandRecognizer
         public InputBits HeldAttacks { get; set; }
 
         public CommandMatch? Last { get; set; }
+    }
+
+    /// <summary>
+    /// 单条蓄力指令的「释放挂起」状态（D51/D52）：一条固定槽位，
+    /// 记录释放瞬间的蓄力量与释放开始帧。挂起不按时间自行过期——匹配时用
+    /// 「末方向进入帧 − 释放帧 ≤ 释放窗口」判定，超时挂起自然无法完成匹配。
+    /// </summary>
+    private sealed class ChargePendingState
+    {
+        public bool HasPending { get; private set; }
+
+        /// <summary>释放瞬间的蓄力量（蓄力方向已连续保持的帧数，从历史条目快照）。</summary>
+        public int AmountHeld { get; private set; }
+
+        /// <summary>释放开始帧（第一个未保持蓄力方向的逻辑帧）。</summary>
+        public int ReleasedAtFrame { get; private set; }
+
+        public void MarkReleased(int amountHeld, int releasedAtFrame)
+        {
+            HasPending = true;
+            AmountHeld = amountHeld;
+            ReleasedAtFrame = releasedAtFrame;
+        }
+
+        public void Clear() => HasPending = false;
     }
 }

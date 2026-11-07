@@ -300,6 +300,309 @@ public class ChargeCommandTests
     }
 
     // ─────────────────────────────────────────────────────────────
+    // 蓄力保持时长：最短边界 + 超长保持（03B-2 最终补修 P1）
+    // ─────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(29, false)]
+    [InlineData(30, true)]
+    [InlineData(45, true)]
+    [InlineData(60, true)]
+    [InlineData(61, true)]
+    [InlineData(120, true)]
+    [InlineData(600, true)]
+    [InlineData(3600, true)]
+    public void ChargeBackForward_HoldBoundaryAndLongHold(int holdFrames, bool shouldMatch)
+    {
+        // 任务书表格：29 不足 → 失败；30/45/60/61/120/600/3600 必须成功。
+        // 修复前 61+ 会因「首尾跨度 > MaxSequenceFrames」与历史裁剪而失效。
+        CommandRecognizer recognizer = ChargeRecognizer(holdFrames: 30);
+
+        var frames = new List<InputBits>(holdFrames + 1);
+        for (int i = 0; i < holdFrames; i++)
+            frames.Add(Left);            // 后（朝右时 Left = Back）
+        frames.Add(Right | BtnA);        // 前 + A
+
+        Run(recognizer, frames.ToArray());
+
+        if (shouldMatch)
+        {
+            CommandMatch match = Single(recognizer);
+            Assert.Equal("46A", match.CommandId);
+            Assert.Equal(0, match.SequenceStartFrame);
+            Assert.Equal(holdFrames, match.SequenceEndFrame);
+        }
+        else
+        {
+            Assert.Empty(recognizer.BufferedMatches(0));
+        }
+    }
+
+    [Fact]
+    public void ChargeDownUp_LongHold_StillMatches()
+    {
+        CommandRecognizer recognizer = ChargeRecognizer(holdFrames: 30);
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < 600; i++)
+            frames.Add(Down);
+        frames.Add(Up | BtnB);
+
+        Run(recognizer, frames.ToArray());
+
+        Assert.Equal("28B", Single(recognizer).CommandId);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 蓄力释放窗口（03B-2 最终补修 P2）
+    // ─────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    [InlineData(4, false)]
+    [InlineData(20, false)]
+    public void ChargeBackForward_ReleaseToleranceBoundary(int neutralFrames, bool shouldMatch)
+    {
+        // 蓄力满 N 帧后，允许最多 3 帧中立（释放窗口）再输入前 + A。
+        // 修复前方向序列必须严格相邻，中立 1 帧即失败。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);
+        for (int i = 0; i < neutralFrames; i++)
+            frames.Add(InputBits.None);
+        frames.Add(Right | BtnA);
+
+        Run(recognizer, frames.ToArray());
+
+        if (shouldMatch)
+            Assert.Equal("46A", Single(recognizer).CommandId);
+        else
+            Assert.Empty(recognizer.BufferedMatches(0));
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(3, true)]
+    [InlineData(4, false)]
+    public void ChargeDownUp_ReleaseToleranceBoundary(int neutralFrames, bool shouldMatch)
+    {
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Down);
+        for (int i = 0; i < neutralFrames; i++)
+            frames.Add(InputBits.None);
+        frames.Add(Up | BtnB);
+
+        Run(recognizer, frames.ToArray());
+
+        if (shouldMatch)
+            Assert.Equal("28B", Single(recognizer).CommandId);
+        else
+            Assert.Empty(recognizer.BufferedMatches(0));
+    }
+
+    [Fact]
+    public void ChargeRelease_UnrelatedDirectionInsideWindow_DoesNotMatch()
+    {
+        // 蓄力后先按「上」再按「前」：无关方向立即失效，不得借释放窗口蒙混。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);
+        frames.Add(Up);              // 无关方向
+        frames.Add(Right | BtnA);    // 前 + A
+
+        Run(recognizer, frames.ToArray());
+
+        Assert.Empty(recognizer.BufferedMatches(0));
+    }
+
+    [Fact]
+    public void ChargeRelease_SocdNeutral_CountsAsRelease()
+    {
+        // 后 + 前同时按住 → SOCD 水平中立，等同于「松开蓄力方向」。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);
+        frames.Add(Left | Right);    // SOCD 中立（1 帧）
+        frames.Add(Left | Right);    // 仍中立
+        // 松开「后」，只剩「前」→ 完成
+        frames.Add(Right | BtnA);
+
+        Run(recognizer, frames.ToArray());
+
+        Assert.Equal("46A", Single(recognizer).CommandId);
+    }
+
+    [Fact]
+    public void ChargeRelease_InsufficientHold_CannotBeCompensatedByWindow()
+    {
+        // 只蓄 5 帧（< 阈值），释放窗口再宽也不能补足。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < 5; i++)
+            frames.Add(Left);
+        frames.Add(InputBits.None);
+        frames.Add(InputBits.None);
+        frames.Add(Right | BtnA);
+
+        Run(recognizer, frames.ToArray());
+
+        Assert.Empty(recognizer.BufferedMatches(0));
+    }
+
+    [Fact]
+    public void ChargeRelease_RechargeResetsCounter()
+    {
+        // 蓄满 10 帧（达标）→ 释放 → 只再蓄 3 帧 → 前+A：重新计数，不足则不匹配。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);
+        frames.Add(InputBits.None);
+        for (int i = 0; i < 3; i++)
+            frames.Add(Left);          // 重新蓄力，仅 3 帧
+        frames.Add(Right | BtnA);
+
+        Run(recognizer, frames.ToArray());
+
+        Assert.Empty(recognizer.BufferedMatches(0));
+    }
+
+    [Fact]
+    public void ChargeResult_RepeatedButtonWithoutRecharge_DoesNotRetrigger()
+    {
+        // 成功一次后：松开 A 再按下（未重新蓄力）不得再利用旧蓄力触发。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);
+        frames.Add(Right | BtnA);    // 识别
+        frames.Add(Right);           // 松开 A
+        frames.Add(Right | BtnA);    // 再按 A（无新蓄力）
+
+        Run(recognizer, frames.ToArray());
+
+        Assert.Single(recognizer.BufferedMatches(0));
+    }
+
+    [Fact]
+    public void ChargeResult_AfterIndependentRecharge_MatchesAgain()
+    {
+        // 重新完成独立蓄力后应允许再次识别。注意：第一次结果（帧 10 识别，
+        // ExpiresAtFrame=18）在第二次识别（帧 22）前已按 8 帧缓冲有效期过期出队，
+        // 这是缓冲的设计语义（D41）——因此缓冲中只有新结果，但识别确实发生了。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);
+        frames.Add(Right | BtnA);         // 第一次：帧 ChargeFrames 识别
+        frames.Add(InputBits.None);       // 松开
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);             // 独立重新蓄力
+        frames.Add(Right | BtnA);         // 第二次：帧 2*ChargeFrames+2 识别
+
+        Run(recognizer, frames.ToArray());
+
+        CommandMatch second = Single(recognizer);
+        Assert.Equal("46A", second.CommandId);
+        Assert.Equal(2 * ChargeFrames + 2, second.RecognizedFrame);
+    }
+
+    [Fact]
+    public void ChargeResult_NoSecondTriggerWithinReleaseWindow_FromSameCharge()
+    {
+        // 同一蓄力不得在释放窗口内借第二次按键边沿反复触发：
+        // 识别一次后松开方向与按键，再在窗口内「前+A」，不得再次识别。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);
+        frames.Add(Right | BtnA);         // 帧 ChargeFrames：识别，蓄力被消费
+        frames.Add(InputBits.None);       // 松开方向 + 按键
+        frames.Add(Right | BtnA);         // 帧 ChargeFrames+2（窗口内）：不得再触发
+
+        Run(recognizer, frames.ToArray());
+
+        Assert.Single(recognizer.BufferedMatches(0));
+    }
+
+    [Fact]
+    public void ChargeRelease_P1AndP2_Independent()
+    {
+        // P1 朝右蓄「后」（Left），P2 朝左蓄「后」（Right）；两者都带 2 帧中立后完成。
+        var recognizer = ChargeRecognizer();
+
+        for (int frame = 0; frame < ChargeFrames; frame++)
+        {
+            recognizer.Observe(new FrameInput(frame, Left, Right), Facing.Right, Facing.Left);
+        }
+        for (int i = 0; i < 2; i++)
+        {
+            int frame = ChargeFrames + i;
+            recognizer.Observe(new FrameInput(frame, InputBits.None, InputBits.None), Facing.Right, Facing.Left);
+        }
+        // P1 朝右「前」= Right；P2 朝左「前」= Left。
+        recognizer.Observe(new FrameInput(ChargeFrames + 2, Right | BtnA, Left | BtnA), Facing.Right, Facing.Left);
+
+        Assert.Equal("46A", Single(recognizer, 0).CommandId);
+        Assert.Equal("46A", Single(recognizer, 1).CommandId);
+    }
+
+    [Fact]
+    public void ChargeRelease_SideSwitchUsesPerFrameFacing()
+    {
+        // 蓄力 10 帧朝右按 Left（相对后）；释放后换边，朝左按 Left（相对前）完成。
+        // 换边只影响之后的条目，蓄力保持按当帧朝向解析。
+        var recognizer = ChargeRecognizer();
+
+        for (int frame = 0; frame < ChargeFrames; frame++)
+            recognizer.Observe(new FrameInput(frame, Left, InputBits.None), Facing.Right, Facing.Left);
+
+        // 换边后 Left = Forward，直接完成（无中立帧）。
+        recognizer.Observe(new FrameInput(ChargeFrames, Left | BtnA, InputBits.None), Facing.Left, Facing.Right);
+
+        CommandMatch match = Single(recognizer);
+        Assert.Equal("46A", match.CommandId);
+        Assert.Equal(0, match.SequenceStartFrame);
+        Assert.Equal(ChargeFrames, match.SequenceEndFrame);
+    }
+
+    [Fact]
+    public void ChargeRelease_ButtonToleranceDoesNotExtendReleaseWindow()
+    {
+        // 释放 4 帧后才按「前」：即使按键离得更近也不得匹配（释放窗口先失效）。
+        CommandRecognizer recognizer = ChargeRecognizer();
+
+        var frames = new List<InputBits>();
+        for (int i = 0; i < ChargeFrames; i++)
+            frames.Add(Left);
+        for (int i = 0; i < 4; i++)
+            frames.Add(InputBits.None);
+        frames.Add(Right);              // 前，无按键
+        frames.Add(Right | BtnA);       // 下一帧才按 A
+
+        Run(recognizer, frames.ToArray());
+
+        Assert.Empty(recognizer.BufferedMatches(0));
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // 构造校验 / 内存上界
     // ─────────────────────────────────────────────────────────────
 
@@ -346,21 +649,21 @@ public class ChargeCommandTests
     // 工具
     // ─────────────────────────────────────────────────────────────
 
-    /// <summary>构造只含蓄力指令的识别器（蓄力帧数缩短为 ChargeFrames 便于测试）。</summary>
-    private static CommandRecognizer ChargeRecognizer() => new(new[]
+    /// <summary>构造只含蓄力指令的识别器（默认蓄力 ChargeFrames，便于测试）。</summary>
+    private static CommandRecognizer ChargeRecognizer(int holdFrames = ChargeFrames) => new(new[]
     {
         new CommandDefinition("46A",
             new[] { CommandDirection.Back, CommandDirection.Forward },
             BtnA, maxSequenceFrames: 60, buttonToleranceFrames: 3, priority: 30,
-            bufferLifetimeFrames: 8, chargeHoldFrames: ChargeFrames),
+            bufferLifetimeFrames: 8, chargeHoldFrames: holdFrames),
         new CommandDefinition("28B",
             new[] { CommandDirection.Down, CommandDirection.Up },
             BtnB, maxSequenceFrames: 60, buttonToleranceFrames: 3, priority: 30,
-            bufferLifetimeFrames: 8, chargeHoldFrames: ChargeFrames),
+            bufferLifetimeFrames: 8, chargeHoldFrames: holdFrames),
         new CommandDefinition("46C",
             new[] { CommandDirection.Back, CommandDirection.Forward },
             BtnC, maxSequenceFrames: 60, buttonToleranceFrames: 3, priority: 30,
-            bufferLifetimeFrames: 8, chargeHoldFrames: ChargeFrames),
+            bufferLifetimeFrames: 8, chargeHoldFrames: holdFrames),
     });
 
     private static CommandMatch Single(CommandRecognizer recognizer, int player = 0)

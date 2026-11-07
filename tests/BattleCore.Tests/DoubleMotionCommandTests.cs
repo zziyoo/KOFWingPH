@@ -238,8 +238,71 @@ public class DoubleMotionCommandTests
     }
 
     // ─────────────────────────────────────────────────────────────
+    // 真正的超时边界：方向连续，仅首尾跨度超限（03B-2 最终补修 P2）
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void DoubleQuarterCircle_ExactMaxSpan_Matches()
+    {
+        // 方向进入帧 0,8,16,24,32,40；首尾跨度恰好 40 == MaxSequenceFrames，应成功。
+        CommandRecognizer recognizer = DoubleRecognizer();
+        RunDirectionFrames(
+            recognizer,
+            directionFrames: new[] { 0, 8, 16, 24, 32, 40 },
+            buttonFrame: 42);
+
+        CommandMatch match = Single(recognizer);
+        Assert.Equal("236236A", match.CommandId);
+        Assert.Equal(0, match.SequenceStartFrame);
+        Assert.Equal(40, match.SequenceEndFrame);
+        Assert.Equal(42, match.ButtonFrame);
+    }
+
+    [Fact]
+    public void DoubleQuarterCircle_OneFrameOverMaxSpan_DoesNotMatch()
+    {
+        // 同上但末方向 @41：首尾跨度 41 > 40，必须因超时失败。
+        // 方向序列本身完整连续、按键也在容差内——失败只能来自跨度判断。
+        // 变异验证：移除跨度检查后本用例会失败。
+        CommandRecognizer recognizer = DoubleRecognizer();
+        RunDirectionFrames(
+            recognizer,
+            directionFrames: new[] { 0, 8, 16, 24, 32, 41 },
+            buttonFrame: 43);
+
+        Assert.Empty(recognizer.BufferedMatches(0));
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // 工具
     // ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 按指定的方向进入帧构造逐帧输入，末段一直保持到 <paramref name="buttonFrame"/>，
+    /// 并在该帧叠加 A 键（末方向 + 按键）。
+    /// </summary>
+    private static void RunDirectionFrames(
+        CommandRecognizer recognizer,
+        int[] directionFrames,
+        int buttonFrame)
+    {
+        InputBits[] directions =
+        {
+            Down, Down | Right, Right, Down, Down | Right, Right,
+        };
+
+        var log = new InputBits[buttonFrame + 1];
+        for (int i = 0; i < directionFrames.Length; i++)
+        {
+            int from = directionFrames[i];
+            int to = i + 1 < directionFrames.Length ? directionFrames[i + 1] : buttonFrame + 1;
+            for (int f = from; f < to; f++)
+                log[f] = directions[i];
+        }
+
+        log[buttonFrame] = directions[^1] | BtnA;
+        Run(recognizer, log);
+    }
 
     /// <summary>只含双重指令的识别器（不含单段，便于隔离测试）。</summary>
     private static CommandRecognizer DoubleRecognizer() => new(new[]

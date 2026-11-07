@@ -48,6 +48,12 @@ public static class CommandCatalog
     /// <summary>蓄力指令默认保持帧数（60Hz 下 30 帧 ≈ 0.5 秒）。</summary>
     public const int DefaultChargeHoldFrames = 30;
 
+    /// <summary>
+    /// 蓄力指令默认释放窗口（帧）：离开蓄力方向后，最多容忍这么多帧中立，
+    /// 释放方向须在其后的下一帧前进入（60Hz 下 3 帧 = 50ms，D52）。
+    /// </summary>
+    public const int DefaultChargeReleaseToleranceFrames = 3;
+
     /// <summary>构造默认指令表；每次返回新实例，调用方可自行增删。</summary>
     public static IReadOnlyList<CommandDefinition> CreateDefault() => new[]
     {
@@ -110,7 +116,8 @@ public static class CommandCatalog
 
         // ── 蓄力指令（03B-2）────────────────────────────────────
         // [4]6A：后蓄 DefaultChargeHoldFrames 帧 → 前 + A。
-        // 蓄力只认纯方向（斜方向打断蓄力）。序列跨度上限放宽，容纳蓄力保持时长。
+        // 蓄力只认纯方向（斜方向打断蓄力）。保持时长不受 maxSequenceFrames 约束（D51）；
+        // 释放窗口 DefaultChargeReleaseToleranceFrames 容忍短暂松开（D52）。
         new CommandDefinition(
             ChargeBackForwardLightPunch,
             new[]
@@ -123,7 +130,8 @@ public static class CommandCatalog
             buttonToleranceFrames: 3,
             priority: 30,
             bufferLifetimeFrames: 8,
-            chargeHoldFrames: DefaultChargeHoldFrames),
+            chargeHoldFrames: DefaultChargeHoldFrames,
+            chargeReleaseToleranceFrames: DefaultChargeReleaseToleranceFrames),
 
         // [2]8B：下蓄 → 上 + B。
         new CommandDefinition(
@@ -138,7 +146,8 @@ public static class CommandCatalog
             buttonToleranceFrames: 3,
             priority: 30,
             bufferLifetimeFrames: 8,
-            chargeHoldFrames: DefaultChargeHoldFrames),
+            chargeHoldFrames: DefaultChargeHoldFrames,
+            chargeReleaseToleranceFrames: DefaultChargeReleaseToleranceFrames),
 
         // [4]6C：与 [4]6A 同模板，不同攻击键。
         new CommandDefinition(
@@ -153,7 +162,8 @@ public static class CommandCatalog
             buttonToleranceFrames: 3,
             priority: 30,
             bufferLifetimeFrames: 8,
-            chargeHoldFrames: DefaultChargeHoldFrames),
+            chargeHoldFrames: DefaultChargeHoldFrames,
+            chargeReleaseToleranceFrames: DefaultChargeReleaseToleranceFrames),
 
         // ── 双重方向 / 超必杀指令（03B-2）──────────────────────
         // 236236A：↓↘→↓↘→ + A。优先级高于单段 236A，序列长度也作为次级键。

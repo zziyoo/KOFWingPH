@@ -20,7 +20,8 @@ namespace NewKOF.BattleCore.Commands;
 ///       <see cref="InputBits.None"/> 表示纯方向指令（如 →→）。</description></item>
 /// <item><term><see cref="MaxSequenceFrames"/></term>
 ///       <description>从<b>第一个方向进入帧</b>到<b>最后一个方向进入帧</b>的最大跨度。
-///       超过即视为超时，不再匹配。</description></item>
+///       超过即视为超时，不再匹配。<b>仅约束普通方向指令</b>；蓄力指令的保持时长
+///       不受它约束（否则长蓄力反而失效），其超时由释放窗口与按键容差承担（D51）。</description></item>
 /// <item><term><see cref="ButtonToleranceFrames"/></term>
 ///       <description>按键边沿与「最后一个方向进入帧」之间允许的帧差（提前或延后均可）。
 ///       0 表示必须同帧。</description></item>
@@ -47,8 +48,16 @@ public sealed class CommandDefinition
     /// <param name="chargeHoldFrames">
     /// 蓄力保持帧数：方向序列<b>第一个元素</b>必须被连续保持的最少逻辑帧数。
     /// 0 表示普通指令（无蓄力）。例如 [4]6A（后蓄前）设 &gt; 0 表示「后」需保持该帧数。
+    /// 蓄力指令的保持时长<b>不受</b> <see cref="maxSequenceFrames"/> 约束（超时语义分离，见 D51）。
     /// </param>
-    /// <exception cref="ArgumentException">ID 为空 / 序列为空 / 含非攻击键位。</exception>
+    /// <param name="chargeReleaseToleranceFrames">
+    /// 蓄力释放窗口（逻辑帧）：离开蓄力方向后，序列<b>最后一个方向</b>允许进入的最晚帧差。
+    /// 期间只容忍<b>中立</b>与序列尾部方向；出现无关方向立即失效（D52）。
+    /// 仅 <paramref name="chargeHoldFrames"/> &gt; 0 时有意义，默认
+    /// <see cref="CommandCatalog.DefaultChargeReleaseToleranceFrames"/>。
+    /// </param>
+    /// <exception cref="ArgumentException">ID 为空 / 序列为空 / 含非攻击键位 /
+    /// 蓄力指令序列不足 2 个元素。</exception>
     /// <exception cref="ArgumentOutOfRangeException">帧数参数为负。</exception>
     public CommandDefinition(
         string commandId,
@@ -58,7 +67,8 @@ public sealed class CommandDefinition
         int buttonToleranceFrames = 3,
         int priority = 0,
         int bufferLifetimeFrames = 8,
-        int chargeHoldFrames = 0)
+        int chargeHoldFrames = 0,
+        int chargeReleaseToleranceFrames = CommandCatalog.DefaultChargeReleaseToleranceFrames)
     {
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("指令 ID 不能为空。", nameof(commandId));
@@ -99,6 +109,16 @@ public sealed class CommandDefinition
         if (chargeHoldFrames < 0)
             throw new ArgumentOutOfRangeException(nameof(chargeHoldFrames), chargeHoldFrames,
                 "蓄力保持帧数不能为负。");
+        if (chargeReleaseToleranceFrames < 0)
+            throw new ArgumentOutOfRangeException(nameof(chargeReleaseToleranceFrames), chargeReleaseToleranceFrames,
+                "蓄力释放窗口不能为负。");
+
+        // 蓄力语义 = 「保持蓄力方向 → 释放 → 释放方向进入」；序列只有 1 个元素时
+        // 不存在「释放方向」，蓄力匹配无定义。直接在构造期拒绝（D52）。
+        if (chargeHoldFrames > 0 && sequence.Length < 2)
+            throw new ArgumentException(
+                "蓄力指令的方向序列至少需要 2 个元素（蓄力方向 + 释放方向）。",
+                nameof(directionSequence));
 
         CommandId = commandId;
         DirectionSequence = Array.AsReadOnly(sequence);
@@ -108,6 +128,7 @@ public sealed class CommandDefinition
         Priority = priority;
         BufferLifetimeFrames = bufferLifetimeFrames;
         ChargeHoldFrames = chargeHoldFrames;
+        ChargeReleaseToleranceFrames = chargeReleaseToleranceFrames;
     }
 
     /// <summary>唯一标识，如 <c>236A</c>。</summary>
@@ -137,4 +158,11 @@ public sealed class CommandDefinition
     /// 蓄力只认<b>纯方向</b>（斜方向不计入），见 <see cref="CommandRecognizer"/> 的匹配规则。
     /// </summary>
     public int ChargeHoldFrames { get; }
+
+    /// <summary>
+    /// 蓄力释放窗口（逻辑帧）：离开蓄力方向后（含中立帧），序列<b>最后一个方向</b>
+    /// 进入帧与「释放开始帧」的最大帧差。窗口内只容忍中立与序列尾部方向，
+    /// 出现无关方向立即失效；蓄力不足 <see cref="ChargeHoldFrames"/> 不能靠窗口补足（D52）。
+    /// </summary>
+    public int ChargeReleaseToleranceFrames { get; }
 }
