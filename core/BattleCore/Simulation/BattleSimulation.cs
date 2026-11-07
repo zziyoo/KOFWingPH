@@ -101,6 +101,8 @@ public sealed class BattleSimulation
         public FixedPoint KnockbackFriction;
         public int LandingKnockdownFrames;
         public int LandingWakeupFrames;
+        public int MoveElapsedFrames;
+        public int HitstopRemainingFrames;
 
         /// <summary>是否处于地面可转向状态（站立/蹲下；动作与空中朝向冻结，D72）。</summary>
         public readonly bool CanTurn =>
@@ -139,11 +141,49 @@ public sealed class BattleSimulation
 
         // ── 第 1-2 阶段：逐角色「识别 → 状态机 → 运动」（双方独立，互不读取对方）──
         var candidates = new FighterCandidate[state.Fighters.Count];
+        var frozenThisFrame = new bool[candidates.Length];
         for (int i = 0; i < candidates.Length; i++)
         {
             FighterState fighter = state.Fighters[i];
             FighterDefinition definition = _roster.Fighter(i);
             InputBits bits = input.ForPlayer(i);
+
+            // ── 命中停顿（08A/D96）：本帧<b>整体冻结</b>——动作阶段、硬直计时、击退衰减、
+            //    空中积分、取消窗口全部停摆；只有输入识别照常推进（缓冲不丢失、不消费）。
+            //    N 帧停顿 = 冻结后续 N 个逻辑帧，第 N+1 帧恢复（计数器逐帧 −1）。
+            if (fighter.HitstopRemainingFrames > 0)
+            {
+                RecognitionState frozenRecognition = fighter.RecognitionState.Advance(
+                    bits, fighter.Facing, state.Frame, i, definition.Commands);
+
+                candidates[i] = new FighterCandidate
+                {
+                    LogicState = fighter.LogicState,
+                    MoveId = fighter.MoveId,
+                    PhaseRemainingFrames = fighter.PhaseRemainingFrames,
+                    Recognition = frozenRecognition,
+                    PositionX = fighter.PositionX,
+                    PositionY = fighter.PositionY,
+                    VelocityX = fighter.VelocityX,
+                    VelocityY = fighter.VelocityY,
+                    JumpKind = fighter.JumpKind,
+                    Facing = fighter.Facing,
+                    UpHeld = fighter.UpHeldLastFrame,
+                    // 防御资格仍按本帧输入解析（停顿不额外授予/剥夺防御）。
+                    BackHeld = DirectionResolver.Resolve(bits, fighter.Facing).Back,
+                    Health = fighter.Health,
+                    StunRemainingFrames = fighter.StunRemainingFrames,
+                    MoveStartedFrame = fighter.MoveStartedFrame,
+                    MoveElapsedFrames = fighter.MoveElapsedFrames,
+                    MoveStartedThisFrame = false,
+                    KnockbackFriction = fighter.KnockbackFriction,
+                    LandingKnockdownFrames = fighter.LandingKnockdownFrames,
+                    LandingWakeupFrames = fighter.LandingWakeupFrames,
+                    HitstopRemainingFrames = fighter.HitstopRemainingFrames - 1,
+                };
+                frozenThisFrame[i] = true;
+                continue;
+            }
 
             // 1) 指令识别（D55）：纯函数推进，朝向取「帧开始状态」（D46）。
             RecognitionState recognition = fighter.RecognitionState.Advance(
@@ -151,6 +191,11 @@ public sealed class BattleSimulation
 
             // 2) 动作状态机 + 起跳 + 指令消费（D58/D60/D67/D68）；硬直倒计时（D78）。
             RelativeInput resolved = DirectionResolver.Resolve(bits, fighter.Facing);
+
+            // 动作有效经过帧数（D96）：帧开始时已在招式中 → 上一帧值 + 1；
+            // 本帧发动/取消时由状态机返回 0（新实例）。
+            int moveElapsed = fighter.IsInMove ? fighter.MoveElapsedFrames + 1 : 0;
+
             FighterActionTick tick = FighterStateMachine.Tick(
                 fighter.LogicState,
                 fighter.MoveId,
@@ -164,7 +209,8 @@ public sealed class BattleSimulation
                 fighter.MoveStartedFrame,
                 fighter.HitConfirmFrame,
                 fighter.BlockConfirmFrame,
-                fighter.LandingWakeupFrames);
+                fighter.LandingWakeupFrames,
+                moveElapsed);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -296,6 +342,8 @@ public sealed class BattleSimulation
                 KnockbackFriction = knockbackFriction,
                 LandingKnockdownFrames = landingKnockdown,
                 LandingWakeupFrames = landingWakeup,
+                MoveElapsedFrames = tick.MoveElapsedFrames,
+                HitstopRemainingFrames = 0, // 命中停顿只由结算写入（本帧未冻结）。
             };
         }
 
@@ -336,6 +384,8 @@ public sealed class BattleSimulation
                 KnockbackFriction = candidates[i].KnockbackFriction,
                 LandingKnockdownFrames = candidates[i].LandingKnockdownFrames,
                 LandingWakeupFrames = candidates[i].LandingWakeupFrames,
+                MoveElapsedFrames = candidates[i].MoveElapsedFrames,
+                HitstopRemainingFrames = candidates[i].HitstopRemainingFrames,
             };
 
             // 命中/防御确认属于「当前攻击实例」：换招、被中断或回到待机后必须清空（D91）。
@@ -352,7 +402,7 @@ public sealed class BattleSimulation
         // AttackActive 必须取<b>结算前</b>视图（下方结算会原地改写 nextFighters）：
         // 本帧确实生效过的攻击不能因为同帧被打断而丢事件——连<b>招式身份</b>一起取，
         // 因为结算会把被中断者的 MoveId 清空。
-        AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster);
+        AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster, frozenThisFrame);
 
         var outcomes = new CombatSettlement?[2];
         ApplyCombatSettlement(state.Frame, nextFighters, contacts,
@@ -468,6 +518,7 @@ public sealed class BattleSimulation
                     // 被击者自身的动作被打断：攻击实例身份一并清除（防御者通常无动作，
                     // 但同帧互中时防御不成立，此处理覆盖所有路径）。
                     MoveStartedFrame = -1,
+                    MoveElapsedFrames = 0, // 招式中断：动作时间随实例一并清除（D96）
                     // 被击者的攻击实例随之中断：确认帧属于旧实例，必须一并清空（D91 不变式）。
                     HitConfirmFrame = -1,
                     BlockConfirmFrame = -1,
@@ -504,6 +555,7 @@ public sealed class BattleSimulation
                     LandingWakeupFrames = settled.WakeupFrames,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     MoveStartedFrame = -1,
+                    MoveElapsedFrames = 0, // 招式中断：动作时间随实例一并清除（D96）
                     HitConfirmFrame = -1,
                     BlockConfirmFrame = -1,
                     ComboRecord = comboAfter,
@@ -527,6 +579,7 @@ public sealed class BattleSimulation
                     LandingWakeupFrames = 0,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     MoveStartedFrame = -1,
+                    MoveElapsedFrames = 0, // 招式中断：动作时间随实例一并清除（D96）
                     HitConfirmFrame = -1,
                     BlockConfirmFrame = -1,
                     ComboRecord = comboAfter,
@@ -547,12 +600,34 @@ public sealed class BattleSimulation
                     KnockbackFriction = settled.KnockbackFriction,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     MoveStartedFrame = -1, // 招式中断（D78）：实例身份随 MoveId 一并清除。
+                    MoveElapsedFrames = 0, // 动作时间随实例一并清除（D96）。
                     // 确认帧属于被中断的旧实例，必须一并清空（D91 不变式）。
                     HitConfirmFrame = -1,
                     BlockConfirmFrame = -1,
                     ComboRecord = comboAfter,
                 };
             }
+        }
+
+        // 命中停顿（08A/D96）：攻击方与被击方<b>同值</b>（配置在攻击数据上），
+        // 同帧多个来源取最大值——不因旧攻击框残留反复刷新（D81 去重已保证每实例一次）。
+        // 写入发生在全部状态应用之后，避免 with 覆盖。
+        for (int defender = 0; defender < fighters.Length; defender++)
+        {
+            if (outcomes[defender] is not CombatSettlement settled || settled.HitstopFrames <= 0)
+                continue;
+
+            int attacker = 1 - defender;
+            fighters[attacker] = fighters[attacker] with
+            {
+                HitstopRemainingFrames = Math.Max(
+                    fighters[attacker].HitstopRemainingFrames, settled.HitstopFrames),
+            };
+            fighters[defender] = fighters[defender] with
+            {
+                HitstopRemainingFrames = Math.Max(
+                    fighters[defender].HitstopRemainingFrames, settled.HitstopFrames),
+            };
         }
     }
 
@@ -678,7 +753,8 @@ public sealed class BattleSimulation
                 AirHit: false, Launch: false,
                 KnockbackX: knockbackX, KnockbackFriction: friction,
                 LaunchVelocityX: FixedPoint.Zero, LaunchVelocityY: FixedPoint.Zero,
-                KnockdownFrames: 0, WakeupFrames: 0);
+                KnockdownFrames: 0, WakeupFrames: 0,
+                HitstopFrames: attack.HitstopFrames);
         }
 
         bool launches = attack.Launches;
@@ -692,7 +768,8 @@ public sealed class BattleSimulation
                 : FixedPoint.Zero,
             LaunchVelocityY: launches ? attack.LaunchVelocityY : FixedPoint.Zero,
             KnockdownFrames: launches ? attack.KnockdownFrames : 0,
-            WakeupFrames: launches ? attack.WakeupFrames : 0);
+            WakeupFrames: launches ? attack.WakeupFrames : 0,
+            HitstopFrames: attack.HitstopFrames);
     }
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
@@ -724,12 +801,17 @@ public sealed class BattleSimulation
     /// （<c>elapsed == min(FirstActiveFrame)</c>），且下一次发动（新 MoveStarted）会重新计数。
     /// 一个攻击实例至多产生一条 AttackActive——多攻击定义、错开窗口也只发一次。</para>
     /// </summary>
-    private static AttackActiveSnapshot[] CollectAttackActive(FighterState[] fighters, FightRoster roster)
+    private static AttackActiveSnapshot[] CollectAttackActive(
+        FighterState[] fighters, FightRoster roster, bool[] frozenThisFrame)
     {
         var snapshots = new AttackActiveSnapshot[fighters.Length];
 
         for (int i = 0; i < fighters.Length; i++)
         {
+            // 冻结帧不推进动作时间，因此「首个生效帧」会重复成立——必须跳过（D96）。
+            if (frozenThisFrame[i])
+                continue;
+
             FighterState fighter = fighters[i];
             if (fighter.LogicState != FighterLogicState.Active || fighter.MoveId is null)
                 continue;
@@ -879,7 +961,8 @@ public sealed class BattleSimulation
         FixedPoint LaunchVelocityX,
         FixedPoint LaunchVelocityY,
         int KnockdownFrames,
-        int WakeupFrames);
+        int WakeupFrames,
+        int HitstopFrames);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。

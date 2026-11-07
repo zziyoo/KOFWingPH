@@ -39,6 +39,8 @@ public sealed class AttackDefinition
     /// <param name="launchVelocityY">击飞垂直初速（≥ 0；&gt; 0 即「这一击会击飞」）。</param>
     /// <param name="knockdownFrames">落地后的倒地帧数（击飞时 ≥ 1）。</param>
     /// <param name="wakeupFrames">倒地后的起身帧数（0 = 直接站起）。</param>
+    /// <param name="hitstopFrames">命中停顿帧数（阶段 08A，D96）：命中或成功防御后，
+    /// 攻击方与被击方各冻结该数量的<b>后续</b>逻辑帧；0 = 不产生停顿。</param>
     /// <exception cref="ArgumentOutOfRangeException">半宽/半高 ≤ 0、帧号 &lt; 0、
     /// 伤害 &lt; 0 或硬直帧数 &lt; 1，或击退/击飞参数越界。</exception>
     /// <exception cref="ArgumentException">lastActiveFrame &lt; firstActiveFrame，
@@ -60,7 +62,8 @@ public sealed class AttackDefinition
         FixedPoint launchVelocityX = default,
         FixedPoint launchVelocityY = default,
         int knockdownFrames = 0,
-        int wakeupFrames = 0)
+        int wakeupFrames = 0,
+        int hitstopFrames = 0)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -107,6 +110,12 @@ public sealed class AttackDefinition
         if (launchVelocityY > FixedPoint.Zero && knockdownFrames < 1)
             throw new ArgumentException(
                 "击飞必须配置倒地帧数（≥ 1）：落地后不允许直接恢复站立。", nameof(knockdownFrames));
+        if (hitstopFrames < 0)
+            throw new ArgumentOutOfRangeException(nameof(hitstopFrames), hitstopFrames,
+                "命中停顿帧数不能为负。");
+        if (hitstopFrames > MaxHitstopFrames)
+            throw new ArgumentOutOfRangeException(nameof(hitstopFrames), hitstopFrames,
+                $"命中停顿帧数超过上限 {MaxHitstopFrames}（防止配置错误导致长时间冻结）。");
 
         OffsetForward = offsetForward;
         OffsetUp = offsetUp;
@@ -125,6 +134,7 @@ public sealed class AttackDefinition
         LaunchVelocityY = launchVelocityY;
         KnockdownFrames = knockdownFrames;
         WakeupFrames = wakeupFrames;
+        HitstopFrames = hitstopFrames;
     }
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
@@ -179,6 +189,12 @@ public sealed class AttackDefinition
     /// <summary>倒地后的起身帧数（0 = 直接从倒地回到待机）。</summary>
     public int WakeupFrames { get; }
 
+    /// <summary>
+    /// 命中停顿帧数（阶段 08A，D96）：命中或成功防御后，攻击方与被击方各冻结
+    /// 该数量的<b>后续</b>逻辑帧（命中当帧照常完成结算）。0 = 不产生停顿。
+    /// </summary>
+    public int HitstopFrames { get; }
+
     /// <summary>这一击是否会击飞（垂直初速 &gt; 0）。</summary>
     public bool Launches => LaunchVelocityY > FixedPoint.Zero;
 
@@ -187,6 +203,9 @@ public sealed class AttackDefinition
 
     /// <summary>单帧击飞初速上限（健全性边界）。</summary>
     public const int MaxLaunchUnits = 64;
+
+    /// <summary>命中停顿帧数上限（健全性边界：0.5 秒）。</summary>
+    public const int MaxHitstopFrames = 30;
 
     private static void ValidateMagnitude(FixedPoint value, string paramName, int maxUnits)
     {

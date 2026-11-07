@@ -1,8 +1,8 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 07 最终专项补修：空中受击推挤资格 / 防御击退摩擦不变式，
-> D94/D95——阶段 07 正式结项，646 项测试）
+> 最后更新：2026-11-08（阶段 08A：命中停顿 Hitstop 与动作有效时间，D96——阶段 08 进行中，
+> 663 项测试）
 
 ---
 
@@ -62,7 +62,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 646，已跳过: 0，总计: 646`
+期望：`失败: 0，通过: 663，已跳过: 0，总计: 663`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -162,6 +162,23 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 08A（2026-11-08）命中停顿 Hitstop 与动作有效时间（D96）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Combat/AttackDefinition.cs` | 新增 `HitstopFrames`（0..`MaxHitstopFrames`=30，构造期校验） |
+| `core/BattleCore/State/FighterState.cs` | 新增 `MoveElapsedFrames`（动作有效经过帧数）与 `HitstopRemainingFrames`，含不变式 |
+| `core/BattleCore/Combat/FighterStateMachine.cs` | `Tick`/`FighterActionTick` 携带并返回动作经过帧数；取消窗口改用它；`IsInCancelWindow` 去掉 frame 参数 |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | 冻结分支（只推进识别）；`frozenThisFrame` 让 `AttackActive` 快照跳过冻结帧；结算写入双方停顿（取最大值）；中断/换招清空动作时间 |
+| `core/BattleCore/Combat/DemoRoster.cs` | 演示 5A 配置 `hitstopFrames: 4` |
+| `core/BattleCore/BattleCoreInfo.cs` / `State/BattleState.cs` | CoreVersion/StateVersion 9 → 10 |
+| `scripts/BattleScene.cs` | HUD 显示 `HITSTOP(n)`；取消行改用 `MoveElapsedFrames` |
+| `tests/BattleCore.Tests/HitstopTests.cs` | **新增 17 项** |
+| `tests/BattleCore.Tests/HitDetectionTests.cs`、`CombatEventTests.cs` | 4 条时序断言按新规则更新（详见 PROGRESS 08A 表格） |
+
+**验收**：663/663；四构建 0/0；图形 `shots/p08a_hitstop_hit.png` / `p08a_hitstop_block.png`。
+**变异验证**：把取消窗口改回 `frame − moveStartedFrame` → `CancelWindow_SurvivesHitstop` 失败（已恢复）。
 
 ### 阶段 07 最终专项补修（2026-11-07）空中受击推挤 / 防御击退摩擦（D94/D95）
 
@@ -751,8 +768,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K50 | **空中被击不再跳过（D93），倒地计划由配置保证** | 「击飞必倒地」靠 `AttackDefinition` 构造期强制 `KnockdownFrames ≥ 1`，而不是状态不变式；非击飞攻击打中空中目标落地直接站起 | 改这条规则会影响 `AirborneDefender_*` 与 `KnockdownAndWakeup_*` 两组测试，先读注释再动 |
 | K51 | **「是不是空中状态」只有 `IsAirborneLike()` 一个答案（D94）** | 07C 新增 `AirHitstun` 时只改了结算，推挤的两处仍写死 `Airborne`，导致飞行中被地面求解器推动、越身被拉回、落地无法建新序 | 新增任何空中/地面状态时**只改这一个函数**；绝不能改回 `PositionY > 0`（击飞当帧 Y=0，D93）。`bothGroundAtFrameStart` 与 `ApplySeparation` 必须同时改，只改一处仍会错 |
 | K52 | **击退摩擦是「地面击退通用」配置（D95）** | 只校验 `GroundKnockback` 会放过「仅防御击退 + 零摩擦」，构造期合法但真实防御结算时整帧失败 | 任何新增「会写 VelocityX 的配置」都要同步加进 `AttackDefinition` 的摩擦不变式；**不要**靠放宽 `FighterState.Validate` 来「修」这类问题 |
+| K53 | **冻结角色必须整条流水线一起跳过（D96）** | 只冻动作不冻输入会让缓冲错乱；只冻动作不跳 `AttackActive` 快照会让首个生效帧重复发事件 | 冻结分支只做「推进识别 + 复制其余字段 + 计数 −1」，任何新的逐帧逻辑都要先判断该角色本帧是否冻结 |
+| K54 | **取消窗口/UI 的「第几帧」一律用 `MoveElapsedFrames`** | 用 `Frame − MoveStartedFrame` 会在停顿期间继续走，窗口提前过期（有变异测试钉住） | 新增任何「按动作帧计算」的规则（如未来的取消链、连段递减）都从 `MoveElapsedFrames` 取时间 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 07 最终补修验收时 646/646 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 08A 验收时 663/663 测试通过，可正常启动运行。
 
 ---
 
@@ -818,6 +837,18 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           core/BattleCore/BattleCoreInfo.cs
           scripts/BattleScene.cs  scenes/Battle.tscn
           tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **本轮阶段 08A：`feat(combat): add deterministic hitstop`**
+    （文档与代码同一提交，SHA 由 `git rev-parse HEAD` 读取，不自引用）。提交内容：
+    ```
+    新增: tests/BattleCore.Tests/HitstopTests.cs（含 .uid）
+    修改: core/BattleCore/Combat/{AttackDefinition,FighterStateMachine,DemoRoster}.cs
+          core/BattleCore/State/{FighterState,BattleState}.cs
+          core/BattleCore/Simulation/BattleSimulation.cs
+          core/BattleCore/BattleCoreInfo.cs
+          scripts/BattleScene.cs
+          tests/BattleCore.Tests/{HitDetectionTests,CombatEventTests}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
   - **本轮阶段 07 最终补修：`fix(combat): correct air hitstun push and block knockback validation`**
@@ -937,7 +968,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
 2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D88 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、646 项测试、阶段 08 安全入口
+3. `docs/PROGRESS.md` — 已完成/未完成边界、663 项测试、阶段 08 进度
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Combat/HitDetection.cs` — 三框几何 + **原始攻击序号**（K38）
@@ -992,7 +1023,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 07 已结项**（07A D89 / 07B D90-D91 / 07C D92-D93 / 最终补修 D94-D95），646 项测试。
+4e. **阶段 08 进行中**：08A（Hitstop，D96）已完成并推送；08B（投技）、08C（相杀）、08D（飞行道具）随后推进。
+   阶段 07 已结项（07A D89 / 07B D90-D91 / 07C D92-D93 / 最终补修 D94-D95）。
    阶段 08 安全入口（按依赖顺序，详见 `PROGRESS.md` 阶段 07 总结）：① 比赛规则（多回合/计时/选人，
    建在 `RoundState` 之上）；② Hitstop；③ 投技；④ 飞行道具；⑤ 招式数据外置；⑥ 联机回滚。
    **不要**在没有新决策的情况下改动 D92/D93 的状态簇或 D89 的终局语义。
@@ -1028,7 +1060,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 646」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 663」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -1091,6 +1123,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
       但 D70 边界照旧；落地帧按候选顺序建立新地面顺序，此后地面帧防穿越
 - [ ] 击退摩擦（D95）：`GroundKnockback` 或 `BlockKnockback` 任一 > 0 时摩擦必须 > 0（构造期拒绝）；
       不放宽 `FighterState.Validate`
+- [ ] 命中停顿（D96）：命中/防御当帧结算，后续 N 帧冻结（动作/硬直/击退/空中积分/取消窗口），
+      第 N+1 帧恢复；双方同值、同帧多来源取最大；冻结帧只推进输入识别；
+      `AttackActive` 快照跳过冻结帧；取消窗口用 `MoveElapsedFrames`
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向

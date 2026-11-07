@@ -257,8 +257,8 @@ public partial class BattleScene : Node2D
                 $"P2 State: {DescribeState(p2)}\n" +
                 $"P2 Move: {DescribeMove(p2)}\n" +
                 $"Combo: P1 {p1.Combo} | P2 {p2.Combo}\n" +
-                $"P1 Cancel: {DescribeCancel(p1, 0, state.Frame)}\n" +
-                $"P2 Cancel: {DescribeCancel(p2, 1, state.Frame)}\n" +
+                $"P1 Cancel: {DescribeCancel(p1, 0)}\n" +
+                $"P2 Cancel: {DescribeCancel(p2, 1)}\n" +
                 $"Round: {DescribeRound(state.Round)}\n" +
                 $"Event: {DescribeLastEvent(_lastEvents)}";
         }
@@ -287,13 +287,14 @@ public partial class BattleScene : Node2D
     /// 取消相关调试文本（只读）：当前招式 / 经过帧数 / 是否处于窗口 / 命中与防御确认帧。
     /// 窗口判定走内核 <see cref="FighterStateMachine.IsInCancelWindow"/>，表现层不复刻规则。
     /// </summary>
-    private string DescribeCancel(FighterState fighter, int player, int frame)
+    private string DescribeCancel(FighterState fighter, int player)
     {
         if (!fighter.IsInMove || fighter.MoveId is null || fighter.MoveStartedFrame < 0)
             return "-";
 
-        int elapsed = frame - fighter.MoveStartedFrame;
-        bool window = FighterStateMachine.IsInCancelWindow(fighter, _roster.Fighter(player), frame);
+        // 时间基准 = 动作有效经过帧数（D96）：Hitstop 冻结帧不推进它。
+        int elapsed = fighter.MoveElapsedFrames;
+        bool window = FighterStateMachine.IsInCancelWindow(fighter, _roster.Fighter(player));
         string hit = fighter.HitConfirmFrame >= 0 ? $"hit@{fighter.HitConfirmFrame}" : "hit@-";
         string block = fighter.BlockConfirmFrame >= 0 ? $" blk@{fighter.BlockConfirmFrame}" : string.Empty;
 
@@ -315,12 +316,18 @@ public partial class BattleScene : Node2D
         return $"{last.Type} {actors}{move}{amount} (id={last.EventId})";
     }
 
-    /// <summary>状态行：带倒计时的状态附加剩余帧数（06B 硬直 / 07C 倒地·起身）。</summary>
-    private static string DescribeState(FighterState fighter) =>
-        fighter.LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun
+    /// <summary>状态行：带倒计时的状态附加剩余帧数（06B 硬直 / 07C 倒地·起身 / 08A 停顿）。</summary>
+    private static string DescribeState(FighterState fighter)
+    {
+        string state = fighter.LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun
             or FighterLogicState.Knockdown or FighterLogicState.Wakeup
             ? $"{fighter.LogicState}({fighter.StunRemainingFrames})"
             : fighter.LogicState.ToString();
+
+        return fighter.HitstopRemainingFrames > 0
+            ? $"{state} HITSTOP({fighter.HitstopRemainingFrames})"
+            : state;
+    }
 
     /// <summary>把权威定点坐标渲染成 HUD 文本（世界坐标，Y 向上，地面为 0；显示用浮点）。</summary>
     private static string DescribePosition(FighterState fighter) =>

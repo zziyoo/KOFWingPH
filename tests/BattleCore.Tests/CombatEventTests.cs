@@ -38,7 +38,9 @@ public class CombatEventTests
     [Fact]
     public void MultiFrameActive_HitsOnlyOnce()
     {
-        // 5A Active 2 帧：帧 3 命中（970）；帧 4 接触仍在但同实例已结算 → 不重复扣血。
+        // 5A Active 2 帧 + 命中停顿 4 帧（08A/D96）：
+        // 帧 3 命中（970）；帧 4–7 冻结（硬直不消耗）；帧 8 第二 Active 帧——
+        // 接触仍在但同实例已结算 → 不重复扣血，硬直正常倒计时。
         var sim = NewSim();
         BattleState state = DefaultPair();
 
@@ -48,18 +50,28 @@ public class CombatEventTests
 
         Assert.Equal(970, P2(frame3).Health);
         Assert.Equal(FighterLogicState.Hitstun, P2(frame3).LogicState);
+        Assert.Equal(12, P2(frame3).StunRemainingFrames);
+        Assert.Equal(4, P2(frame3).HitstopRemainingFrames);
 
-        // 帧 4：第二 Active 帧——接触仍会发生，但去重后不再结算。
-        BattleState frame4 = sim.Step(frame3, new FrameInput(4, InputBits.None, InputBits.None)).State;
-        Assert.Equal(970, P2(frame4).Health); // 不重复扣血
-        Assert.Equal(FighterLogicState.Hitstun, P2(frame4).LogicState);
-        Assert.Equal(11, P2(frame4).StunRemainingFrames); // 硬直正常倒计时（未重置）
+        BattleState frozen = frame3;
+        for (int f = 4; f <= 7; f++)
+        {
+            frozen = sim.Step(frozen, new FrameInput(f, InputBits.None, InputBits.None)).State;
+            Assert.Equal(970, P2(frozen).Health);
+            Assert.Equal(12, P2(frozen).StunRemainingFrames); // 冻结期间硬直不消耗
+        }
+
+        BattleState frame8 = sim.Step(frozen, new FrameInput(8, InputBits.None, InputBits.None)).State;
+        Assert.Equal(970, P2(frame8).Health); // 不重复扣血
+        Assert.Equal(FighterLogicState.Hitstun, P2(frame8).LogicState);
+        Assert.Equal(11, P2(frame8).StunRemainingFrames); // 硬直正常倒计时（未重置）
     }
 
     [Fact]
     public void BlockedAttack_AlsoConsumed_NoDoubleGuardSettlement()
     {
         // 被防御亦视为已结算（D81）：第二 Active 帧不再重复防御结算（Blockstun 不重置）。
+        // 防御同样触发 4 帧命中停顿（08A/D96）→ 第二 Active 帧落在帧 8。
         var sim = NewSim();
         BattleState state = DefaultPair();
 
@@ -70,10 +82,18 @@ public class CombatEventTests
         Assert.Equal(1000, P2(frame3).Health);
         Assert.Equal(FighterLogicState.Blockstun, P2(frame3).LogicState);
         Assert.Equal(8, P2(frame3).StunRemainingFrames);
+        Assert.Equal(4, P2(frame3).HitstopRemainingFrames);
 
-        BattleState frame4 = sim.Step(frame3, new FrameInput(4, InputBits.None, InputBits.Right)).State;
-        Assert.Equal(1000, P2(frame4).Health);
-        Assert.Equal(7, P2(frame4).StunRemainingFrames); // 正常倒计时（未重置）
+        BattleState frozen = frame3;
+        for (int f = 4; f <= 7; f++)
+        {
+            frozen = sim.Step(frozen, new FrameInput(f, InputBits.None, InputBits.Right)).State;
+            Assert.Equal(8, P2(frozen).StunRemainingFrames); // 冻结期间 Blockstun 不消耗
+        }
+
+        BattleState frame8 = sim.Step(frozen, new FrameInput(8, InputBits.None, InputBits.Right)).State;
+        Assert.Equal(1000, P2(frame8).Health);
+        Assert.Equal(7, P2(frame8).StunRemainingFrames); // 正常倒计时（未重置）
     }
 
     [Fact]
@@ -83,16 +103,17 @@ public class CombatEventTests
         var sim = NewSim();
         BattleState state = DefaultPair();
 
-        // 第一次 5A：帧 0 发动、帧 3 命中（970）、帧 5–10 Recovery、帧 11 回站立。
-        for (int f = 0; f <= 11; f++)
+        // 第一次 5A：帧 0 发动、帧 3 命中（970）、帧 4–7 命中停顿、帧 8 第二 Active 帧、
+        // 帧 9–14 Recovery、帧 15 回站立（命中停顿把旧时间线整体推后 4 帧，08A/D96）。
+        for (int f = 0; f <= 15; f++)
             state = sim.Step(state, new FrameInput(f, f == 0 ? InputBits.LightPunch : InputBits.None, InputBits.None)).State;
 
         Assert.Equal(FighterLogicState.Standing, P1(state).LogicState);
         Assert.Equal(970, P2(state).Health);
 
-        // 第二次 5A（新实例，发动帧 12）：帧 15 命中（940）。
-        for (int f = 12; f <= 15; f++)
-            state = sim.Step(state, new FrameInput(f, f == 12 ? InputBits.LightPunch : InputBits.None, InputBits.None)).State;
+        // 第二次 5A（新实例，发动帧 16）：帧 19 命中（940）。
+        for (int f = 16; f <= 19; f++)
+            state = sim.Step(state, new FrameInput(f, f == 16 ? InputBits.LightPunch : InputBits.None, InputBits.None)).State;
 
         Assert.Equal(940, P2(state).Health);
         Assert.Equal(FighterLogicState.Hitstun, P2(state).LogicState);

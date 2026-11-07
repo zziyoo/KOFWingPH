@@ -23,7 +23,8 @@ public readonly record struct FighterActionTick(
     CommandMatch? ConsumedMatch,
     JumpLaunch? Launch = null,
     int StunRemainingFrames = 0,
-    int MoveStartedFrame = -1);
+    int MoveStartedFrame = -1,
+    int MoveElapsedFrames = 0);
 
 /// <summary>
 /// 角色<b>动作状态机</b>（阶段 04/05B）：集中、显式、纯函数的状态转换。
@@ -79,6 +80,9 @@ public static class FighterStateMachine
     /// <param name="hitConfirmFrame">本攻击实例最近一次有效命中的帧（阶段 07B，D91；-1 = 尚未命中）。</param>
     /// <param name="blockConfirmFrame">本攻击实例最近一次被防御的帧（阶段 07B，D91；-1 = 尚未被防御）。</param>
     /// <param name="landingWakeupFrames">倒地结束后要进入的起身帧数（阶段 07C，D93；0 = 直接站起）。</param>
+    /// <param name="moveElapsedFrames">当前攻击实例的<b>动作有效经过帧数</b>（阶段 08A，D96）：
+    /// 由调用方按「上一帧值 + 1」给出（发动/取消当帧为 0）。取消窗口用它而不是
+    /// <c>frame − moveStartedFrame</c>，这样 Hitstop 不会让窗口提前过期。</param>
     public static FighterActionTick Tick(
         FighterLogicState state,
         string? moveId,
@@ -92,7 +96,8 @@ public static class FighterStateMachine
         int moveStartedFrame = -1,
         int hitConfirmFrame = -1,
         int blockConfirmFrame = -1,
-        int landingWakeupFrames = 0)
+        int landingWakeupFrames = 0,
+        int moveElapsedFrames = 0)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -118,27 +123,29 @@ public static class FighterStateMachine
 
             // 取消判定（阶段 07B，D91）：必须在<b>阶段推进之前</b>用帧开始状态判定——
             // 否则「Recovery 首帧」会被推进成「剩余帧减一」，窗口语义随实现漂移。
+            // 取消窗口用<b>动作有效经过帧数</b>（D96）：Hitstop 冻结帧不推进它，
+            // 因此停顿期间窗口不会悄悄过期（无 Hitstop 时它恒等于 frame − moveStartedFrame）。
             FighterActionTick? cancel = TryCancel(
                 state, move, definition, recognition, frame,
-                moveStartedFrame, hitConfirmFrame, blockConfirmFrame);
+                moveStartedFrame, moveElapsedFrames, hitConfirmFrame, blockConfirmFrame);
             if (cancel is FighterActionTick cancelled)
                 return cancelled;
 
             int remaining = phaseRemainingFrames - 1;
             if (remaining > 0)
                 return new FighterActionTick(state, moveId, remaining, recognition, ConsumedMatch: null,
-                    MoveStartedFrame: moveStartedFrame);
+                    MoveStartedFrame: moveStartedFrame, MoveElapsedFrames: moveElapsedFrames);
 
             switch (state)
             {
                 case FighterLogicState.Startup:
                     return new FighterActionTick(FighterLogicState.Active, moveId,
                         move.ActiveFrames, recognition, ConsumedMatch: null,
-                        MoveStartedFrame: moveStartedFrame);
+                        MoveStartedFrame: moveStartedFrame, MoveElapsedFrames: moveElapsedFrames);
                 case FighterLogicState.Active:
                     return new FighterActionTick(FighterLogicState.Recovery, moveId,
                         move.RecoveryFrames, recognition, ConsumedMatch: null,
-                        MoveStartedFrame: moveStartedFrame);
+                        MoveStartedFrame: moveStartedFrame, MoveElapsedFrames: moveElapsedFrames);
                 case FighterLogicState.Recovery:
                     // 收招完成 → 回到待机；同帧继续走待机更新、起跳与消费（B5）。
                     break;
@@ -246,7 +253,8 @@ public static class FighterStateMachine
                 move.StartupFrames,
                 recognition.WithResultConsumed(match.RecognizedFrame),
                 match,
-                MoveStartedFrame: frame);
+                MoveStartedFrame: frame,
+                MoveElapsedFrames: 0);
         }
 
         return new FighterActionTick(idle, MoveId: null, 0, recognition, ConsumedMatch: null);
@@ -254,9 +262,10 @@ public static class FighterStateMachine
 
     /// <summary>
     /// 当前帧是否处于<b>任一取消窗口</b>内（只判窗口帧数与阶段，不含确认与指令缓冲条件）。
-    /// 供表现层只读显示使用——与 <see cref="TryCancel"/> 共用同一个窗口谓词，不产生第二套规则。
+    /// 供表现层只读显示使用——与 <see cref="TryCancel"/> 共用同一个窗口谓词与同一个时间基准
+    /// （<see cref="FighterState.MoveElapsedFrames"/>，D96），不产生第二套规则。
     /// </summary>
-    public static bool IsInCancelWindow(FighterState fighter, FighterDefinition definition, int frame)
+    public static bool IsInCancelWindow(FighterState fighter, FighterDefinition definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
 
@@ -267,7 +276,7 @@ public static class FighterStateMachine
         if (move is null || move.Cancels.Count == 0)
             return false;
 
-        int elapsed = frame - fighter.MoveStartedFrame;
+        int elapsed = fighter.MoveElapsedFrames;
         foreach (CancelDefinition cancel in move.Cancels)
         {
             if (IsWindowOpen(cancel, fighter.LogicState, elapsed))
@@ -302,13 +311,15 @@ public static class FighterStateMachine
         RecognitionState recognition,
         int frame,
         int moveStartedFrame,
+        int moveElapsedFrames,
         int hitConfirmFrame,
         int blockConfirmFrame)
     {
         if (move.Cancels.Count == 0 || moveStartedFrame < 0)
             return null;
 
-        int elapsed = frame - moveStartedFrame;
+        // 窗口时间基准 = 动作有效经过帧数（D96），不是全局帧差。
+        int elapsed = moveElapsedFrames;
         if (elapsed < 0)
             return null;
 
@@ -338,7 +349,8 @@ public static class FighterStateMachine
                     target.StartupFrames,
                     recognition.WithResultConsumed(result.Match.RecognizedFrame),
                     result.Match,
-                    MoveStartedFrame: frame);
+                    MoveStartedFrame: frame,
+                    MoveElapsedFrames: 0);
             }
         }
 

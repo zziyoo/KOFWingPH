@@ -63,7 +63,9 @@ public readonly record struct FighterState(
     int BlockConfirmFrame = -1,
     FixedPoint KnockbackFriction = default,
     int LandingKnockdownFrames = 0,
-    int LandingWakeupFrames = 0)
+    int LandingWakeupFrames = 0,
+    int MoveElapsedFrames = 0,
+    int HitstopRemainingFrames = 0)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -81,6 +83,24 @@ public readonly record struct FighterState(
     /// 该角色作为<b>被击方</b>的连段记录（阶段 07B，D90）；null（旧构造路径）视为无连段。
     /// </summary>
     public ComboState Combo => ComboRecord ?? ComboState.None;
+
+    /// <summary>
+    /// <b>动作有效经过帧数</b>（阶段 08A，D96）：当前攻击实例自发动起，<b>实际推进过</b>的
+    /// 动作帧数（发动当帧 = 0）。它是取消窗口（D91）与表现层「第几帧」显示的唯一时间基准。
+    ///
+    /// <para>与全局逻辑帧的关系：无 Hitstop 时它恒等于 <c>Frame − MoveStartedFrame</c>；
+    /// 有 Hitstop 时冻结帧不推进它——因此<b>停顿不会让取消窗口提前过期</b>。
+    /// 非动作状态必须为 0。</para>
+    /// </summary>
+    public int MoveElapsedFrames { get; init; } = MoveElapsedFrames;
+
+    /// <summary>
+    /// <b>命中停顿剩余帧数</b>（阶段 08A，D96）：&gt; 0 表示该角色本帧被冻结——
+    /// 动作阶段、硬直计时、击退衰减、空中积分、取消窗口全部停摆，仅<b>输入识别</b>照常推进
+    /// （缓冲不丢失）。每冻结一帧 −1，归零后的下一帧恢复正常推进。
+    /// 停顿由命中/成功防御结算写入（攻击方与被击方同值）。
+    /// </summary>
+    public int HitstopRemainingFrames { get; init; } = HitstopRemainingFrames;
 
     /// <summary>是否处于招式阶段（Startup/Active/Recovery）。</summary>
     public bool IsInMove =>
@@ -246,6 +266,20 @@ public readonly record struct FighterState(
                 $"角色 {Id} 处于 {LogicState} 但携带落地计划 " +
                 $"({LandingKnockdownFrames}, {LandingWakeupFrames})（必须为 0）。");
         }
+
+        // 动作有效时间与停顿（阶段 08A，D96）：
+        // - 动作经过帧数只在动作状态存在（发动当帧 = 0，逐帧 +1，非动作必须为 0）；
+        // - 停顿剩余帧数在所有状态下都必须落在 [0, MaxHitstopFrames]。
+        if (MoveElapsedFrames < 0)
+            throw new InvalidOperationException(
+                $"角色 {Id} 的动作经过帧数为负：{MoveElapsedFrames}。");
+        if (!IsInMove && MoveElapsedFrames != 0)
+            throw new InvalidOperationException(
+                $"角色 {Id} 处于非动作状态 {LogicState} 但携带动作经过帧数 {MoveElapsedFrames}（必须为 0）。");
+        if (HitstopRemainingFrames < 0 || HitstopRemainingFrames > Combat.AttackDefinition.MaxHitstopFrames)
+            throw new InvalidOperationException(
+                $"角色 {Id} 的命中停顿剩余帧数越界：{HitstopRemainingFrames}" +
+                $"（允许 0..{Combat.AttackDefinition.MaxHitstopFrames}）。");
 
         // 攻击实例身份（阶段 06C，D81）：动作期间必须携带发动帧（≥ 0），
         // 非动作状态必须为 -1——「发动帧 + 攻击者 ID」构成攻击实例唯一标识，

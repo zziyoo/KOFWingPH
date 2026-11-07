@@ -75,7 +75,9 @@ public static class DemoRoster
                         // 07C（D92）：轻击退 2 单位/帧、摩擦 0.5；防御击退 1.5（演示数据）。
                         groundKnockback: FixedPoint.FromInt(2),
                         groundKnockbackFriction: FixedPoint.FromFraction(1, 2),
-                        blockKnockback: FixedPoint.FromFraction(3, 2)),
+                        blockKnockback: FixedPoint.FromFraction(3, 2),
+                        // 08A（D96）：命中/防御各停顿 4 帧（演示手感数据）。
+                        hitstopFrames: 4),
                 },
                 cancels: new[]
                 {

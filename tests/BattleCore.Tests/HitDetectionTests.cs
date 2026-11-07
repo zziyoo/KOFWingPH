@@ -199,18 +199,22 @@ public class HitDetectionTests
             state = next;
         }
 
-        // 帧 3–4：Active 首帧与末帧都有接触；位置不因攻击改变（Pushbox 不受影响）。
+        // 帧 3：Active 首帧命中 → 4 帧命中停顿（08A/D96）。
+        // 帧 4–7：冻结帧——动作时间不推进，攻击仍在 Active，几何接触仍在
+        //          （重复结算由 D81 挡住，见 CombatEventTests.MultiFrameActive_*）。
+        // 帧 8：恢复后的第二个（末）Active 帧。
         int xBefore = state.Fighter(0).PositionX.ToIntTruncated();
-        for (int f = 3; f <= 4; f++)
+        for (int f = 3; f <= 8; f++)
         {
             var (contact, next) = Step5A(sim, state, f);
-            Assert.True(contact, $"帧 {f}（Active）应有接触");
+            Assert.True(contact, $"帧 {f}（Active / 冻结）应有接触");
             state = next;
             Assert.Equal(-120, state.Fighter(0).PositionX.ToIntTruncated());
         }
+        Assert.Equal(0, state.Fighter(0).HitstopRemainingFrames);
 
-        // 帧 5–7：Recovery 无接触。
-        for (int f = 5; f <= 7; f++)
+        // 帧 9–11：Recovery 无接触。
+        for (int f = 9; f <= 11; f++)
         {
             var (contact, next) = Step5A(sim, state, f);
             Assert.False(contact, $"帧 {f}（Recovery）不应有接触");
