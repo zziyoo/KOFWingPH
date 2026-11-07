@@ -22,7 +22,7 @@ public class InputPipelineTests
         var session = new BattleSession();
         buffer.Sample(InputBits.Right, InputBits.None);
 
-        session.Advance(Step, buffer.Take);
+        session.Advance(Step, inputSource: buffer);
 
         Assert.Equal(1, session.CurrentState.Frame);
         Assert.Single(buffer.History);
@@ -40,7 +40,7 @@ public class InputPipelineTests
         buffer.Sample(InputBits.LightPunch, InputBits.None);
         buffer.Sample(InputBits.None, InputBits.None);
 
-        int steps = session.Advance(3 * Step, buffer.Take);
+        int steps = session.Advance(3 * Step, inputSource: buffer);
 
         Assert.Equal(3, steps);
         Assert.Equal(3, buffer.History.Count);
@@ -59,12 +59,12 @@ public class InputPipelineTests
         buffer.Sample(InputBits.HeavyPunch, InputBits.None);
 
         // 1ms 远小于一个逻辑步长：本渲染帧推进 0 帧，不得产出输入。
-        int steps = session.Advance(0.001, buffer.Take);
+        int steps = session.Advance(0.001, inputSource: buffer);
         Assert.Equal(0, steps);
         Assert.Empty(buffer.History);
 
         // 补足一个步长后，边沿仍然在，落在第 0 帧。
-        session.Advance(Step, buffer.Take);
+        session.Advance(Step, inputSource: buffer);
         Assert.Single(buffer.History);
         Assert.Equal(InputBits.HeavyPunch, buffer.History[0].Player1);
     }
@@ -77,11 +77,11 @@ public class InputPipelineTests
         session.Scheduler.Pause();
 
         buffer.Sample(InputBits.Down, InputBits.None);
-        Assert.Equal(0, session.Advance(1.0, buffer.Take));
+        Assert.Equal(0, session.Advance(1.0, inputSource: buffer));
         Assert.Empty(buffer.History);
 
         session.Scheduler.Resume();
-        session.Advance(Step, buffer.Take);
+        session.Advance(Step, inputSource: buffer);
 
         // 暂停期间按下的键不会被吞：恢复后第一帧带上它。
         Assert.Single(buffer.History);
@@ -96,7 +96,7 @@ public class InputPipelineTests
         var session = new BattleSession(scheduler: new FixedStepScheduler(maxStepsPerAdvance: 5));
         buffer.Sample(InputBits.Right, InputBits.Left);
 
-        int steps = session.Advance(1.0, buffer.Take);
+        int steps = session.Advance(1.0, inputSource: buffer);
 
         Assert.Equal(5, steps);
         Assert.True(session.Scheduler.DroppedStepCount > 0);
@@ -121,12 +121,16 @@ public class InputPipelineTests
             else if (i % 11 == 0)
                 buffer.Sample(InputBits.None, InputBits.None);
 
-            session.Advance(0.004 + rng.NextDouble() * 0.036, buffer.Take);
+            session.Advance(0.004 + rng.NextDouble() * 0.036, inputSource: buffer);
         }
 
-        Assert.Equal(session.CurrentState.Frame, buffer.History.Count);
-        for (int i = 0; i < buffer.History.Count; i++)
-            Assert.Equal(i, buffer.History[i].Frame);
+        // 不能断言 History.Count == Frame：历史有容量上限（默认 600），会淘汰最旧帧。
+        // 稳定可比对的是「最后一帧 == Frame - 1」，且窗口内帧号连续。
+        Assert.True(buffer.IsAlignedWith(session.CurrentState.Frame));
+        Assert.Equal(session.CurrentState.Frame - 1, buffer.LastInput!.Value.Frame);
+        Assert.True(buffer.History.Count <= buffer.Capacity);
+        for (int i = 1; i < buffer.History.Count; i++)
+            Assert.Equal(buffer.History[i - 1].Frame + 1, buffer.History[i].Frame);
 
         Assert.True(session.IsFrameSyncIntact);
     }

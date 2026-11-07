@@ -1,6 +1,6 @@
 # PROGRESS.md — NewKOF 开发进度
 
-> 最后更新：2026-11-07（阶段 03A 完成并推送 `0be9919`）
+> 最后更新：2026-11-07（阶段 03A 专项补修完成，本地未提交）
 
 ---
 
@@ -10,6 +10,7 @@
 **阶段 02：固定逻辑帧与模拟调度验收 — ✅ 已完成**
 **阶段 02 补修：战斗状态与调度器帧同步 — ✅ 已完成（已提交 `850c4db`）**
 **阶段 03A：基础输入链路 — ✅ 已完成（已提交 `0be9919` 并推送）**
+**阶段 03A 专项补修：输入一致性与调试工具 — ✅ 已完成（本地未提交，141 项测试通过）**
 
 ---
 
@@ -37,7 +38,7 @@
 | SOCD-V | 上下同时按下 → **上优先**（跳跃优先） |
 | 绝对 / 相对 | `InputBits` 存**绝对方向**（物理键）；相对朝向只在 `DirectionResolver` 用 `Facing` 换算 |
 | 历史归属 | `InputBuffer.History`（内核层）保存每逻辑帧一条 `FrameInput`，帧号必须连续，否则抛异常 |
-| 边沿传递 | 采样时 `pending \|= (now & ~held)`；`Take(frame)` 消费一次即清零。0 帧不丢、N 帧不重复 |
+| 边沿传递 | 采样时 `pending \|= (now & ~held)`；`Commit` 时消费一次即清零（`Take` 是「准备+提交」的内部便捷方法）。0 帧不丢、N 帧不重复 |
 | 多次按下 | 两次逻辑帧之间按多次 → 合并为一帧，并累加 `CoalescedPressCount`（可观测，非静默） |
 | 暂停 | 不产生输入帧；已闩锁边沿保留到恢复后第一帧 |
 | 丢弃预算 | 被丢弃的时间不产生逻辑帧，也不产生输入帧 |
@@ -76,6 +77,60 @@ F1 切换暂停（只阻止时间驱动推进，不影响显式单步）。
   `_Input → KeyboardInputMap → InputBuffer` 路径；OS 级按键注入被安全策略拦截，未使用。
 - 暂停截图在 200 个渲染帧后仍停在逻辑帧 21，证明暂停确实阻止了时间驱动推进。
 - 启动首帧丢弃 1~4 帧（渲染尖峰），告警只输出一次。
+
+---
+
+## 阶段 03A 专项补修（2026-11-07）
+
+### 修复的三个缺陷
+
+| # | 缺陷 | 修复前实测证据 | 修复 |
+|---|---|---|---|
+| I1 | `History` 只读是假的：返回的仍是 `List<FrameInput>` | `History as List<FrameInput>` 非 null；`(IList<FrameInput>)History` 的 `IsReadOnly == false`，`Add/Clear` 直接改写内部历史 | 构造时创建**单实例** `ReadOnlyCollection<FrameInput>` 包装（不额外拷贝）；强转 `List` 返回 null，`IList.Add` 抛 `NotSupportedException`（D34） |
+| I2 | 输入先提交、模拟后失败 → 幻影帧 + 重试错帧 | `Step()` 溢出失败后 `History.Count == 1`（战斗帧没提交）；重试同一帧抛「输入帧号必须严格连续」 | 两阶段 `IInputSource.Prepare` → `Step` → `Commit`；失败帧不写历史、不消费边沿；`Take()` 收为 `internal`（D35） |
+| I3 | 调试参数 `--key=` 用渲染帧计数，文案却像逻辑帧 | 实测渲染帧 20 时逻辑帧为 17，渲染帧 150 时逻辑帧 70 | 改名 `--renderkey=`（旧名保留 + 告警一次），注入日志同时打印渲染帧与当时逻辑帧 |
+
+### P2 历史容量：改了，依据如下
+
+- 默认保留 **600 帧（10 秒 @60Hz）**，超限淘汰最旧帧并置 `IsHistoryTruncated`。
+- 依据：当前唯一潜在消费者（指令识别）只需秒级窗口；完整录像/回滚属独立系统，
+  不应塞进缓冲器（会同时破坏内存上界与回放语义）。
+- **影响**：被淘汰的帧不能再用于回放或长窗口识别；需要完整录像时必须另建录像模块（未实现）。
+- 对齐判断改用 `IsAlignedWith(frame)`（最后一帧 == frame-1）。旧测试
+  `InputHistoryFrames_AlwaysMatchStateFrames` 断言 `History.Count == Frame`，容量生效后必然失效，
+  已按验收不变量改写（不是放宽断言，而是换用稳定可比对的条件）。
+
+### 测试（123 → 141）
+
+新增 `InputIntegrityTests` 18 项：历史只读 / Prepare 不提前提交 / Commit 只写一次 /
+模拟失败不留幻影帧 / 批中失败只保留已提交帧 / 边沿跨失败恢复且只消费一次 /
+`StepExact` 与暂停单步 / 双输入源互斥 / 非零初始帧 / 容量与构造参数 / 普通委托幂等。
+
+**变异测试**（证明新增断言确实能发现故障）：
+
+| 变异 | 失败用例 |
+|---|---|
+| `History => _history`（退回裸列表） | 2 项（`History_IsNotBackedByMutableList`、`History_CannotBeMutatedThroughIListInterface`） |
+| 把 `Commit` 提前到 `Step` 之前 | 3 项（幻影帧、重试、批中失败） |
+
+### 真实 Godot 运行验证
+
+```
+[CaptureHelper] 将在第 150 个渲染帧截图（渲染帧计数，不是逻辑帧）
+[CaptureHelper] 渲染帧 20 注入 D 按下（当时逻辑帧 17）
+[CaptureHelper] 截图已保存（渲染帧 150，逻辑帧 70）
+```
+
+截图 `shots/fix_input.png`：`Logic Frame: 69` / `P1: R A` / `P2: L A`。
+旧参数 `--key=` 仍可用，并输出「已改名为 --renderkey=」告警。
+
+### 未完成 / 边界
+
+- 未实现「按逻辑帧注入」：那需要重放系统把逐帧输入日志直接喂给 `IInputSource`，本轮不做。
+- 未做完整录像、回滚、网络同步。
+- 普通 `Func<int, FrameInput>` 输入源无法回滚：契约要求「同一帧号返回同一输入（幂等）」，
+  已写入 `BattleSession.Advance` 的 XML 文档与 K15。
+- 本轮未提交 Git（任务要求不擅自提交）。
 
 ---
 
@@ -233,9 +288,9 @@ cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
 
-**最近一次实际运行结果（2026-11-07，阶段 03A 完成后实测）**
+**最近一次实际运行结果（2026-11-07，阶段 03A 专项补修后实测）**
 ```
-已通过! - 失败: 0，通过: 123，已跳过: 0，总计: 123，持续时间: 117 ms - BattleCore.Tests.dll (net8.0)
+已通过! - 失败: 0，通过: 141，已跳过: 0，总计: 141，持续时间: 184 ms - BattleCore.Tests.dll (net8.0)
 ```
 
 | 测试文件 | 用例数（`--list-tests` 实测） | 内容 |
@@ -250,7 +305,8 @@ dotnet test
 | `InputBufferTests.cs` | 13 | **03A**：电平/边沿/双人独立/历史连续性 |
 | `DirectionResolverTests.cs` | 10 | **03A**：SOCD 与相对朝向 |
 | `InputPipelineTests.cs` | 7 | **03A**：输入与逻辑帧绑定、暂停、多帧批次 |
-| **合计** | **123** | 与 `dotnet test` 的「总计: 123」一致 |
+| `InputIntegrityTests.cs` | 18 | **03A 补修**：只读历史、两阶段提交、失败恢复、容量 |
+| **合计** | **141** | 与 `dotnet test` 的「总计: 141」一致 |
 
 > 说明：上表是 **xUnit 用例数**（`Theory` 的每个 `InlineData` 计一条），不是方法数。
 > 早先版本按方法数填写，与「总计」对不上，已按 `--list-tests` 实测校正。

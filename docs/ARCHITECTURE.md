@@ -100,7 +100,7 @@ NewKOF (表现层)  ─────────┘
 | `BattleState` | 权威状态快照（不可变） | 被外部修改 |
 | `FighterState` | 单角色数据（身份 + 初始数据） | 招式、受击、碰撞 |
 | `FrameInput` | 一帧内双方输入（不可变值类型） | 输入归一化、SOCD、命令识别 |
-| `InputBuffer` | **渲染采样 → 逻辑帧输入**：电平保持、按下边沿闩锁、逐帧历史 | 键盘/手柄 API、SOCD、指令识别 |
+| `InputBuffer` | **渲染采样 → 逻辑帧输入**：电平保持、按下边沿闩锁、两阶段提交、只读历史（默认 600 帧窗口） | 键盘/手柄 API、SOCD、指令识别、完整录像 |
 | `DirectionResolver` | **SOCD 清理 + 绝对方向 → 相对朝向**（纯函数） | 输入录制、状态推进 |
 | `BattleStepResult` | 单次 Step 的结果描述 | 权威判定 |
 | `BattleScene` (Godot) | 把 `delta` 交给 `BattleSession`、把状态映射为画面 | 任何权威判定、**任何时间累积逻辑**、输入历史 |
@@ -111,15 +111,21 @@ NewKOF (表现层)  ─────────┘
 `core/BattleCore/Simulation/FixedStepScheduler.cs`。`BattleScene._Process`
 只调用 `_session.Advance(delta, inputProvider: null)`。
 
-**记账职责链（阶段 02 补修）**：
+**记账职责链（阶段 02 补修 + 阶段 03A 补修）**：
 
 ```
 BattleScene._Process(delta)
-   └─> BattleSession.Advance(delta, provider)
-         ├─> Scheduler.Advance(delta)        // 只消耗时间预算，返回可推进帧数
-         ├─> 循环: provider(frame) → Step() → Scheduler.CommitStep()   // 提交后才记账
+   └─> BattleSession.Advance(delta, inputSource: buffer)
+         ├─> Scheduler.Advance(delta)              // 只消耗时间预算，返回可推进帧数
+         ├─> 循环: buffer.Prepare(frame)           // 只计算输入，不改历史/不清边沿
+         │         → BattleSimulation.Step(state, input)
+         │         → buffer.Commit(input)          // 模拟成功后才写历史、消费边沿
+         │         → Scheduler.CommitStep()
          └─> 异常时: Scheduler.RecordDroppedSteps(剩余预算) + throw
 ```
+
+**输入提交不变量**：`History` 为空（尚未提交）或 `History[^1].Frame == CurrentState.Frame - 1`，
+用 `InputBuffer.IsAlignedWith(frame)` 断言。模拟失败的那一帧**不会**出现在历史里。
 
 **核心帧同步不变量**（可用 `BattleSession.IsFrameSyncIntact` 断言）：
 
@@ -198,11 +204,18 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | **D26** | **输入分两层：原始层（`InputBits`）+ 解析层（`DirectionResolver`）** | 原始层是被逐帧录制/重放的数据；解析层是可随规则演进的计算。混在一起会让「规则一改，旧录像全废」。 |
 | **D27** | **SOCD：左右同时 → 水平中立；上下同时 → 上优先** | 左右对称抵消是当前数据格式下唯一无歧义的规则：`FrameInput` 只存电平位，没有事件顺序，「后输入优先」无法从位掩码还原。上下「上优先」符合 2D 格斗跳跃优先的惯例。要改「后输入优先」必须先扩展录制格式（后续阶段）。 |
 | **D28** | **录制绝对方向，相对朝向只在解析时用 `Facing` 换算** | 朝向属于权威状态且会随换边变化；把它烘进输入会让同一份日志在换边后失效，也会让 P1/P2 需要两套录法。 |
-| **D29** | **输入历史由 `BattleCore.Input.InputBuffer` 保存** | 放在表现层就无法无 GUI 测试，也无法保证「历史帧号 == 状态帧号」。`InputBuffer.Take(frame)` 对非连续帧号直接抛异常，把错帧挡在源头。 |
+| **D29** | **输入历史由 `BattleCore.Input.InputBuffer` 保存** | 放在表现层就无法无 GUI 测试，也无法保证「历史帧号 == 状态帧号」。`Prepare`/`Commit` 对非连续帧号直接抛异常，把错帧挡在源头（`Take` 已收为 internal）。 |
 | **D30** | **按下边沿闩锁：`pending \|= (now & ~held)`，`Take` 时消费一次即清零** | 一个渲染帧可能推进 0/1/N 个逻辑帧。闩锁保证边沿必定落在紧随其后的那一个逻辑帧上：0 帧时不丢，N 帧时不重复消费。 |
 | **D31** | **两次逻辑帧之间的多次按下合并为一帧，并累加 `CoalescedPressCount`** | 电平语义无法表达「同帧内按了两次」。选择显式计数而不是静默丢弃，使合并可观测；逐次事件流留给指令识别阶段。 |
 | **D32** | **暂停与丢弃预算都不产生输入帧；已闩锁的边沿保留到恢复后第一帧** | 不为不存在的逻辑帧伪造输入。暂停期间按键不会丢，恢复后第一帧带上它；被丢弃的时间预算本来就没有模拟，自然没有输入。 |
 | **D33** | **Godot 层按「按键事件」采样，而不是每个渲染帧轮询** | 轮询会漏掉「同一渲染帧内按下又松开」。事件驱动 + `HashSet<Key>` 推导按住状态，还能让一个输入位绑定多个键（小键盘 + 标点键都映射 P2 攻击）。窗口失焦时 `ReleaseAll()` 防止卡键。 |
+
+### 阶段 03A 专项补修决策（输入一致性）
+
+| # | 决策 | 理由 / 证据 |
+|---|---|---|
+| **D34** | **`History` 用 `ReadOnlyCollection<T>` 包装底层 `List`；默认只保留最近 600 帧（`IsHistoryTruncated` 标记淘汰）** | `IReadOnlyList<T>` 只是接口：实测外部可强转回 `List<FrameInput>` 并 `Add/Clear` 改写内部状态。改为构造时创建**单实例**只读包装（不产生每次访问的拷贝）：强转 `List` 返回 null，`IList<T>.Add` 抛 `NotSupportedException`。容量上限把「指令识别短期历史（10 秒窗口）」与「完整录像」分开，后者需要独立系统。对齐判断改用 `IsAlignedWith(frame)`（最后一帧 == frame-1），**不用** `History.Count == Frame`——有容量上限后该等式不再成立。 |
+| **D35** | **输入两阶段提交：`IInputSource.Prepare` → `Step()` → `Commit()`** | 旧 `Take()` 立即写历史并清边沿，`Step()` 失败后留下幻影帧，重试同一帧还会因帧号不连续而抛异常（已用复现测试证实）。现在：准备阶段不写历史/不清边沿；模拟成功后才提交输入，再记账。失败帧不写入历史、不消费边沿，重试得到同一输入。`Take()` 收为 `internal`，防止表现层把它当作 `Func<int,FrameInput>` 传给会话。 |
 
 
 

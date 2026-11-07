@@ -38,9 +38,6 @@ public partial class BattleScene : Node2D
     /// <summary>键盘映射（表现层）。本类是唯一接触 Godot 输入 API 的地方。</summary>
     private KeyboardInputMap _inputMap = null!;
 
-    /// <summary>缓存的方法组委托，避免每帧重新分配。</summary>
-    private Func<int, FrameInput> _inputProvider = null!;
-
     private Node2D? _fighter1Node;
     private Node2D? _fighter2Node;
     private Label? _hudLabel;
@@ -68,10 +65,14 @@ public partial class BattleScene : Node2D
             scheduler: new FixedStepScheduler(MaxStepsPerAdvance));
 
         _inputMap = new KeyboardInputMap(_inputBuffer);
-        _inputProvider = _inputBuffer.Take;
 
         SyncViewFromState();
     }
+
+    /// <summary>
+    /// 当前逻辑帧号（只读）。仅供调试工具读取，权威值仍在内核状态里。
+    /// </summary>
+    public int CurrentLogicFrame => _session.CurrentState.Frame;
 
     /// <summary>
     /// 键盘事件入口。按事件（而不是每渲染帧轮询）采样，
@@ -103,8 +104,8 @@ public partial class BattleScene : Node2D
 
     public override void _Process(double delta)
     {
-        // 输入已接入：每个逻辑帧的输入由内核缓冲按帧号逐帧产出。
-        int steps = _session.Advance(delta, _inputProvider);
+        // 输入用两阶段提交：模拟成功后才写入输入历史，失败不留幻影帧。
+        int steps = _session.Advance(delta, inputSource: _inputBuffer);
 
         if (steps > 0)
             SyncViewFromState();

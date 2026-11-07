@@ -3,27 +3,40 @@ using Godot;
 namespace NewKOF;
 
 /// <summary>
-/// 开发期验收辅助：仅在使用命令行参数 --shot=路径 启动时启用。
-/// 在指定帧数后保存一张截图并退出，用于自动化验证画面内容。
-/// 不参与任何战斗逻辑；正常运行游戏时完全无副作用。
+/// 开发期验收辅助：仅在使用命令行参数启动时启用；正常运行零副作用。
+///
+/// <para><b>参数（全部按「渲染帧」计数，不是逻辑帧）</b></para>
+/// <list type="table">
+/// <item><term>--shot=&lt;path&gt;</term><description>截图保存路径，指定后才启用本节点</description></item>
+/// <item><term>--shotframes=&lt;n&gt;</term><description>第 n 个<b>渲染帧</b>截图并退出</description></item>
+/// <item><term>--renderkey=&lt;frame&gt;:&lt;down|up&gt;:&lt;KeyName&gt;</term>
+///       <description>第 frame 个<b>渲染帧</b>注入合成按键，可重复；
+///       日志同时打印当时的<b>逻辑帧号</b>，便于对照</description></item>
+/// <item><term>--key=...</term><description>旧名，等价于 <c>--renderkey=</c>（保留兼容，会告警一次）</description></item>
+/// </list>
 ///
 /// <para>
-/// 另支持 <c>--key=&lt;frame&gt;:&lt;down|up&gt;:&lt;KeyName&gt;</c>（可重复），
-/// 在指定帧通过 <see cref="Input.ParseInputEvent"/> 注入合成按键事件。
-/// 它走的是 Godot 正常输入事件管线（与真实键盘同一条路径：
-/// <c>_Input</c> → <see cref="KeyboardInputMap"/> → <see cref="InputBuffer"/>），
-/// 用于在无人值守环境下验证输入链路；不指定该参数时完全不生效。
+/// <b>为什么不按逻辑帧注入：</b>本节点的 <c>_Process</c> 只知道自己被调用了多少次
+/// （渲染帧），不知道调度器这次推进了几个逻辑帧。把渲染帧计数说成逻辑帧编号是错的。
+/// 真正「按逻辑帧」的输入回放应走重放系统（把逐帧输入日志直接喂给
+/// <see cref="BattleCore.Input.IInputSource"/>），不在本工具范围内。
+/// </para>
+///
+/// <para>
+/// 注入走 <see cref="Input.ParseInputEvent"/>，与真实键盘同一条路径：
+/// <c>_Input</c> → <see cref="KeyboardInputMap"/> → <see cref="BattleCore.Input.InputBuffer"/>。
 /// </para>
 /// </summary>
 public partial class CaptureHelper : Node
 {
     private string? _targetPath;
-    private int _framesToWait = 30;
-    private int _elapsed;
+    private int _renderFramesToWait = 30;
+    private int _renderFrame;
 
     private readonly List<KeyStep> _keyScript = new();
 
-    private readonly record struct KeyStep(int Frame, bool Down, Key Keycode);
+    /// <summary>一条按键注入计划；<paramref name="RenderFrame"/> 是<b>渲染帧</b>号。</summary>
+    private readonly record struct KeyStep(int RenderFrame, bool Down, Key Keycode);
 
     public override void _Ready()
     {
@@ -32,9 +45,14 @@ public partial class CaptureHelper : Node
             if (arg.StartsWith("--shot="))
                 _targetPath = arg["--shot=".Length..];
             else if (arg.StartsWith("--shotframes=") && int.TryParse(arg["--shotframes=".Length..], out int f))
-                _framesToWait = f;
+                _renderFramesToWait = f;
+            else if (arg.StartsWith("--renderkey="))
+                ParseKeyStep(arg["--renderkey=".Length..]);
             else if (arg.StartsWith("--key="))
+            {
+                GD.PushWarning("[CaptureHelper] --key= 已改名为 --renderkey=（语义：渲染帧，不是逻辑帧）。");
                 ParseKeyStep(arg["--key=".Length..]);
+            }
         }
 
         if (_targetPath is null)
@@ -43,50 +61,54 @@ public partial class CaptureHelper : Node
             return;
         }
 
-        GD.Print($"[CaptureHelper] 将在 {_framesToWait} 帧后截图到 {_targetPath}");
+        GD.Print($"[CaptureHelper] 将在第 {_renderFramesToWait} 个渲染帧截图到 {_targetPath}" +
+                 "（渲染帧计数，不是逻辑帧）");
     }
 
     public override void _Process(double delta)
     {
-        _elapsed++;
+        _renderFrame++;
         InjectScheduledKeys();
 
         if (_targetPath is null) return;
 
-        if (_elapsed < _framesToWait) return;
+        if (_renderFrame < _renderFramesToWait) return;
 
         Image image = GetViewport().GetTexture().GetImage();
         Error err = image.SavePng(_targetPath);
         GD.Print(err == Error.Ok
-            ? $"[CaptureHelper] 截图已保存：{_targetPath}"
+            ? $"[CaptureHelper] 截图已保存：{_targetPath}（渲染帧 {_renderFrame}，逻辑帧 {LogicFrame()}）"
             : $"[CaptureHelper] 截图失败：{err}");
 
         _targetPath = null;
         GetTree().Quit(err == Error.Ok ? 0 : 1);
     }
 
-    /// <summary>解析 <c>&lt;frame&gt;:&lt;down|up&gt;:&lt;KeyName&gt;</c>。</summary>
+    /// <summary>解析 <c>&lt;renderFrame&gt;:&lt;down|up&gt;:&lt;KeyName&gt;</c>。</summary>
     private void ParseKeyStep(string spec)
     {
         string[] parts = spec.Split(':');
         if (parts.Length != 3
-            || !int.TryParse(parts[0], out int frame)
+            || !int.TryParse(parts[0], out int renderFrame)
             || !Enum.TryParse(parts[2], ignoreCase: true, out Key keycode))
         {
             GD.PushWarning($"[CaptureHelper] 无法解析按键参数：{spec}");
             return;
         }
 
-        _keyScript.Add(new KeyStep(frame, parts[1].Equals("down", StringComparison.OrdinalIgnoreCase), keycode));
+        _keyScript.Add(new KeyStep(
+            renderFrame,
+            parts[1].Equals("down", StringComparison.OrdinalIgnoreCase),
+            keycode));
     }
 
-    /// <summary>在预定帧注入合成按键事件。按帧排序后逐条命中，避免每帧遍历全部。</summary>
+    /// <summary>在预定的<b>渲染帧</b>注入合成按键事件，并在日志里标出当时的逻辑帧。</summary>
     private void InjectScheduledKeys()
     {
         for (int i = 0; i < _keyScript.Count; i++)
         {
             KeyStep step = _keyScript[i];
-            if (step.Frame != _elapsed) continue;
+            if (step.RenderFrame != _renderFrame) continue;
 
             Input.ParseInputEvent(new InputEventKey
             {
@@ -94,6 +116,12 @@ public partial class CaptureHelper : Node
                 PhysicalKeycode = step.Keycode,
                 Pressed = step.Down,
             });
+
+            GD.Print($"[CaptureHelper] 渲染帧 {_renderFrame} 注入 {step.Keycode} {(step.Down ? "按下" : "松开")}" +
+                     $"（当时逻辑帧 {LogicFrame()}）");
         }
     }
+
+    /// <summary>当前逻辑帧号；场景根不是 <see cref="BattleScene"/> 时返回 -1。</summary>
+    private int LogicFrame() => (GetParent() as BattleScene)?.CurrentLogicFrame ?? -1;
 }

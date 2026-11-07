@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 03A 完成并推送 `0be9919`）
+> 最后更新：2026-11-07（阶段 03A 专项补修完成，本地未提交）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 123，已跳过: 0，总计: 123`
+期望：`失败: 0，通过: 141，已跳过: 0，总计: 141`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,41 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 03A 专项补修（2026-11-07）输入一致性与调试工具 —— 本地未提交
+
+**修改文件**
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Input/IInputSource.cs` | **新增**：两阶段输入契约 `Prepare` / `Commit` |
+| `core/BattleCore/Input/InputBuffer.cs` | `History` 改 `ReadOnlyCollection` 单实例包装；默认保留 600 帧（`Capacity` / `IsHistoryTruncated` / `IsAlignedWith`）；实现 `IInputSource`；`Take()` 收为 `internal` |
+| `core/BattleCore/Simulation/BattleSession.cs` | `Advance` / `StepExact` 新增 `IInputSource? inputSource`（与 `inputProvider` 互斥）；顺序改为「准备 → 模拟 → 提交输入 → 记账」；普通委托幂等契约写入 XML |
+| `scripts/BattleScene.cs` | 改用 `Advance(delta, inputSource: _inputBuffer)`；新增只读 `CurrentLogicFrame` 供调试工具读取 |
+| `scripts/CaptureHelper.cs` | `--key=` 改名 `--renderkey=`（旧名兼容 + 告警）；渲染帧/逻辑帧变量与文案分离；注入日志打印当时逻辑帧 |
+| `tests/BattleCore.Tests/InputIntegrityTests.cs` | **新增 18 项**：只读历史、两阶段提交、失败恢复、批中失败、暂停单步、容量 |
+| `tests/BattleCore.Tests/InputPipelineTests.cs` | 全部改走 `inputSource: buffer`；对齐断言改为 `IsAlignedWith` + 最后一帧，不再用 `Count == Frame` |
+
+**修复的三个缺陷**
+
+1. `History` 伪只读 → 可强转 `List` 改写 / `IList.Add` 成功（实测）。
+2. `Take()` 先提交输入、`Step()` 后失败 → 幻影帧 + 重试抛「帧号不连续」（实测）。
+3. `--key=` 用渲染帧计数却像逻辑帧语义（实测渲染帧 20 = 逻辑帧 17）。
+
+**验收证据**
+
+- `dotnet test` → **141/141**；`dotnet build` 0 警告 0 错误。
+- 变异测试：`History => _history` → 2 项失败；`Commit` 提前到 `Step` 前 → 3 项失败。
+- Godot：`shots/fix_input.png`（`Logic Frame: 69` / `P1: R A` / `P2: L A`），
+  日志 `渲染帧 20 注入 D 按下（当时逻辑帧 17）`、`截图已保存（渲染帧 150，逻辑帧 70）`。
+- 复现命令（参数已改名）：
+  ```bat
+  Godot_v4.7.2-stable_mono_win64_console.exe --path . -- ^
+    --shot=C:/Users/32360/Desktop/NewKOF/shots/x.png --shotframes=150 ^
+    --renderkey=20:down:D --renderkey=20:down:J --renderkey=20:down:Left --renderkey=20:down:Kp1
+  ```
+
+---
 
 ### 阶段 03A（2026-11-07）基础输入链路 —— 已提交 `0be9919`
 
@@ -242,8 +277,11 @@ cd /d C:\Users\32360\Desktop\NewKOF
 | K12 | `InputBuffer.History` **无上限增长** | 约 16 B/帧 ≈ 3.4 MB/小时；长时间挂机会吃内存 | 原型够用。若做长跑/录制，加环形缓冲或按需 `Clear()`（尚未提供，避免过早设计） |
 | K13 | **键位硬编码**，无重绑定 | 只有 `KeyboardInputMap.TryMap` 一处映射，改键需改代码 | 键位重绑定 UI 属后续阶段；手柄映射未做 |
 | K14 | 两次逻辑帧之间多次按下会**合并成一帧** | 快速双击在 `InputBits` 里只体现为一帧按下 | 按 D31 属已知限制，`CoalescedPressCount` 可观测；逐次事件流留给指令识别阶段 |
+| K15 | **普通 `Func<int,FrameInput>` 输入源无法回滚** | 模拟失败后会话会以同一帧号再次调用它；若委托有副作用（如 `buffer.Take`），会重复提交 | 契约要求「同一帧号返回同一输入（幂等）」；生产路径必须传 `IInputSource`（`InputBuffer`），`Take()` 已收为 internal 防误用 |
+| K16 | **输入历史只保留最近 600 帧** | 更早的帧被淘汰，`IsHistoryTruncated == true`，不能再用于回放/长窗口识别 | 完整输入录像需独立模块（未实现）；若做重放，先设计录像格式，不要拉长这个缓冲 |
+| K17 | `BattleSession.Advance` 允许 `inputSource` 与 `inputProvider` 二选一 | 同时传入会抛 `ArgumentException` | 保持显式；不要为了省参做成隐式优先级 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 02 补修验收时 93/93 测试通过（当前总数 123），可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 02 补修验收时 93/93 测试通过（当前总数 141），可正常启动运行。
 
 ---
 
@@ -253,10 +291,21 @@ cd /d C:\Users\32360\Desktop\NewKOF
   - `9937b3f` — 阶段 01–02 Godot 工程初始化与固定逻辑帧调度
   - `c003dc2` — 记录远程仓库与代理要求
   - `850c4db` — 阶段 02 补修（调度器记账与帧同步）
-  - **功能基线提交 = `0be9919`（阶段 03A，代码与测试全在这里）**
-  - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：其后若只有 `docs:` 提交，
-    功能代码等同 `0be9919`。本节记录的是写文档时的状态，不要把它当作实时 HEAD。
-  - **工作区：干净**（`git status --porcelain` 无输出；`.workbuddy/` 与 `shots/` 已被忽略）
+  - `0be9919` — 阶段 03A 基础输入链路（**最近一次已推送的功能基线**）
+  - `1538395` / `083abd5` — 仅文档
+  - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本轮补修**尚未提交**，
+    远端仍停在 `083abd5`。本节记录的是写文档时的状态，不要当作实时 HEAD。
+  - **工作区：有未提交改动**（阶段 03A 专项补修）：
+    ```
+    新增: core/BattleCore/Input/IInputSource.cs（+ .uid）
+          tests/BattleCore.Tests/InputIntegrityTests.cs（+ .uid）
+    修改: core/BattleCore/Input/InputBuffer.cs
+          core/BattleCore/Simulation/BattleSession.cs
+          scripts/BattleScene.cs  scripts/CaptureHelper.cs
+          tests/BattleCore.Tests/InputPipelineTests.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+    `git status --porcelain` 应恰好输出上面这组文件。
   - `0be9919` 提交内容（19 文件）：
     ```
     新增: core/BattleCore/Input/InputBuffer.cs
@@ -284,8 +333,9 @@ cd /d C:\Users\32360\Desktop\NewKOF
 - **安全备份**：`C:\Users\32360\Desktop\NewKOF_backups\NewKOF_pre_phase03a_20261107.tar.gz`
   （阶段 03A 开始前的完整工作区，含当时未提交的补修代码）
 - **清理建议**：`bin/obj/.godot` 可安全删除，重新 `dotnet build` + `--import` 即可重建。
-- **工作区干净的标准**：`git status --porcelain` 应输出阶段 03A 那一组文件；
-  若出现 `bin/`、`obj/`、`.godot/`、`shots/`，说明 `.gitignore` 被改坏。
+- **工作区状态判读**：以 `git status --porcelain` 的**实际输出**为准，不要凭文档猜。
+  提交本轮补修后应无输出；提交前应恰好输出第 6 节列出的那组文件。
+  若出现 `bin/`、`obj/`、`.godot/`、`shots/`、`.workbuddy/`，说明 `.gitignore` 被改坏。
 
 ---
 
@@ -294,17 +344,18 @@ cd /d C:\Users\32360\Desktop\NewKOF
 **按顺序阅读：**
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
-2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D33 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、123 项测试、下一阶段计划
+2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D35 决策）与第 5 节（未决定问题）
+3. `docs/PROGRESS.md` — 已完成/未完成边界、141 项测试、下一阶段计划
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
-6. `core/BattleCore/Input/InputBuffer.cs` — **阶段 03A 核心**，边沿闩锁与历史
-7. `core/BattleCore/Input/DirectionResolver.cs` — SOCD 与相对朝向规则
-8. `core/BattleCore/Simulation/BattleSimulation.cs` — 内核入口 `Step()` 契约
-9. `core/BattleCore/State/BattleState.cs` — 不可变状态与所有权
-10. `tests/BattleCore.Tests/` — 十个测试文件构成当前回归基线
-11. `scripts/BattleScene.cs` — 表现层如何只读消费状态（**应保持极薄**）
-12. `scripts/KeyboardInputMap.cs` — 键位映射，唯一接触 Godot 输入 API 的地方
+6. `core/BattleCore/Input/InputBuffer.cs` — **阶段 03A 核心**：边沿闩锁、两阶段提交、只读历史
+7. `core/BattleCore/Input/IInputSource.cs` — 输入提交契约（Prepare/Commit）
+8. `core/BattleCore/Input/DirectionResolver.cs` — SOCD 与相对朝向规则
+9. `core/BattleCore/Simulation/BattleSimulation.cs` — 内核入口 `Step()` 契约
+10. `core/BattleCore/State/BattleState.cs` — 不可变状态与所有权
+11. `tests/BattleCore.Tests/` — 十一个测试文件构成当前回归基线
+12. `scripts/BattleScene.cs` — 表现层如何只读消费状态（**应保持极薄**）
+13. `scripts/KeyboardInputMap.cs` — 键位映射，唯一接触 Godot 输入 API 的地方
 
 **参考资料（只读，禁止修改）：**
 
@@ -325,19 +376,21 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 1. ~~实现阶段 03 输入链路~~ **已完成（03A）**。后续若要改键位/加手柄，只动
    `KeyboardInputMap`（或新增 `GamepadInputMap`），**不要**把映射写进 `BattleScene` 或内核。
-2. ~~提交阶段 03A~~ **已提交并推送（`0be9919`）**。下一阶段开工前先跑一遍 `dotnet test` 确认 123 项。
-3. **实现运动系统** — 前提：先确定定点数格式并写入文档；方向直接用
+2. ~~提交阶段 03A~~ **已提交并推送（`0be9919`）**。
+   **本轮 03A 专项补修尚未提交**——需用户明确授权后再 `git add/commit/push`。
+3. **提交本轮补修** — 测试 141/141、Godot 已验证；授权后按第 6 节文件清单提交。
+4. **实现运动系统** — 前提：先确定定点数格式并写入文档；方向直接用
    `DirectionResolver.Resolve(...)` 的结果，不要在运动系统里再解析 `InputBits`。
-4. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
-5. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
+5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
+6. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
    与 `NewKOF.csproj` 的 `Compile Include`。
-6. **添加 `.sln`** — 纯工程整理。
+7. **添加 `.sln`** — 纯工程整理。
 
 ### 需要先决策 ⚠️
 
-7. **修改 `BattleState` 结构**（增加速度/状态字段）— 先读 `ARCHITECTURE.md` 第 5 节问题 1。
-8. **引入碰撞/判定框** — 先决定几何类型（AABB/OBB）与推挤算法。
-9. **引入事件流** — 先设计 `(frame, eventId)` 事件契约。
+8. **修改 `BattleState` 结构**（增加速度/状态字段）— 先读 `ARCHITECTURE.md` 第 5 节问题 1。
+9. **引入碰撞/判定框** — 先决定几何类型（AABB/OBB）与推挤算法。
+10. **引入事件流** — 先设计 `(frame, eventId)` 事件契约。
 10. **SOCD 改「后输入优先」** — 必须先扩展 `FrameInput` 记录事件顺序，否则无法重放。
 
 ### 禁止 ❌
@@ -358,14 +411,16 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 123」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 141」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
 - [ ] `scripts/` 下**没有**任何权威判定逻辑、**没有**输入历史/SOCD 实现
 - [ ] `FrameInput` 的帧号恒等于 `BattleState.Frame`（`BattleSession` 会抛异常，测试守护）
-- [ ] `InputBuffer.Take()` 对非连续帧号抛异常（防错帧）
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D33）与代码实现一致
+- [ ] `InputBuffer.History` 强转 `List<FrameInput>` 必须为 null（只读包装未被改回裸列表）
+- [ ] `history[^1].Frame == CurrentState.Frame - 1`（`IsAlignedWith`），不用 `Count == Frame`
+- [ ] 输入只有两条合法路径：`IInputSource`（两阶段）或幂等委托；`Take()` 不得被表现层当委托用
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D35）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

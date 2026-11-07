@@ -24,6 +24,10 @@ namespace NewKOF.BattleCore.Simulation;
 ///       <see cref="FixedStepScheduler.CommitStep"/>。任何异常都不会让
 ///       <c>TotalSteps</c> 超过真实提交的帧数。</item>
 /// <item>不推进时（暂停 / 欠帧不足）绝不调用 <c>Step()</c>。</item>
+/// <item><b>输入与战斗状态一致提交</b>：使用 <see cref="IInputSource"/> 时，
+///       顺序恒为「准备输入 → 执行模拟 → 提交输入 → 帧记账」。模拟失败时这次准备的结果
+///       被直接丢弃：不写输入历史、不消费按下边沿，重试同一帧仍是同一输入。
+///       普通 <see cref="Func{T,TResult}"/> 输入源无法回滚，故要求其对同一帧号幂等。</item>
 /// </list>
 ///
 /// <para>
@@ -61,26 +65,39 @@ public sealed class BattleSession
     /// 用渲染帧耗时推进，返回本次<b>实际提交</b>的逻辑帧数。
     ///
     /// <para>
-    /// 输入由 <paramref name="inputProvider"/> 按"即将推进的帧号"提供，
-    /// 从而保证输入帧号与状态帧号严格对应。
+    /// 输入按"即将推进的帧号"提供，保证输入帧号与状态帧号严格对应。
+    /// 两种输入来源二选一：
+    /// <see cref="IInputSource"/>（可两阶段提交，推荐）或普通委托（无回滚能力）。
     /// </para>
     /// </summary>
     /// <param name="deltaSeconds">渲染帧耗时（秒）。</param>
     /// <param name="inputProvider">
-    /// 输入提供者：入参为即将推进的逻辑帧号，返回该帧输入。
+    /// 普通输入委托：入参为即将推进的逻辑帧号，返回该帧输入。
+    /// <b>契约：必须对同一帧号返回相同输入（幂等）</b>——模拟失败后会话会以同一帧号
+    /// 再次调用它；会话无法回滚该委托的副作用，故不适合有状态的输入源。
     /// 传 null 表示双方无输入。
     /// </param>
+    /// <param name="inputSource">
+    /// 两阶段输入源（如 <see cref="InputBuffer"/>）。模拟成功后才提交输入，
+    /// 失败时不会留下「输入已提交、战斗帧未提交」的幻影帧。与 <paramref name="inputProvider"/> 互斥。
+    /// </param>
     /// <returns>本次实际提交的逻辑帧数（0 到 <see cref="FixedStepScheduler.MaxStepsPerAdvance"/>）。</returns>
+    /// <exception cref="ArgumentException">同时传入两种输入来源。</exception>
     /// <exception cref="InvalidOperationException">
-    /// 输入提供者返回的帧号与当前逻辑帧不一致。
+    /// 输入帧号与当前逻辑帧不一致。
     /// </exception>
     /// <remarks>
-    /// 若 <paramref name="inputProvider"/> 或 <c>Step()</c> 抛出异常：
+    /// 若输入来源或 <c>Step()</c> 抛出异常：
     /// 已提交的帧保留、未提交的帧不计入 <c>TotalSteps</c>，
     /// 剩余时间预算记为丢弃，异常原样向上抛出。详见类型注释的「异常策略」。
     /// </remarks>
-    public int Advance(double deltaSeconds, Func<int, FrameInput>? inputProvider = null)
+    public int Advance(
+        double deltaSeconds,
+        Func<int, FrameInput>? inputProvider = null,
+        IInputSource? inputSource = null)
     {
+        RejectTwoInputSources(inputProvider, inputSource);
+
         // 只取「允许推进几帧」的时间预算，此处不增加 TotalSteps。
         int budget = Scheduler.Advance(deltaSeconds);
         if (budget <= 0)
@@ -92,9 +109,7 @@ public sealed class BattleSession
             for (int i = 0; i < budget; i++)
             {
                 int frame = CurrentState.Frame;
-                FrameInput input = inputProvider is null
-                    ? FrameInput.Empty(frame)
-                    : inputProvider(frame);
+                FrameInput input = ResolveInput(frame, inputProvider, inputSource);
 
                 // 防御：输入提供者返回的帧号必须与当前帧一致，否则立即失败而不是静默错帧。
                 if (input.Frame != frame)
@@ -104,6 +119,10 @@ public sealed class BattleSession
                 }
 
                 CurrentState = _simulation.Step(CurrentState, input).State;
+
+                // 模拟成功后才提交输入（写历史 + 消费边沿）；
+                // 失败时这次 Prepare 的结果被直接丢弃，重试同一帧仍是同一输入。
+                inputSource?.Commit(input);
 
                 // 只有真正提交后才记账，保证 TotalSteps 不会跑在状态前面。
                 Scheduler.CommitStep();
@@ -139,19 +158,24 @@ public sealed class BattleSession
     /// </para>
     /// </summary>
     /// <param name="count">要推进的帧数，必须非负。</param>
-    /// <param name="inputProvider">同 <see cref="Advance"/>。</param>
+    /// <param name="inputProvider">同 <see cref="Advance"/>（幂等契约）。</param>
+    /// <param name="inputSource">同 <see cref="Advance"/>；模拟成功后才提交输入。</param>
     /// <exception cref="ArgumentOutOfRangeException">count 为负。</exception>
-    public void StepExact(int count, Func<int, FrameInput>? inputProvider = null)
+    /// <exception cref="ArgumentException">同时传入两种输入来源。</exception>
+    public void StepExact(
+        int count,
+        Func<int, FrameInput>? inputProvider = null,
+        IInputSource? inputSource = null)
     {
         if (count < 0)
             throw new ArgumentOutOfRangeException(nameof(count), count, "步数不能为负。");
 
+        RejectTwoInputSources(inputProvider, inputSource);
+
         for (int i = 0; i < count; i++)
         {
             int frame = CurrentState.Frame;
-            FrameInput input = inputProvider is null
-                ? FrameInput.Empty(frame)
-                : inputProvider(frame);
+            FrameInput input = ResolveInput(frame, inputProvider, inputSource);
 
             if (input.Frame != frame)
             {
@@ -161,9 +185,29 @@ public sealed class BattleSession
 
             CurrentState = _simulation.Step(CurrentState, input).State;
 
-            // 与 Advance 共用同一记账路径，保证两种推进方式不会错位。
+            // 与 Advance 共用同一契约：模拟成功后才提交输入，再记账。
+            inputSource?.Commit(input);
             Scheduler.CommitStep();
         }
+    }
+
+    /// <summary>按优先级取输入：两阶段输入源 &gt; 普通委托 &gt; 空输入。</summary>
+    private static FrameInput ResolveInput(
+        int frame,
+        Func<int, FrameInput>? inputProvider,
+        IInputSource? inputSource)
+    {
+        if (inputSource is not null)
+            return inputSource.Prepare(frame);
+
+        return inputProvider is null ? FrameInput.Empty(frame) : inputProvider(frame);
+    }
+
+    private static void RejectTwoInputSources(Func<int, FrameInput>? inputProvider, IInputSource? inputSource)
+    {
+        if (inputProvider is not null && inputSource is not null)
+            throw new ArgumentException(
+                "inputProvider 与 inputSource 只能二选一：前者无法回滚，后者支持两阶段提交。");
     }
 
     /// <summary>
