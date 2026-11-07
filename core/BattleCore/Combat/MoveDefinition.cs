@@ -28,6 +28,8 @@ public sealed class MoveDefinition
 /// <see cref="FighterDefinition"/> 构造期校验）。</param>
 /// <param name="throws">投技定义（阶段 08B，D97）；null/空 = 本招式没有投技判定。
 /// 生效帧窗口必须落在 Active 阶段内，且同一招式内 ThrowId 不得重复。</param>
+/// <param name="projectiles">飞行道具定义（阶段 08D，D99）；null/空 = 本招式不发射道具。
+/// 出生帧必须在 Active 阶段内，且同一招式内 ProjectileTypeId 不得重复。</param>
 /// <exception cref="ArgumentException">ID 为空 / 阶段帧数 &lt; 1 / 允许状态为空。</exception>
 /// <exception cref="ArgumentException">攻击数据的生效帧范围超出 ActiveFrames。</exception>
 public MoveDefinition(
@@ -39,7 +41,8 @@ public MoveDefinition(
     MoveAllowedStates allowedFrom = MoveAllowedStates.GroundIdle,
     IReadOnlyList<AttackDefinition>? attacks = null,
     IReadOnlyList<CancelDefinition>? cancels = null,
-    IReadOnlyList<ThrowDefinition>? throws = null)
+    IReadOnlyList<ThrowDefinition>? throws = null,
+    IReadOnlyList<ProjectileDefinition>? projectiles = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -98,6 +101,23 @@ public MoveDefinition(
         }
 
         Throws = Array.AsReadOnly(throwCopy);
+
+        // 飞行道具（D99）：出生帧必须在 Active 阶段内，类型 ID 在本招式内唯一。
+        ProjectileDefinition[] projectileCopy = (projectiles ?? Array.Empty<ProjectileDefinition>()).ToArray();
+        var seenProjectileIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ProjectileDefinition definition in projectileCopy)
+        {
+            if (definition.SpawnAtActiveFrame >= activeFrames)
+                throw new ArgumentException(
+                    $"招式 {moveId} 的投掷物 {definition.ProjectileTypeId} 出生帧非法" +
+                    $"（spawnAtActiveFrame={definition.SpawnAtActiveFrame}，ActiveFrames={activeFrames}）。",
+                    nameof(projectiles));
+            if (!seenProjectileIds.Add(definition.ProjectileTypeId))
+                throw new ArgumentException(
+                    $"招式 {moveId} 内投掷物类型 ID 重复：{definition.ProjectileTypeId}。", nameof(projectiles));
+        }
+
+        Projectiles = Array.AsReadOnly(projectileCopy);
     }
 
     /// <summary>招式唯一标识（同一角色内唯一）。</summary>
@@ -126,6 +146,9 @@ public MoveDefinition(
 
     /// <summary>投技定义（阶段 08B，D97；只读，可为空列表 = 本招式没有投技判定）。</summary>
     public IReadOnlyList<ThrowDefinition> Throws { get; }
+
+    /// <summary>飞行道具定义（阶段 08D，D99；只读，可为空列表 = 本招式不发射道具）。</summary>
+    public IReadOnlyList<ProjectileDefinition> Projectiles { get; }
 
     /// <summary>招式总帧数（诊断用）。</summary>
     public int TotalFrames => StartupFrames + ActiveFrames + RecoveryFrames;

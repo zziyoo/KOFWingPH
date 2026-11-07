@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-08（阶段 08C：攻击相杀，D98——阶段 08 进行中，698 项测试）
+> 最后更新：2026-11-08（阶段 08D：飞行道具，D99——阶段 08 正式结项，722 项测试）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 698，已跳过: 0，总计: 698`
+期望：`失败: 0，通过: 722，已跳过: 0，总计: 722`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,25 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 08D（2026-11-08）飞行道具（D99）—— 阶段 08 结项
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Combat/ProjectileDefinition.cs` | **新增**：类型 ID / 命中载荷（复用 `AttackDefinition`）/ 速度 / 寿命 / 同类型上限 / 出生帧 |
+| `core/BattleCore/State/ProjectileState.cs` | **新增**：权威实体（Id/Owner/Type/SourceMove/位置/速度/寿命）+ `Validate` |
+| `core/BattleCore/State/BattleState.cs` | 新增 `Projectiles`（只读复制）与 `NextProjectileId`（单调分配、越界拒绝） |
+| `core/BattleCore/Combat/MoveDefinition.cs` | 新增 `Projectiles`（出生帧须在 Active 内、类型 ID 唯一） |
+| `core/BattleCore/State/FighterState.cs` | 新增 `ProjectileSpawnMask`（每次发动只生成一次；非动作状态必须为 0） |
+| `core/BattleCore/Simulation/BattleEvent.cs` | 新增 `ProjectileHit`(13) / `ProjectileBlocked`(14) / `ProjectileClash`(15) |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | `StepProjectiles`：运动/寿命/越界 → P×P 对撞 → P×F 命中/防御 → 生成；终局冻结保留实体 |
+| `core/BattleCore/Combat/DemoRoster.cs` | 双方新增 `5C`（轻脚键 → Fireball：速度 6 / 寿命 90 / 伤害 40 / 停顿 4） |
+| `core/BattleCore/BattleCoreInfo.cs` / `State/BattleState.cs` | StateVersion 11 → 12、CoreVersion 12 → 13 |
+| `scripts/DebugBoxDrawer.cs` / `BattleScene.cs` | 绘制投掷物碰撞盒（橙色）+ HUD `Projectiles:` 行 |
+| `tests/BattleCore.Tests/ProjectileTests.cs` | **新增 24 项** |
+
+**验收**：722/722；四构建 0/0；图形 `shots/p08d_projectile_flight.png` / `p08d_projectile_hit.png` /
+`p08d_projectile_clash.png`；10000 帧确定性长跑与中间快照重放均通过。
 
 ### 阶段 08C（2026-11-08）攻击相杀（D98）
 
@@ -801,8 +820,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K55 | **投技尝试必须在结算前采集（D97）** | 结算把人打进 Hitstun 之后，「目标可投」的答案就变了，投技会凭空消失 | 采集一次、仲裁一次：不要在 `ApplyThrows` 里重新读状态判断资格；新增投技来源（飞行道具/派生）也走同一张冲突表 |
 | K56 | **投技位移是唯一「不在运动阶段」的位置写入（D97）** | 它是显式放置，因此**必须**在同一处做完 D70 边界与 D73 最小间距钳制，否则会贴墙越界或与投技者重叠 | 任何新的「一次性放置」都要照这个模板；不要用 `PositionX = …` 绕过钳制 |
 | K57 | **相杀与互中互斥（D98）** | 如果「有重叠就相杀」，D80 的互中会全部消失（既有互中测试大面积失败），而且同一帧会出现「既取消攻击又结算伤害」 | 唯一分界是「有没有人真正打中受击框」：命中优先于相杀。改这条规则前先读 `StrikeClashTests.CloseRange_BothHit_IsTradeNotClash` |
+| K58 | **投掷物是快照实体，不是附着在角色上的判定（D99）** | 跟着发射者走会导致「发射者收招/被击中就消失」，也无法表示双弹对撞 | 只用 `ProjectileState` 自己的位置/速度/寿命/来源身份判定；新增投掷物行为请改 `StepProjectiles` 的顺序表，不要在角色身上加特例 |
+| K59 | **生成当帧只建立实体（D99）** | 生成帧立刻判定会依赖同一帧内的处理顺序，且「出生点贴着对手」时会凭空多打一下 | `ProjectileSpawnMask` 保证每次发动只生成一次（命中停顿冻结动作时间也不会重复生成） |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 08C 验收时 698/698 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 08D 验收时 722/722 测试通过，可正常启动运行。
 
 ---
 
@@ -868,6 +889,19 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           core/BattleCore/BattleCoreInfo.cs
           scripts/BattleScene.cs  scenes/Battle.tscn
           tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **本轮阶段 08D：`feat(combat): implement deterministic projectiles`**
+    （文档与代码同一提交，SHA 由 `git rev-parse HEAD` 读取，不自引用）。提交内容：
+    ```
+    新增: core/BattleCore/Combat/ProjectileDefinition.cs
+          core/BattleCore/State/ProjectileState.cs
+          tests/BattleCore.Tests/ProjectileTests.cs（含 .uid）
+    修改: core/BattleCore/Combat/{MoveDefinition,DemoRoster}.cs
+          core/BattleCore/State/{BattleState,FighterState}.cs
+          core/BattleCore/Simulation/{BattleSimulation,BattleEvent}.cs
+          core/BattleCore/BattleCoreInfo.cs
+          scripts/{DebugBoxDrawer,BattleScene}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
   - **本轮阶段 08C：`feat(combat): add deterministic strike clashes`**
@@ -1019,7 +1053,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
 2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D88 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、698 项测试、阶段 08 进度
+3. `docs/PROGRESS.md` — 已完成/未完成边界、722 项测试、阶段 09 安全入口
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Combat/HitDetection.cs` — 三框几何 + **原始攻击序号**（K38）
@@ -1074,9 +1108,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 08 进行中**：08A（Hitstop，D96）、08B（投技，D97）、08C（相杀，D98）已完成并推送；
-   08D（飞行道具）随后推进。
-   阶段 07 已结项（07A D89 / 07B D90-D91 / 07C D92-D93 / 最终补修 D94-D95）。
+4e. **阶段 08 已结项**（08A D96 / 08B D97 / 08C D98 / 08D D99），722 项测试。
+   阶段 09 安全入口（按依赖顺序）：① 比赛规则（多回合/计时/选人，建在 `RoundState` 上）；
+   ② 招式数据外置 JSON（`MoveDefinition` 已含攻击/取消/投技/投掷物四类数据）；
+   ③ 空中防御/拆投等防御扩展；④ AI；⑤ 联机回滚（需先做序列化）。
+   **不要**在没有新决策的情况下改动 D96 的冻结语义、D97 的冲突表、D98 的相杀分界、D99 的实体顺序。
    阶段 08 安全入口（按依赖顺序，详见 `PROGRESS.md` 阶段 07 总结）：① 比赛规则（多回合/计时/选人，
    建在 `RoundState` 之上）；② Hitstop；③ 投技；④ 飞行道具；⑤ 招式数据外置；⑥ 联机回滚。
    **不要**在没有新决策的情况下改动 D92/D93 的状态簇或 D89 的终局语义。
@@ -1112,7 +1148,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 698」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 722」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -1183,6 +1219,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
       互投冲突双方都不成立；打击优先于投技；位移经 D70/D73 钳制
 - [ ] 相杀（D98）：攻击框正面积重叠 **且双方都没命中受击框** → 双方进 Recovery、无伤害、
       一条 `StrikeClash`；有人真正命中时按 D80 结算（互中/单方命中），不判相杀
+- [ ] 飞行道具（D99）：实体在 `BattleState.Projectiles`（只读、ID 单调）；生成当帧不运动不判定；
+      阶段顺序 近战 → 投技 → 投掷物 → KO；P×P 同级抵消；P×F 命中即消失、每目标每帧至多一枚；
+      实体与发射者状态解耦
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向

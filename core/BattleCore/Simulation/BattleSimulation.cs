@@ -103,6 +103,7 @@ public sealed class BattleSimulation
         public int LandingWakeupFrames;
         public int MoveElapsedFrames;
         public int HitstopRemainingFrames;
+        public int ProjectileSpawnMask;
 
         /// <summary>是否处于地面可转向状态（站立/蹲下；动作与空中朝向冻结，D72）。</summary>
         public readonly bool CanTurn =>
@@ -135,7 +136,8 @@ public sealed class BattleSimulation
         //    终局不会让游戏进入异常/故障状态，也不会重复产生 KO 事件。
         if (state.Round.IsFinished)
         {
-            var frozen = new BattleState(frameAfter, state.Fighters, state.StateVersion, state.Round);
+            var frozen = new BattleState(frameAfter, state.Fighters, state.StateVersion, state.Round,
+                state.Projectiles, state.NextProjectileId);
             return new BattleStepResult(state.Frame, frameAfter, input, frozen);
         }
 
@@ -180,6 +182,7 @@ public sealed class BattleSimulation
                     LandingKnockdownFrames = fighter.LandingKnockdownFrames,
                     LandingWakeupFrames = fighter.LandingWakeupFrames,
                     HitstopRemainingFrames = fighter.HitstopRemainingFrames - 1,
+                    ProjectileSpawnMask = fighter.ProjectileSpawnMask,
                 };
                 frozenThisFrame[i] = true;
                 continue;
@@ -344,6 +347,10 @@ public sealed class BattleSimulation
                 LandingWakeupFrames = landingWakeup,
                 MoveElapsedFrames = tick.MoveElapsedFrames,
                 HitstopRemainingFrames = 0, // 命中停顿只由结算写入（本帧未冻结）。
+                // 投掷物生成掩码只属于当前攻击实例：换招/回到待机由状态机给出 0（见下方归一化）。
+                ProjectileSpawnMask = tick.MoveStartedFrame == fighter.MoveStartedFrame
+                    ? fighter.ProjectileSpawnMask
+                    : 0,
             };
         }
 
@@ -386,6 +393,7 @@ public sealed class BattleSimulation
                 LandingWakeupFrames = candidates[i].LandingWakeupFrames,
                 MoveElapsedFrames = candidates[i].MoveElapsedFrames,
                 HitstopRemainingFrames = candidates[i].HitstopRemainingFrames,
+                ProjectileSpawnMask = candidates[i].ProjectileSpawnMask,
             };
 
             // 命中/防御确认属于「当前攻击实例」：换招、被中断或回到待机后必须清空（D91）。
@@ -424,6 +432,13 @@ public sealed class BattleSimulation
         ThrowResolution throwResolution = ApplyThrows(
             state.Frame, nextFighters, throwAttempts, outcomes, strikeClash);
 
+        // ── 第 6c 阶段：飞行道具（D99）——已有实体移动/对撞/命中，随后本帧新生成的实体入列。
+        //    放在近战与投技之后：近战优先占用目标本帧的受击资格（相杀/投技同理），
+        //    投掷物作为独立实体仍然可以结算（不同来源互不取消），但每名目标每帧至多被
+        //    一枚投掷物命中（按 ID 升序取第一枚）。
+        ProjectileStep projectileStep = StepProjectiles(
+            state.Frame, nextFighters, state.Projectiles, candidates, state.NextProjectileId);
+
         // 连段收尾（D90）：恢复自由行动的角色清空旧记录（命中帧本身不会到这里——命中后必为受击状态）。
         UpdateCombos(nextFighters);
 
@@ -434,7 +449,8 @@ public sealed class BattleSimulation
         // ── 第 8 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
         IReadOnlyList<BattleEvent> events = CollectEvents(
             state.Frame, nextFighters, candidates, outcomes, attackActive,
-            throwAttempts, throwResolution, strikeClash, state.Round, nextRound);
+            throwAttempts, throwResolution, strikeClash,
+            projectileStep.Events, state.Round, nextRound);
 
         // ── 第 9 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
@@ -452,7 +468,8 @@ public sealed class BattleSimulation
             // X 相等：保持原朝向（平局不抖动，D72）。
         }
 
-        var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion, nextRound);
+        var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion, nextRound,
+            projectileStep.Projectiles, projectileStep.NextProjectileId);
 
         return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts, events);
     }
@@ -911,6 +928,349 @@ public sealed class BattleSimulation
     }
 
     /// <summary>
+    /// 飞行道具阶段（阶段 08D，D99）。顺序固定：
+    /// <list type="number">
+    /// <item>已有实体按自己的速度前进一帧、寿命 −1；寿命归零或越界（D70 的 X 边界 / 地面以下）直接移除；</item>
+    /// <item><b>投掷物 × 投掷物</b>：不同发射者的实体正面积重叠 → 双方同时消失（同级抵消，无 P1 先手）；</item>
+    /// <item><b>投掷物 × 角色</b>：重叠受击框即结算（命中或防御），实体消失；每名目标每帧至多被一枚命中（ID 升序）；</item>
+    /// <item>本帧新生成的实体入列：<b>生成当帧只建立实体</b>，不运动、不判定（下一帧才开始）。</item>
+    /// </list>
+    ///
+    /// <para>实体只依赖自身快照（位置/速度/寿命/来源身份），发射者进入收招、被击中或被投中都
+    /// 不会删除已有实体——它们不读发射者当前状态。每枚实体最多结算一次（命中即消失）。</para>
+    /// </summary>
+    private ProjectileStep StepProjectiles(
+        int frame,
+        FighterState[] fighters,
+        IReadOnlyList<ProjectileState> incoming,
+        FighterCandidate[] candidates,
+        int nextProjectileId)
+    {
+        var events = new List<ProjectileEvent>(4);
+        var alive = new List<ProjectileState>(incoming.Count);
+
+        // ① 运动 + 寿命 + 出界。
+        for (int i = 0; i < incoming.Count; i++)
+        {
+            ProjectileState projectile = incoming[i];
+            int life = projectile.RemainingLifetime - 1;
+            if (life <= 0)
+                continue;
+            FixedPoint x = projectile.PositionX + projectile.VelocityX;
+            FixedPoint y = projectile.PositionY + projectile.VelocityY;
+            if (x < _stage.MinX || x > _stage.MaxX)
+                continue;
+            if (y < FixedPoint.Zero)
+                continue;
+
+            alive.Add(projectile with { PositionX = x, PositionY = y, RemainingLifetime = life });
+        }
+
+        // ② 投掷物 × 投掷物：不同发射者、正面积重叠 → 同归于尽。
+        var definitions = new ProjectileDefinition[alive.Count];
+        for (int i = 0; i < alive.Count; i++)
+            definitions[i] = ResolveProjectile(alive[i]);
+
+        var destroyed = new bool[alive.Count];
+        for (int i = 0; i < alive.Count; i++)
+        {
+            for (int j = i + 1; j < alive.Count; j++)
+            {
+                if (destroyed[i] || destroyed[j])
+                    continue;
+                if (alive[i].OwnerFighterId == alive[j].OwnerFighterId)
+                    continue;
+
+                if (!ProjectileBox(alive[i], definitions[i]).Overlaps(ProjectileBox(alive[j], definitions[j])))
+                    continue;
+
+                destroyed[i] = true;
+                destroyed[j] = true;
+                events.Add(new ProjectileEvent(
+                    BattleEventType.ProjectileClash,
+                    Math.Min(alive[i].OwnerFighterId, alive[j].OwnerFighterId),
+                    Math.Max(alive[i].OwnerFighterId, alive[j].OwnerFighterId),
+                    MoveId: null,
+                    Amount: 0));
+            }
+        }
+
+        // ③ 投掷物 × 角色：每名目标每帧至多一枚（按 ID 升序先到先得）。
+        var survivors = new List<ProjectileState>(alive.Count);
+        var alreadyHit = new bool[fighters.Length];
+        for (int i = 0; i < alive.Count; i++)
+        {
+            if (destroyed[i])
+                continue;
+
+            ProjectileState projectile = alive[i];
+            int target = 1 - projectile.OwnerFighterId;
+            if (alreadyHit[target])
+            {
+                survivors.Add(projectile); // 本帧该目标已被另一枚命中：这枚继续飞（不消失）。
+                continue;
+            }
+
+            ProjectileDefinition definition = definitions[i];
+            if (!ProjectileBox(projectile, definition).Overlaps(FighterBoxes.GetHurtbox(fighters[target])))
+            {
+                survivors.Add(projectile);
+                continue;
+            }
+
+            alreadyHit[target] = true;
+            ApplyProjectileHit(
+                frame, fighters, projectile, definition, candidates[target].BackHeld, events);
+            // 命中或被防御后实体消失（不加入 survivors）——一次结算，不会重复扣血。
+        }
+
+        // ④ 本帧新生成的实体：只建立，不运动、不判定（D99）。
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            FighterState fighter = fighters[i];
+            if (fighter.LogicState != FighterLogicState.Active || fighter.MoveId is null)
+                continue;
+
+            MoveDefinition? move = _roster.Fighter(i).FindMoveById(fighter.MoveId);
+            if (move is null || move.Projectiles.Count == 0)
+                continue;
+
+            int elapsed = move.ActiveFrames - fighter.PhaseRemainingFrames;
+            int mask = fighter.ProjectileSpawnMask;
+
+            for (int k = 0; k < move.Projectiles.Count; k++)
+            {
+                ProjectileDefinition definition = move.Projectiles[k];
+                if (elapsed != definition.SpawnAtActiveFrame)
+                    continue;
+                if ((mask & (1 << k)) != 0)
+                    continue;
+
+                // 无论是否因数量上限被拒绝，都要标记「本次发动已经处理过这一条」——
+                // 命中停顿会冻结动作时间，否则同一帧会反复尝试生成。
+                mask |= 1 << k;
+
+                if (CountAlive(survivors, i, definition.ProjectileTypeId) >= definition.MaxAlive)
+                    continue;
+
+                if (nextProjectileId == int.MaxValue)
+                    throw new InvalidOperationException(
+                        $"帧 {frame}：投掷物 ID 空间耗尽（NextProjectileId 已达 int 上限）。");
+
+                FixedPoint forwardSign = fighter.Facing == Facing.Right
+                    ? FixedPoint.One
+                    : -FixedPoint.One;
+
+                survivors.Add(new ProjectileState(
+                    ProjectileId: nextProjectileId++,
+                    OwnerFighterId: i,
+                    TypeId: definition.ProjectileTypeId,
+                    SourceMoveId: fighter.MoveId,
+                    PositionX: _stage.ClampX(fighter.PositionX + forwardSign * definition.Hit.OffsetForward),
+                    PositionY: fighter.PositionY + definition.Hit.OffsetUp,
+                    VelocityX: forwardSign * definition.SpeedX,
+                    VelocityY: definition.SpeedY,
+                    RemainingLifetime: definition.LifetimeFrames));
+            }
+
+            fighters[i] = fighter with { ProjectileSpawnMask = mask };
+        }
+
+        return new ProjectileStep(survivors, events, nextProjectileId);
+    }
+
+    /// <summary>场上（含本帧新生成）属于该发射者、该类型的实体数量（数量上限判定用）。</summary>
+    private static int CountAlive(List<ProjectileState> projectiles, int owner, string typeId)
+    {
+        int count = 0;
+        for (int i = 0; i < projectiles.Count; i++)
+        {
+            if (projectiles[i].OwnerFighterId == owner
+                && string.Equals(projectiles[i].TypeId, typeId, StringComparison.Ordinal))
+                count++;
+        }
+        return count;
+    }
+
+    /// <summary>投掷物的权威碰撞盒（中心 ± 半宽/半高，全部定点数）。</summary>
+    private static FixedRect ProjectileBox(ProjectileState projectile, ProjectileDefinition definition) =>
+        new(
+            projectile.PositionX - definition.Hit.HalfWidth,
+            projectile.PositionX + definition.Hit.HalfWidth,
+            projectile.PositionY - definition.Hit.HalfHeight,
+            projectile.PositionY + definition.Hit.HalfHeight);
+
+    /// <summary>按来源身份解析投掷物定义（配置缺失立即失败，不静默跳过）。</summary>
+    private ProjectileDefinition ResolveProjectile(ProjectileState projectile)
+    {
+        MoveDefinition? move = _roster.Fighter(projectile.OwnerFighterId).FindMoveById(projectile.SourceMoveId);
+        if (move is not null)
+        {
+            for (int i = 0; i < move.Projectiles.Count; i++)
+            {
+                if (string.Equals(move.Projectiles[i].ProjectileTypeId, projectile.TypeId, StringComparison.Ordinal))
+                    return move.Projectiles[i];
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"投掷物 {projectile.ProjectileId} 的类型 {projectile.TypeId}" +
+            $"（来源招式 {projectile.SourceMoveId}）在角色 {projectile.OwnerFighterId} 的配置中不存在。");
+    }
+
+    /// <summary>
+    /// 投掷物命中/被防御的结算（D99）：与前程打击共用同一套防御表（D77）、击退/击飞（D92/D93）
+    /// 与实扣伤害语义；<b>停顿只作用于被击者</b>（不冻结远处的发射者）。
+    /// </summary>
+    private void ApplyProjectileHit(
+        int frame,
+        FighterState[] fighters,
+        ProjectileState projectile,
+        ProjectileDefinition definition,
+        bool backHeld,
+        List<ProjectileEvent> events)
+    {
+        int target = 1 - projectile.OwnerFighterId;
+        FighterState defender = fighters[target];
+        bool defenderAirborne = defender.LogicState.IsAirborneLike();
+
+        bool guarding = !defenderAirborne && defender.LogicState switch
+        {
+            FighterLogicState.Standing => backHeld,
+            FighterLogicState.Crouching => backHeld,
+            _ => false,
+        } && GuardCovers(definition.Hit.Height, defender.LogicState);
+
+        // 方向 = 投掷物自己的飞行方向（不是「远离发射者」——弹可能已经飞过发射者）。
+        int direction = projectile.VelocityX >= FixedPoint.Zero ? 1 : -1;
+
+        if (guarding)
+        {
+            FixedPoint knockback = definition.Hit.BlockKnockback;
+            FixedPoint knockbackX = direction > 0 ? knockback : -knockback;
+            FixedPoint friction = knockback == FixedPoint.Zero
+                ? FixedPoint.Zero
+                : definition.Hit.GroundKnockbackFriction;
+
+            fighters[target] = defender with
+            {
+                LogicState = FighterLogicState.Blockstun,
+                MoveId = null,
+                PhaseRemainingFrames = 0,
+                StunRemainingFrames = definition.Hit.BlockstunFrames,
+                VelocityX = knockbackX,
+                VelocityY = FixedPoint.Zero,
+                KnockbackFriction = friction,
+                MoveStartedFrame = -1,
+                MoveElapsedFrames = 0,
+                ProjectileSpawnMask = 0,
+                HitConfirmFrame = -1,
+                BlockConfirmFrame = -1,
+            };
+
+            events.Add(new ProjectileEvent(BattleEventType.ProjectileBlocked,
+                projectile.OwnerFighterId, target, projectile.TypeId, definition.Hit.BlockstunFrames));
+            return;
+        }
+
+        int healthAfter = defender.Health - definition.Hit.Damage;
+        if (healthAfter < 0)
+            healthAfter = 0;
+        int appliedDamage = defender.Health - healthAfter;
+
+        ComboState comboAfter = ComboState.AfterHit(
+            defender.Combo, projectile.OwnerFighterId, defender.LogicState.IsHitReaction());
+
+        if (definition.Hit.Launches)
+        {
+            fighters[target] = defender with
+            {
+                LogicState = FighterLogicState.AirHitstun,
+                MoveId = null,
+                PhaseRemainingFrames = 0,
+                StunRemainingFrames = 0,
+                Health = healthAfter,
+                VelocityX = direction > 0
+                    ? definition.Hit.LaunchVelocityX
+                    : -definition.Hit.LaunchVelocityX,
+                VelocityY = definition.Hit.LaunchVelocityY,
+                JumpKind = JumpKind.None,
+                KnockbackFriction = FixedPoint.Zero,
+                LandingKnockdownFrames = definition.Hit.KnockdownFrames,
+                LandingWakeupFrames = definition.Hit.WakeupFrames,
+                MoveStartedFrame = -1,
+                MoveElapsedFrames = 0,
+                ProjectileSpawnMask = 0,
+                HitConfirmFrame = -1,
+                BlockConfirmFrame = -1,
+                ComboRecord = comboAfter,
+            };
+        }
+        else if (defenderAirborne)
+        {
+            fighters[target] = defender with
+            {
+                LogicState = FighterLogicState.AirHitstun,
+                MoveId = null,
+                PhaseRemainingFrames = 0,
+                StunRemainingFrames = 0,
+                Health = healthAfter,
+                VelocityX = defender.VelocityX,
+                VelocityY = defender.VelocityY,
+                JumpKind = JumpKind.None,
+                KnockbackFriction = FixedPoint.Zero,
+                LandingKnockdownFrames = 0,
+                LandingWakeupFrames = 0,
+                MoveStartedFrame = -1,
+                MoveElapsedFrames = 0,
+                ProjectileSpawnMask = 0,
+                HitConfirmFrame = -1,
+                BlockConfirmFrame = -1,
+                ComboRecord = comboAfter,
+            };
+        }
+        else
+        {
+            FixedPoint knockback = definition.Hit.GroundKnockback;
+            FixedPoint knockbackX = direction > 0 ? knockback : -knockback;
+            FixedPoint friction = knockback == FixedPoint.Zero
+                ? FixedPoint.Zero
+                : definition.Hit.GroundKnockbackFriction;
+
+            fighters[target] = defender with
+            {
+                LogicState = FighterLogicState.Hitstun,
+                MoveId = null,
+                PhaseRemainingFrames = 0,
+                StunRemainingFrames = definition.Hit.HitstunFrames,
+                Health = healthAfter,
+                VelocityX = knockbackX,
+                VelocityY = FixedPoint.Zero,
+                KnockbackFriction = friction,
+                MoveStartedFrame = -1,
+                MoveElapsedFrames = 0,
+                ProjectileSpawnMask = 0,
+                HitConfirmFrame = -1,
+                BlockConfirmFrame = -1,
+                ComboRecord = comboAfter,
+            };
+        }
+
+        // 命中停顿只作用于被击者（D96 同一套字段；不冻结发射者）。
+        if (definition.Hit.HitstopFrames > 0)
+        {
+            fighters[target] = fighters[target] with
+            {
+                HitstopRemainingFrames = Math.Max(
+                    fighters[target].HitstopRemainingFrames, definition.Hit.HitstopFrames),
+            };
+        }
+
+        events.Add(new ProjectileEvent(BattleEventType.ProjectileHit,
+            projectile.OwnerFighterId, target, projectile.TypeId, appliedDamage));
+    }
+
+    /// <summary>
     /// 命中的连段记录归一化（阶段 07B，D90）：<b>帧末</b>状态已不在受击延续中的角色，
     /// 清空旧连段——「恢复自由行动」的判定落在帧末（含硬直归零转待机的那一帧）。
     /// </summary>
@@ -1079,6 +1439,20 @@ public sealed class BattleSimulation
         string? MoveId,
         bool InRange);
 
+    /// <summary>本帧飞行道具的一条事件（D99），在事件收集阶段按发生顺序写入事件流。</summary>
+    private readonly record struct ProjectileEvent(
+        BattleEventType Type,
+        int Source,
+        int Target,
+        string? MoveId,
+        int Amount);
+
+    /// <summary>本帧飞行道具阶段的输出（D99）：存活实体、事件、下一个可分配 ID。</summary>
+    private readonly record struct ProjectileStep(
+        IReadOnlyList<ProjectileState> Projectiles,
+        List<ProjectileEvent> Events,
+        int NextProjectileId);
+
     /// <summary>本帧投技的最终仲裁结果（D97）。</summary>
     private readonly record struct ThrowResolution(
         bool Clash,
@@ -1154,6 +1528,7 @@ public sealed class BattleSimulation
         ThrowAttempt[] throwAttempts,
         ThrowResolution throwResolution,
         bool strikeClash,
+        List<ProjectileEvent> projectileEvents,
         RoundState previousRound,
         RoundState nextRound)
     {
@@ -1235,7 +1610,14 @@ public sealed class BattleSimulation
             Add(BattleEventType.ThrowHit, throwResolution.Thrower, throwResolution.Target,
                 throwResolution.MoveId, throwResolution.Damage);
 
-        // ⑥ 回合终局（D89）：只在「本帧刚结束」时产生一次——
+        // ⑦ 飞行道具事件（D99）：对撞 / 命中 / 被防御，按发生顺序（ID 升序）追加。
+        for (int i = 0; i < projectileEvents.Count; i++)
+        {
+            ProjectileEvent e = projectileEvents[i];
+            Add(e.Type, e.Source, e.Target, e.MoveId, e.Amount);
+        }
+
+        // ⑧ 回合终局（D89）：只在「本帧刚结束」时产生一次——
         //    单方 KO：Knockout(胜者→败者) + RoundEnded；双 KO：DoubleKnockout(0→1) + RoundEnded。
         //    RoundEnded.Amount = (int)RoundOutcome，是消费方判断胜负的唯一依据。
         if (!previousRound.IsFinished && nextRound.IsFinished)

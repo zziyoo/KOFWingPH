@@ -66,7 +66,8 @@ public readonly record struct FighterState(
     int LandingWakeupFrames = 0,
     int MoveElapsedFrames = 0,
     int HitstopRemainingFrames = 0,
-    int LastThrowStartFrame = -1)
+    int LastThrowStartFrame = -1,
+    int ProjectileSpawnMask = 0)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -109,6 +110,13 @@ public readonly record struct FighterState(
     /// -1 = 尚未被投技抓取过；单调记录，随快照携带。
     /// </summary>
     public int LastThrowStartFrame { get; init; } = LastThrowStartFrame;
+
+    /// <summary>
+    /// 本攻击实例已经生成过哪些飞行道具（阶段 08D，D99）：位掩码，第 n 位 = 招式的第 n 条
+    /// <c>ProjectileDefinition</c>。命中停顿会冻结动作时间，若只按「经过帧」判定就会在同一帧
+    /// 反复生成，因此用掩码把「这次发动已经发过」变成显式事实。换招/中断时清零。
+    /// </summary>
+    public int ProjectileSpawnMask { get; init; } = ProjectileSpawnMask;
 
     /// <summary>是否处于招式阶段（Startup/Active/Recovery）。</summary>
     public bool IsInMove =>
@@ -284,6 +292,13 @@ public readonly record struct FighterState(
         if (!IsInMove && MoveElapsedFrames != 0)
             throw new InvalidOperationException(
                 $"角色 {Id} 处于非动作状态 {LogicState} 但携带动作经过帧数 {MoveElapsedFrames}（必须为 0）。");
+        if (ProjectileSpawnMask < 0)
+            throw new InvalidOperationException(
+                $"角色 {Id} 的投掷物生成掩码非法：{ProjectileSpawnMask}（必须 ≥ 0）。");
+        if (!IsInMove && ProjectileSpawnMask != 0)
+            throw new InvalidOperationException(
+                $"角色 {Id} 处于非动作状态 {LogicState} 但携带投掷物生成掩码 {ProjectileSpawnMask}（必须为 0）。");
+
         if (LastThrowStartFrame < -1)
             throw new InvalidOperationException(
                 $"角色 {Id} 的被投实例记录非法：LastThrowStartFrame={LastThrowStartFrame}（必须 ≥ -1）。");

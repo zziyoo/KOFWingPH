@@ -259,6 +259,7 @@ public partial class BattleScene : Node2D
                 $"Combo: P1 {p1.Combo} | P2 {p2.Combo}\n" +
                 $"P1 Cancel: {DescribeCancel(p1, 0)}\n" +
                 $"P2 Cancel: {DescribeCancel(p2, 1)}\n" +
+                $"Projectiles: {DescribeProjectiles(state)}\n" +
                 $"Round: {DescribeRound(state.Round)}\n" +
                 $"Event: {DescribeLastEvent(_lastEvents)}";
         }
@@ -277,6 +278,20 @@ public partial class BattleScene : Node2D
         }
 
         _debugBoxes.Refresh(); // 判定框调试绘制随权威状态刷新。
+    }
+
+    /// <summary>飞行道具只读摘要（D99）：数量 + 第一枚的位置/寿命（权威值）。</summary>
+    private static string DescribeProjectiles(BattleState state)
+    {
+        if (state.Projectiles.Count == 0)
+            return "-";
+
+        ProjectileState first = state.Projectiles[0];
+        string text = $"{state.Projectiles.Count} [{first.TypeId}@P{first.OwnerFighterId + 1}" +
+            $" ({first.PositionX.ToDouble():0.##}, {first.PositionY.ToDouble():0.##})" +
+            $" life={first.RemainingLifetime}]";
+
+        return state.Projectiles.Count > 1 ? text + " +" + (state.Projectiles.Count - 1) : text;
     }
 
     /// <summary>回合状态文本：进行中显示 InProgress，终局附结果与重开提示。</summary>

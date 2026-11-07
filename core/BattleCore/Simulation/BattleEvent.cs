@@ -70,6 +70,23 @@ public enum BattleEventType
     /// 两边攻击都中断进入 Recovery，不产生伤害。
     /// </summary>
     StrikeClash = 12,
+
+    /// <summary>
+    /// 飞行道具命中角色（阶段 08D，D99）：Source = 发射者，Target = 被击者，
+    /// MoveId = 投掷物类型 ID，Amount = <b>实扣伤害</b>（与 <see cref="Hit"/> 同语义）。
+    /// </summary>
+    ProjectileHit = 13,
+
+    /// <summary>
+    /// 飞行道具被防御（阶段 08D，D99）：Amount = 防御硬直帧数。
+    /// </summary>
+    ProjectileBlocked = 14,
+
+    /// <summary>
+    /// 两枚<b>不同发射者</b>的飞行道具对撞（阶段 08D，D99）：双方同时消失，
+    /// Source = 较小 ID 的发射者，Target = 另一名发射者，MoveId = null，Amount = 0。每帧可多次。
+    /// </summary>
+    ProjectileClash = 15,
 }
 
 /// <summary>

@@ -26,9 +26,22 @@ public sealed record BattleState
     /// </summary>
     public RoundState Round { get; }
 
+    /// <summary>飞行道具集合（阶段 08D，D99）；构造时复制并只读，顺序 = 生成顺序（ID 升序）。</summary>
+    public IReadOnlyList<ProjectileState> Projectiles { get; }
+
+    /// <summary>
+    /// 下一个可分配的投掷物 ID（阶段 08D，D99）：单调递增、随快照携带，
+    /// 保证「同一快照重放 → 同一串 ID」，且同帧多弹不会撞号。
+    /// </summary>
+    public int NextProjectileId { get; }
+
     /// <param name="round">回合状态；null 表示进行中（旧构造路径语义不变）。</param>
+    /// <param name="projectiles">飞行道具集合；null/空 = 场上没有实体。</param>
+    /// <param name="nextProjectileId">下一个投掷物 ID（≥ 1，且必须大于集合内所有 ID）。</param>
     public BattleState(int frame, IReadOnlyList<FighterState> fighters, int stateVersion,
-        RoundState? round = null)
+        RoundState? round = null,
+        IReadOnlyList<ProjectileState>? projectiles = null,
+        int nextProjectileId = 1)
     {
         if (frame < 0)
             throw new ArgumentOutOfRangeException(nameof(frame), frame, "逻辑帧号不能为负。");
@@ -42,6 +55,27 @@ public sealed record BattleState
         Round = round ?? RoundState.InProgress;
         Round.Validate();
 
+        ProjectileState[] projectileCopy = (projectiles ?? Array.Empty<ProjectileState>()).ToArray();
+        var seenIds = new HashSet<int>();
+        foreach (ProjectileState projectile in projectileCopy)
+        {
+            projectile.Validate();
+            if (!seenIds.Add(projectile.ProjectileId))
+                throw new ArgumentException(
+                    $"投掷物 ID 重复：{projectile.ProjectileId}（同一快照内必须唯一）。", nameof(projectiles));
+            if (projectile.ProjectileId >= nextProjectileId)
+                throw new ArgumentException(
+                    $"投掷物 {projectile.ProjectileId} 的 ID 不小于 NextProjectileId={nextProjectileId}" +
+                    "（分配器必须已经越过已存在的实体）。", nameof(nextProjectileId));
+        }
+
+        if (nextProjectileId < 1)
+            throw new ArgumentOutOfRangeException(nameof(nextProjectileId), nextProjectileId,
+                "下一个投掷物 ID 必须 ≥ 1。");
+
+        Projectiles = Array.AsReadOnly(projectileCopy);
+        NextProjectileId = nextProjectileId;
+
         foreach (FighterState fighter in Fighters)
             fighter.Validate();
     }
@@ -54,10 +88,11 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 11 = 阶段 08B（FighterState 新增被投实例记录 LastThrowStartFrame；
-    /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界）。
+    /// 状态格式版本 12 = 阶段 08D（BattleState 新增 Projectiles 实体集合与 NextProjectileId；
+    /// FighterState 新增 ProjectileSpawnMask。项目尚无序列化快照，无迁移负担，
+    /// 版本号只标记格式边界）。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 11) => new(
+    public static BattleState CreateDefault(int stateVersion = 12) => new(
         frame: 0,
         fighters: new[]
         {

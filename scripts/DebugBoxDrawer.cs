@@ -53,6 +53,42 @@ public partial class DebugBoxDrawer : Node2D
             foreach (FixedRect hitbox in FighterBoxes.GetActiveHitboxes(fighter, definition))
                 DrawRect(ToScreenRect(hitbox), new Color(1f, 0.15f, 0.1f, 0.45f));
         }
+
+        // 飞行道具（08D，D99）：橙色半透明 = 权威碰撞盒；位置完全来自快照，表现层不模拟。
+        foreach (ProjectileState projectile in state.Projectiles)
+        {
+            ProjectileDefinition? definition = ResolveProjectile(projectile);
+            if (definition is null)
+                continue;
+
+            FixedRect box = new(
+                projectile.PositionX - definition.Hit.HalfWidth,
+                projectile.PositionX + definition.Hit.HalfWidth,
+                projectile.PositionY - definition.Hit.HalfHeight,
+                projectile.PositionY + definition.Hit.HalfHeight);
+
+            DrawRect(ToScreenRect(box), new Color(1f, 0.6f, 0.1f, 0.55f));
+            DrawRect(ToScreenRect(box), new Color(1f, 0.85f, 0.2f, 0.95f), filled: false, width: 2f);
+        }
+    }
+
+    /// <summary>按来源身份查投掷物定义（只读展示用；规则仍在内核）。</summary>
+    private ProjectileDefinition? ResolveProjectile(ProjectileState projectile)
+    {
+        if (_roster is null)
+            return null;
+
+        MoveDefinition? move = _roster.Fighter(projectile.OwnerFighterId).FindMoveById(projectile.SourceMoveId);
+        if (move is null)
+            return null;
+
+        for (int i = 0; i < move.Projectiles.Count; i++)
+        {
+            if (move.Projectiles[i].ProjectileTypeId == projectile.TypeId)
+                return move.Projectiles[i];
+        }
+
+        return null;
     }
 
     /// <summary>世界坐标（Y 向上、地面 0）→ 屏幕矩形（Godot Y 向下）。</summary>

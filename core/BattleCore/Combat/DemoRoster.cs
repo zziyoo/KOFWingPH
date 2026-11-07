@@ -37,6 +37,12 @@ public static class DemoRoster
     /// <summary>站立投技（阶段 08B，D97）：裸重脚键，双方同款。</summary>
     public const string StandingThrow = "StandingThrow";
 
+    /// <summary>飞行道具招式（阶段 08D，D99）：裸轻脚键，双方同款。</summary>
+    public const string Fireball = "Fireball";
+
+    /// <summary>飞行道具类型 ID（事件与实体都用它）。</summary>
+    public const string FireballType = "Fireball";
+
     /// <summary>角色甲「Kai」的配置。</summary>
     public static FighterDefinition CreateKai() => new(
         "Kai",
@@ -65,6 +71,12 @@ public static class DemoRoster
                 "5D",
                 Array.Empty<CommandDirection>(),
                 InputBits.HeavyKick,
+                priority: 5),
+            // 5C：裸轻脚键 → 飞行道具（D99）。
+            new CommandDefinition(
+                "5C",
+                Array.Empty<CommandDirection>(),
+                InputBits.LightKick,
                 priority: 5),
         },
         new[]
@@ -136,6 +148,24 @@ public static class DemoRoster
                         pushDistance: FixedPoint.FromInt(20),
                         hitstopFrames: 6),
                 }),
+            // 飞行道具（08D，D99）：Startup 5 / Active 2 / Recovery 10。Active 首帧生成实体，
+            // 速度 6、寿命 90；命中载荷 40 伤害 / 硬直 14 / 防御硬直 10 / 停顿 4。
+            new MoveDefinition(Fireball, "5C",
+                startupFrames: 5, activeFrames: 2, recoveryFrames: 10,
+                allowedFrom: MoveAllowedStates.Standing,
+                projectiles: new[]
+                {
+                    new ProjectileDefinition(
+                        projectileTypeId: FireballType,
+                        hit: new AttackDefinition(
+                            offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(60),
+                            halfWidth: FixedPoint.FromInt(14), halfHeight: FixedPoint.FromInt(14),
+                            height: AttackHeight.Mid, damage: 40, hitstunFrames: 14, blockstunFrames: 10,
+                            hitstopFrames: 4),
+                        speedX: FixedPoint.FromInt(6),
+                        lifetimeFrames: 90,
+                        maxAlive: 1),
+                }),
         },
         // 运动配置（D64/D68）：Kai——前行 2.0 / 后撤 1.5 单位每帧；预备跳 3 帧；
         // 小跳初速 4.0（腾空 16 帧、最高 14）、大跳初速 6.5（腾空 26 帧、最高 39）、
@@ -169,6 +199,12 @@ public static class DemoRoster
                 "5D",
                 Array.Empty<CommandDirection>(),
                 InputBits.HeavyKick,
+                priority: 5),
+            // 5C：裸轻脚键 → 飞行道具（D99）。
+            new CommandDefinition(
+                "5C",
+                Array.Empty<CommandDirection>(),
+                InputBits.LightKick,
                 priority: 5),
         },
         new[]
@@ -216,6 +252,23 @@ public static class DemoRoster
                         wakeupFrames: 8,
                         pushDistance: FixedPoint.FromInt(20),
                         hitstopFrames: 6),
+                }),
+            // 飞行道具（08D，D99）：与 Kai 同款（不同招式表里的同名 MoveId 互不影响）。
+            new MoveDefinition(Fireball, "5C",
+                startupFrames: 5, activeFrames: 2, recoveryFrames: 10,
+                allowedFrom: MoveAllowedStates.Standing,
+                projectiles: new[]
+                {
+                    new ProjectileDefinition(
+                        projectileTypeId: FireballType,
+                        hit: new AttackDefinition(
+                            offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(60),
+                            halfWidth: FixedPoint.FromInt(14), halfHeight: FixedPoint.FromInt(14),
+                            height: AttackHeight.Mid, damage: 40, hitstunFrames: 14, blockstunFrames: 10,
+                            hitstopFrames: 4),
+                        speedX: FixedPoint.FromInt(6),
+                        lifetimeFrames: 90,
+                        maxAlive: 1),
                 }),
         },
         // 运动配置（D64/D68）：Rei 与 Kai 刻意不同——证明 P1/P2 可携带不同运动数据：
