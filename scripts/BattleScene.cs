@@ -62,6 +62,15 @@ public partial class BattleScene : Node2D
     /// <summary>确保积压告警只输出一次，避免每帧刷屏。</summary>
     private bool _backlogWarningIssued;
 
+    /// <summary>判定框调试显示开关（F2 切换）：Hitbox 红 / Hurtbox 蓝 / Pushbox 绿框。</summary>
+    private bool _showDebugBoxes = true;
+
+    /// <summary>判定框调试绘制节点（渲染在所有子节点之上）。</summary>
+    private DebugBoxDrawer _debugBoxes = null!;
+
+    /// <summary>本会话的角色配置（供判定框查询；只读）。</summary>
+    private readonly FightRoster _roster = DemoRoster.CreateKaiVsRei();
+
     public override void _Ready()
     {
         _fighter1Node = GetNodeOrNull<Node2D>("Fighter1");
@@ -72,9 +81,14 @@ public partial class BattleScene : Node2D
         _session = new BattleSession(
             initialState: BattleState.CreateDefault(),
             scheduler: new FixedStepScheduler(MaxStepsPerAdvance),
-            simulation: new BattleSimulation(DemoRoster.CreateKaiVsRei()));
+            simulation: new BattleSimulation(_roster));
 
         _inputMap = new KeyboardInputMap(_inputBuffer);
+
+        // 判定框调试层：最后 AddChild → 渲染在所有子节点之上（不受不透明背景遮挡）。
+        _debugBoxes = new DebugBoxDrawer();
+        _debugBoxes.Bind(_session, _roster);
+        AddChild(_debugBoxes);
 
         SyncViewFromState();
     }
@@ -99,6 +113,14 @@ public partial class BattleScene : Node2D
                 _session.Scheduler.Resume();
 
             SyncViewFromState();
+            return;
+        }
+
+        if (@event is InputEventKey f2 && !f2.Echo && f2.Pressed && f2.Keycode == Key.F2)
+        {
+            _showDebugBoxes = !_showDebugBoxes;
+            _debugBoxes.Enabled = _showDebugBoxes;
+            _debugBoxes.Refresh();
             return;
         }
 
@@ -179,6 +201,8 @@ public partial class BattleScene : Node2D
                 $"P2 State: {state.Fighter(1).LogicState}\n" +
                 $"P2 Move: {DescribeMove(state.Fighter(1))}";
         }
+
+        _debugBoxes.Refresh(); // 判定框调试绘制随权威状态刷新。
     }
 
     /// <summary>把权威定点坐标渲染成 HUD 文本（世界坐标，Y 向上，地面为 0；显示用浮点）。</summary>

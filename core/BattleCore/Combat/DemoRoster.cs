@@ -60,13 +60,36 @@ public static class DemoRoster
         },
         new[]
         {
-            new MoveDefinition(FireballPrototype, "236A",
-                startupFrames: 4, activeFrames: 3, recoveryFrames: 8),
-            new MoveDefinition(DragonPunchPrototype, "623A",
-                startupFrames: 3, activeFrames: 5, recoveryFrames: 10),
+            // 5A：站立轻拳——短前向攻击框（Active 全程生效），Mid，随 06B 接入伤害。
             new MoveDefinition(StandLightPunch, "5A",
                 startupFrames: 3, activeFrames: 2, recoveryFrames: 6,
-                allowedFrom: MoveAllowedStates.Standing),
+                allowedFrom: MoveAllowedStates.Standing,
+                attacks: new[]
+                {
+                    new AttackDefinition(
+                        offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(70),
+                        halfWidth: FixedPoint.FromInt(20), halfHeight: FixedPoint.FromInt(20),
+                        height: AttackHeight.Mid),
+                }),
+            new MoveDefinition(FireballPrototype, "236A",
+                startupFrames: 4, activeFrames: 3, recoveryFrames: 8,
+                attacks: new[]
+                {
+                    new AttackDefinition(
+                        offsetForward: FixedPoint.FromInt(50), offsetUp: FixedPoint.FromInt(60),
+                        halfWidth: FixedPoint.FromInt(25), halfHeight: FixedPoint.FromInt(25),
+                        height: AttackHeight.Mid),
+                }),
+            new MoveDefinition(DragonPunchPrototype, "623A",
+                startupFrames: 3, activeFrames: 5, recoveryFrames: 10,
+                attacks: new[]
+                {
+                    // 升龙：攻击框偏上（High，06B 蹲防失败）。
+                    new AttackDefinition(
+                        offsetForward: FixedPoint.FromInt(35), offsetUp: FixedPoint.FromInt(95),
+                        halfWidth: FixedPoint.FromInt(22), halfHeight: FixedPoint.FromInt(30),
+                        height: AttackHeight.High),
+                }),
         },
         // 运动配置（D64/D68）：Kai——前行 2.0 / 后撤 1.5 单位每帧；预备跳 3 帧；
         // 小跳初速 4.0（腾空 16 帧、最高 14）、大跳初速 6.5（腾空 26 帧、最高 39）、
@@ -100,9 +123,24 @@ public static class DemoRoster
         {
             // 与 Kai 的 236A 同指令、不同招式、不同阶段帧数（B4.5）。
             new MoveDefinition(BackDraft, "236A",
-                startupFrames: 5, activeFrames: 2, recoveryFrames: 7),
+                startupFrames: 5, activeFrames: 2, recoveryFrames: 7,
+                attacks: new[]
+                {
+                    new AttackDefinition(
+                        offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(60),
+                        halfWidth: FixedPoint.FromInt(24), halfHeight: FixedPoint.FromInt(24),
+                        height: AttackHeight.Mid),
+                }),
             new MoveDefinition(SweepPrototype, "214B",
-                startupFrames: 3, activeFrames: 4, recoveryFrames: 9),
+                startupFrames: 3, activeFrames: 4, recoveryFrames: 9,
+                attacks: new[]
+                {
+                    // 扫腿：低位攻击框（Low，06B 站防失败）。
+                    new AttackDefinition(
+                        offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(20),
+                        halfWidth: FixedPoint.FromInt(30), halfHeight: FixedPoint.FromInt(18),
+                        height: AttackHeight.Low),
+                }),
         },
         // 运动配置（D64/D68）：Rei 与 Kai 刻意不同——证明 P1/P2 可携带不同运动数据：
         // 前 1.75 / 后 1.25 单位每帧；预备跳 4 帧；小跳初速 3.5、大跳初速 6.0、

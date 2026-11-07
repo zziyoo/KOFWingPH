@@ -240,7 +240,13 @@ public sealed class BattleSimulation
 
         var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion);
 
-        return new BattleStepResult(state.Frame, frameAfter, input, nextState);
+        // ── 攻击接触检测（阶段 06A，D76）：基于「钳制/推挤后的最终候选状态」做
+        //    几何层「攻击框 ∩ 受击框」检测，作为确定性诊断输出随结果返回。
+        //    本阶段不结算伤害（06B）；候选基于最终位置，命中判定与表现层无关。
+        IReadOnlyList<AttackContact> contacts = HitDetection.Detect(
+            nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
+
+        return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts);
     }
 
     /// <summary>

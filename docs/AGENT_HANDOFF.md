@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 05 最终专项补修：推挤求解 D73 / GroundY D74 / JumpKind D75——阶段 05 结项）
+> 最后更新：2026-11-07（阶段 06A：确定性 AABB 攻击判定，D76）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 485，已跳过: 0，总计: 485`
+期望：`失败: 0，通过: 509，已跳过: 0，总计: 509`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,27 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 06A（2026-11-07）确定性 AABB 攻击判定（D76）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Combat/FixedRect.cs` | **新增**：AABB（MinX/MaxX/MinY/MaxY 全定点），构造期拒绝零/负宽高；`Overlaps` = 正面积重叠（边接触不算，无 epsilon） |
+| `core/BattleCore/Combat/AttackHeight.cs` | **新增**：High/Mid/Low（06B 防御表；数据显式配置，不由 Hitbox Y 推断） |
+| `core/BattleCore/Combat/AttackDefinition.cs` | **新增**：攻击框几何（前向/向上偏移 + 半宽高）+ Active 内生效帧范围（`int.MaxValue` 哨兵 = 至末帧）+ 高度 |
+| `core/BattleCore/Combat/MoveDefinition.cs` | 新增 `Attacks` 列表（可空 = 无攻击招式）；范围超出 ActiveFrames 构造期失败 |
+| `core/BattleCore/Combat/HitDetection.cs` | **新增**：`FighterBoxes`（Hurtbox 姿态查询 / Pushbox 查询 / Active 攻击框查询）+ `HitDetection.Detect`（确定性接触候选；不结算） |
+| `core/BattleCore/Simulation/BattleStepResult.cs` | 新增 `Contacts`（只读接触候选） |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | Step 末尾基于最终候选位置做接触检测 |
+| `core/BattleCore/Combat/DemoRoster.cs` | 演示招式接入攻击框（5A/236A/623A/BackDraft/Sweep，Mid/High/Low 齐备） |
+| `scripts/DebugBoxDrawer.cs` | **新增**：顶层判定框调试节点（Hitbox 红/Hurtbox 蓝/Pushbox 绿轮廓；几何全部来自权威查询） |
+| `scripts/BattleScene.cs` | F2 调试开关；刷新转发给 DebugBoxDrawer |
+| `tests/BattleCore.Tests/FixedRectTests.cs` 等 | **新增 24 项**（几何 6 + 判定框 18） |
+
+**验收**：509/509；四构建 0/0；无头导入 `[ DONE ]`；图形运行攻击框 Active 可见、
+Recovery 无框（`shots/p06a_hitbox_active.png` / `shots/p06a_recovery_nobox.png`）。
+**注意**：BattleScene 自身 `_Draw` 会被不透明 Background 子节点遮挡——调试绘制必须在
+顶层子节点（`DebugBoxDrawer`）进行。
 
 ### 阶段 05 最终专项补修（2026-11-07）推挤统一求解 / 防穿越 / GroundY / JumpKind（D73–D75）—— 阶段 05 结项
 

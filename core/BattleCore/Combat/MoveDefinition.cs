@@ -15,20 +15,24 @@ namespace NewKOF.BattleCore.Combat;
 /// </summary>
 public sealed class MoveDefinition
 {
-    /// <param name="moveId">招式唯一标识（同一角色内不得重复）。</param>
-    /// <param name="commandId">触发的指令 ID；必须存在于同角色的指令表中。</param>
-    /// <param name="startupFrames">启动阶段帧数（≥ 1）。</param>
-    /// <param name="activeFrames">生效阶段帧数（≥ 1；本阶段不执行判定）。</param>
-    /// <param name="recoveryFrames">收招阶段帧数（≥ 1）。</param>
-    /// <param name="allowedFrom">允许发动的待机状态集合，不能为 <see cref="MoveAllowedStates.None"/>。</param>
-    /// <exception cref="ArgumentException">ID 为空 / 阶段帧数 &lt; 1 / 允许状态为空。</exception>
-    public MoveDefinition(
-        string moveId,
-        string commandId,
-        int startupFrames,
-        int activeFrames,
-        int recoveryFrames,
-        MoveAllowedStates allowedFrom = MoveAllowedStates.GroundIdle)
+/// <param name="moveId">招式唯一标识（同一角色内不得重复）。</param>
+/// <param name="commandId">触发的指令 ID；必须存在于同角色的指令表中。</param>
+/// <param name="startupFrames">启动阶段帧数（≥ 1）。</param>
+/// <param name="activeFrames">生效阶段帧数（≥ 1；本阶段不执行判定）。</param>
+/// <param name="recoveryFrames">收招阶段帧数（≥ 1）。</param>
+/// <param name="allowedFrom">允许发动的待机状态集合，不能为 <see cref="MoveAllowedStates.None"/>。</param>
+/// <param name="attacks">攻击判定数据（阶段 06A，D76）；null/空 = 不带攻击框的招式
+/// （识别与状态机时间线照常，只是永不产生命中）。</param>
+/// <exception cref="ArgumentException">ID 为空 / 阶段帧数 &lt; 1 / 允许状态为空。</exception>
+/// <exception cref="ArgumentException">攻击数据的生效帧范围超出 ActiveFrames。</exception>
+public MoveDefinition(
+    string moveId,
+    string commandId,
+    int startupFrames,
+    int activeFrames,
+    int recoveryFrames,
+    MoveAllowedStates allowedFrom = MoveAllowedStates.GroundIdle,
+    IReadOnlyList<AttackDefinition>? attacks = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -53,6 +57,20 @@ public sealed class MoveDefinition
         ActiveFrames = activeFrames;
         RecoveryFrames = recoveryFrames;
         AllowedFrom = allowedFrom;
+
+        // 攻击判定数据（D76）：防御复制 + 生效帧范围必须在 Active 阶段内
+        // （0 起始含两端）。LastActiveFrame == int.MaxValue 是「直到 Active 末帧」的
+        // 显式哨兵（默认值）；显式给出的其他越界范围构造期失败，不进入模拟。
+        var attackCopy = (attacks ?? Array.Empty<AttackDefinition>()).ToArray();
+        foreach (AttackDefinition attack in attackCopy)
+        {
+            if (attack.LastActiveFrame != int.MaxValue && attack.LastActiveFrame >= activeFrames)
+                throw new ArgumentException(
+                    $"招式 {moveId} 的攻击生效帧范围非法（lastActiveFrame={attack.LastActiveFrame}，" +
+                    $"ActiveFrames={activeFrames}；范围须在 0..{activeFrames - 1} 内，或用默认哨兵表示至末帧）。", nameof(attacks));
+        }
+
+        Attacks = Array.AsReadOnly(attackCopy);
     }
 
     /// <summary>招式唯一标识（同一角色内唯一）。</summary>
@@ -72,6 +90,9 @@ public sealed class MoveDefinition
 
     /// <summary>允许发动的待机状态集合。</summary>
     public MoveAllowedStates AllowedFrom { get; }
+
+    /// <summary>攻击判定数据（阶段 06A，D76；只读，可为空列表 = 无攻击框的招式）。</summary>
+    public IReadOnlyList<AttackDefinition> Attacks { get; }
 
     /// <summary>招式总帧数（诊断用）。</summary>
     public int TotalFrames => StartupFrames + ActiveFrames + RecoveryFrames;

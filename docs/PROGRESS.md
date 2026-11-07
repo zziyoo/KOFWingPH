@@ -1215,6 +1215,51 @@ HUD 增加双人 `Vel (vx, vy) Jump: <类型>` 行（只读权威速度与跳跃
 
 ---
 
+## 阶段 06A 成果（确定性 AABB 攻击判定，2026-11-07）
+
+### 边界
+
+只做判定框几何、攻击数据时间线与确定性接触检测。**不做**伤害/防御/硬直（06B）、
+重复命中抑制与事件流（06C）。
+
+### 核心架构（D76）
+
+1. **`FixedRect`**：AABB（MinX/MaxX/MinY/MaxY 全定点），构造期拒绝零/负宽高；
+   相交 = 正面积重叠，**边缘接触不算命中**，无 epsilon（专项测试固定）。
+2. **三框职责**：Pushbox = 显示/调试查询（宽 60 与 D73 间距一致，权威推挤仍由 D73 独占）；
+   Hurtbox = 姿态受击框（站立系 120 高、蹲下 70、空中跟随权威 PositionY）；
+   Hitbox = 只来自 `AttackDefinition`（挂在 `MoveDefinition.Attacks`，可空），
+   仅 Active 配置帧范围生效。
+3. **帧语义**：Startup → Active 转换完成的那一逻辑帧 = Active 第 1 帧
+   （elapsed = ActiveFrames − 剩余），该帧产生攻击框；Recovery 首帧不再有。
+   `int.MaxValue` 哨兵 = 「至 Active 末帧」。
+4. **镜像**：前向偏移按权威 Facing 施加（±），与 Godot 精灵翻转无关；
+   攻击框跟随权威位置；不检测攻击者自己。
+5. **接触输出**：`BattleStepResult.Contacts`（只读；顺序 = 攻击者 0→1、攻击序号升序）。
+   基于推挤/边界处理后的最终候选位置检测。
+6. **Godot**：`DebugBoxDrawer` 顶层调试节点（Hitbox 红/Hurtbox 蓝/Pushbox 绿轮廓，
+   F2 开关），几何全部来自 `FighterBoxes` 权威查询，只做显示换算。
+
+### 测试与构建（06A 实测）
+
+新增 **24 项**（485 → **509**）：AABB 几何 6 项（完全/部分重叠、边接触不算、1 raw 边界、
+负坐标、非法矩形拒绝）；判定框 18 项（三姿态 Hurtbox、Pushbox 对齐 D73、
+Startup/Active 首末帧/Recovery 时间线、无招式无框、镜像、跟随位置、非法几何与范围拒绝、
+Step 时间线接触恰在 Active 帧、镜像配置镜像接触、无自命中、墙角推挤不退化）。
+既有 485 项全部不动地通过（期间发现并修复 `GetActiveHitboxes` 缺「必须 Active 状态」
+门的原型缺陷——修复前 Startup/Recovery 也会产出攻击框，被专项测试捕获）。
+
+| 项 | 结果 |
+|---|---|
+| `dotnet test` | **509/509 通过** |
+| `dotnet build core/BattleCore`（Debug/Release） | 0 警告 / 0 错误 |
+| `dotnet build NewKOF.csproj`（Debug/Release） | 0 警告 / 0 错误 |
+| Godot 无头导入 | `[ DONE ]` |
+| Godot 图形运行 | `shots/p06a_hitbox_active.png`（逻辑帧 29 = 5A Active 首帧：红色攻击框出现在
+  P1 面前，蓝色 Hurtbox/绿色 Pushbox 双方可见）、`shots/p06a_recovery_nobox.png`（Recovery 无攻击框） |
+
+---
+
 ## 下一阶段计划：阶段 06（攻击判定与结算前置）
 
 **进入前必须先读** `ARCHITECTURE.md` 第 4 节（D1–D72 全部决策）与第 5 节。
