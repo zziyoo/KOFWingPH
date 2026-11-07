@@ -61,6 +61,22 @@ public sealed class FighterDefinition
                     $"CommandId：{move.CommandId}。", nameof(moves));
         }
 
+        // 取消目标校验（阶段 07B，D91）：目标必须存在于<b>本角色</b>的招式表，且不能是自身
+        // （自取消会形成无进展的循环，且没有实际意义）。必须在 moveIds 完整后再校验。
+        foreach (MoveDefinition move in moveCopy)
+        {
+            foreach (CancelDefinition cancel in move.Cancels)
+            {
+                if (string.Equals(cancel.TargetMoveId, move.MoveId, StringComparison.Ordinal))
+                    throw new ArgumentException(
+                        $"角色 {fighterId} 的招式 {move.MoveId} 配置了取消到自身的规则。", nameof(moves));
+                if (!moveIds.Contains(cancel.TargetMoveId))
+                    throw new ArgumentException(
+                        $"角色 {fighterId} 的招式 {move.MoveId} 取消了不存在的招式 " +
+                        $"{cancel.TargetMoveId}。", nameof(moves));
+            }
+        }
+
         Commands = Array.AsReadOnly(commandCopy);
         Moves = Array.AsReadOnly(moveCopy);
 

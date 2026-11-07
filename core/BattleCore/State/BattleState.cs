@@ -54,10 +54,10 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 7 = 阶段 07A（BattleState 新增 RoundState，接入 KO/回合终局；
+    /// 状态格式版本 8 = 阶段 07B（FighterState 新增连段记录与命中/防御确认帧；
     /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界）。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 7) => new(
+    public static BattleState CreateDefault(int stateVersion = 8) => new(
         frame: 0,
         fighters: new[]
         {

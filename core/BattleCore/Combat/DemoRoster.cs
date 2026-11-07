@@ -61,6 +61,8 @@ public static class DemoRoster
         new[]
         {
             // 5A：站立轻拳——短前向攻击框（Active 全程生效），Mid，随 06B 接入伤害。
+            // 07B（D91）：命中确认后可取消到 236A（演示数据，窗口 = 自发动帧起算的 3..10 帧，
+            // 覆盖 Active 与大部分 Recovery；确认必须来自更早帧）。
             new MoveDefinition(StandLightPunch, "5A",
                 startupFrames: 3, activeFrames: 2, recoveryFrames: 6,
                 allowedFrom: MoveAllowedStates.Standing,
@@ -70,6 +72,13 @@ public static class DemoRoster
                         offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(70),
                         halfWidth: FixedPoint.FromInt(20), halfHeight: FixedPoint.FromInt(20),
                         height: AttackHeight.Mid, damage: 30, hitstunFrames: 12, blockstunFrames: 8),
+                },
+                cancels: new[]
+                {
+                    new CancelDefinition(FireballPrototype,
+                        windowFirstFrame: 3, windowLastFrame: 10,
+                        MoveCancelPhases.Active | MoveCancelPhases.Recovery,
+                        requiresHitConfirm: true),
                 }),
             new MoveDefinition(FireballPrototype, "236A",
                 startupFrames: 4, activeFrames: 3, recoveryFrames: 8,

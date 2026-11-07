@@ -57,7 +57,10 @@ public readonly record struct FighterState(
     bool UpHeldLastFrame = false,
     int StunRemainingFrames = 0,
     int MoveStartedFrame = -1,
-    int LastHitAttackStartFrame = -1)
+    int LastHitAttackStartFrame = -1,
+    ComboState? ComboRecord = null,
+    int HitConfirmFrame = -1,
+    int BlockConfirmFrame = -1)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -70,6 +73,11 @@ public readonly record struct FighterState(
 
     /// <summary>该角色的指令识别快照；null（旧构造路径）视为未观察的初始状态。</summary>
     public RecognitionState RecognitionState => Recognition ?? RecognitionState.Empty;
+
+    /// <summary>
+    /// 该角色作为<b>被击方</b>的连段记录（阶段 07B，D90）；null（旧构造路径）视为无连段。
+    /// </summary>
+    public ComboState Combo => ComboRecord ?? ComboState.None;
 
     /// <summary>是否处于招式阶段（Startup/Active/Recovery）。</summary>
     public bool IsInMove =>
@@ -187,6 +195,34 @@ public readonly record struct FighterState(
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于非动作状态 {LogicState} 但携带攻击发动帧 {MoveStartedFrame}（必须为 -1）。");
             }
+        }
+
+        // 连段记录（阶段 07B，D90）：无连段必须 AttackerId=-1；有连段时攻击者必须是 0/1 且不是自己。
+        Combo.Validate(Id);
+
+        // 命中/防御确认帧（阶段 07B，D91）：只在招式期间存在，且必须属于<b>当前</b>攻击实例
+        // （换招/中断/回待机后必须清空——否则旧实例的确认会解锁新招式的取消）。
+        if (HitConfirmFrame < -1)
+            throw new InvalidOperationException(
+                $"角色 {Id} 的命中确认帧非法：{HitConfirmFrame}（必须 ≥ -1）。");
+        if (BlockConfirmFrame < -1)
+            throw new InvalidOperationException(
+                $"角色 {Id} 的防御确认帧非法：{BlockConfirmFrame}（必须 ≥ -1）。");
+
+        if (IsInMove)
+        {
+            if (HitConfirmFrame >= 0 && HitConfirmFrame < MoveStartedFrame)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 的命中确认帧 {HitConfirmFrame} 早于当前攻击实例的发动帧 {MoveStartedFrame}。");
+            if (BlockConfirmFrame >= 0 && BlockConfirmFrame < MoveStartedFrame)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 的防御确认帧 {BlockConfirmFrame} 早于当前攻击实例的发动帧 {MoveStartedFrame}。");
+        }
+        else if (HitConfirmFrame != -1 || BlockConfirmFrame != -1)
+        {
+            throw new InvalidOperationException(
+                $"角色 {Id} 处于非动作状态 {LogicState} 但携带命中/防御确认帧 " +
+                $"({HitConfirmFrame}/{BlockConfirmFrame})（必须为 -1）。");
         }
     }
 }

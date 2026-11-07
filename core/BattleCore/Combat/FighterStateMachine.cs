@@ -1,6 +1,7 @@
 using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Numerics;
+using NewKOF.BattleCore.State;
 
 namespace NewKOF.BattleCore.Combat;
 
@@ -75,6 +76,8 @@ public static class FighterStateMachine
     /// 其他状态为 0；阶段 06B，D78）。</param>
     /// <param name="moveStartedFrame">帧开始时的攻击发动帧（动作实例身份，阶段 06C，D81；
     /// 非动作状态为 -1。动作阶段间携带，消费同帧赋值为当帧号）。</param>
+    /// <param name="hitConfirmFrame">本攻击实例最近一次有效命中的帧（阶段 07B，D91；-1 = 尚未命中）。</param>
+    /// <param name="blockConfirmFrame">本攻击实例最近一次被防御的帧（阶段 07B，D91；-1 = 尚未被防御）。</param>
     public static FighterActionTick Tick(
         FighterLogicState state,
         string? moveId,
@@ -85,7 +88,9 @@ public static class FighterStateMachine
         int frame,
         bool upHeldLastFrame = false,
         int stunRemainingFrames = 0,
-        int moveStartedFrame = -1)
+        int moveStartedFrame = -1,
+        int hitConfirmFrame = -1,
+        int blockConfirmFrame = -1)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -108,6 +113,14 @@ public static class FighterStateMachine
             MoveDefinition move = definition.FindMoveById(moveId)
                 ?? throw new InvalidOperationException(
                     $"帧 {frame}：角色 {definition.FighterId} 携带了未配置的招式 {moveId}。");
+
+            // 取消判定（阶段 07B，D91）：必须在<b>阶段推进之前</b>用帧开始状态判定——
+            // 否则「Recovery 首帧」会被推进成「剩余帧减一」，窗口语义随实现漂移。
+            FighterActionTick? cancel = TryCancel(
+                state, move, definition, recognition, frame,
+                moveStartedFrame, hitConfirmFrame, blockConfirmFrame);
+            if (cancel is FighterActionTick cancelled)
+                return cancelled;
 
             int remaining = phaseRemainingFrames - 1;
             if (remaining > 0)
@@ -214,6 +227,99 @@ public static class FighterStateMachine
         }
 
         return new FighterActionTick(idle, MoveId: null, 0, recognition, ConsumedMatch: null);
+    }
+
+    /// <summary>
+    /// 当前帧是否处于<b>任一取消窗口</b>内（只判窗口帧数与阶段，不含确认与指令缓冲条件）。
+    /// 供表现层只读显示使用——与 <see cref="TryCancel"/> 共用同一个窗口谓词，不产生第二套规则。
+    /// </summary>
+    public static bool IsInCancelWindow(FighterState fighter, FighterDefinition definition, int frame)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        if (!fighter.IsInMove || fighter.MoveId is null || fighter.MoveStartedFrame < 0)
+            return false;
+
+        MoveDefinition? move = definition.FindMoveById(fighter.MoveId);
+        if (move is null || move.Cancels.Count == 0)
+            return false;
+
+        int elapsed = frame - fighter.MoveStartedFrame;
+        foreach (CancelDefinition cancel in move.Cancels)
+        {
+            if (IsWindowOpen(cancel, fighter.LogicState, elapsed))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>取消窗口谓词（帧数 + 阶段；确认与缓冲另判）。</summary>
+    private static bool IsWindowOpen(CancelDefinition cancel, FighterLogicState state, int elapsed) =>
+        elapsed >= cancel.WindowFirstFrame
+        && elapsed <= cancel.WindowLastFrame
+        && cancel.AllowsPhase(state);
+
+    /// <summary>
+    /// 尝试取消（阶段 07B，D91）。返回 null 表示本帧不能取消（不动任何状态）。
+    ///
+    /// <para><b>判定顺序（全部满足才成立）</b>：① 来源招式配置了取消规则；
+    /// ② 经过帧数在窗口内；③ 帧开始状态属于允许阶段（Active/Recovery）；
+    /// ④ 确认条件满足（命中/防御确认必须来自<b>更早</b>帧的同一攻击实例，或规则允许空挥）；
+    /// ⑤ 识别缓冲中存在<b>未消费</b>的、正好映射到目标招式的指令。</para>
+    ///
+    /// <para><b>选择顺序</b>：取消规则按配置顺序，缓冲按 D60 的识别顺序——
+    /// 第一个满足全部条件的组合胜出并被消费，其余缓冲结果保持原样（不消费、不破坏）。
+    /// 每帧至多取消一次（本函数返回后 Tick 立即结束），因此不存在同帧连锁取消。</para>
+    /// </summary>
+    private static FighterActionTick? TryCancel(
+        FighterLogicState state,
+        MoveDefinition move,
+        FighterDefinition definition,
+        RecognitionState recognition,
+        int frame,
+        int moveStartedFrame,
+        int hitConfirmFrame,
+        int blockConfirmFrame)
+    {
+        if (move.Cancels.Count == 0 || moveStartedFrame < 0)
+            return null;
+
+        int elapsed = frame - moveStartedFrame;
+        if (elapsed < 0)
+            return null;
+
+        foreach (CancelDefinition cancel in move.Cancels)
+        {
+            if (!IsWindowOpen(cancel, state, elapsed))
+                continue;
+            if (!cancel.ConfirmSatisfied(frame, hitConfirmFrame, blockConfirmFrame, moveStartedFrame))
+                continue;
+
+            MoveDefinition? target = definition.FindMoveById(cancel.TargetMoveId);
+            if (target is null)
+                continue; // 目标存在性已在 FighterDefinition 构造期校验，正常不可达。
+
+            foreach (BufferedResult result in recognition.Buffer)
+            {
+                if (result.Consumed)
+                    continue;
+                if (!string.Equals(result.Match.CommandId, target.CommandId, StringComparison.Ordinal))
+                    continue;
+
+                // 取消成功：旧招式被中断，目标招式作为<b>新的独立攻击实例</b>发动
+                // （MoveStartedFrame = 当帧，不继承旧实例的命中/防御确认与重复命中标记）。
+                return new FighterActionTick(
+                    FighterLogicState.Startup,
+                    target.MoveId,
+                    target.StartupFrames,
+                    recognition.WithResultConsumed(result.Match.RecognizedFrame),
+                    result.Match,
+                    MoveStartedFrame: frame);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>是否处于招式阶段（Startup/Active/Recovery）。</summary>

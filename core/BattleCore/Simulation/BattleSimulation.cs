@@ -158,7 +158,9 @@ public sealed class BattleSimulation
                 state.Frame,
                 fighter.UpHeldLastFrame,
                 fighter.StunRemainingFrames,
-                fighter.MoveStartedFrame);
+                fighter.MoveStartedFrame,
+                fighter.HitConfirmFrame,
+                fighter.BlockConfirmFrame);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -257,6 +259,9 @@ public sealed class BattleSimulation
                 StunRemainingFrames = candidates[i].StunRemainingFrames,
                 MoveStartedFrame = candidates[i].MoveStartedFrame,
             };
+
+            // 命中/防御确认属于「当前攻击实例」：换招、被中断或回到待机后必须清空（D91）。
+            nextFighters[i] = NormalizeConfirms(nextFighters[i]);
         }
 
         // ── 第 6 阶段：命中结算（D78/D79/D80/D81）——接触检测 + 双方同时判定（互不先手）
@@ -270,7 +275,11 @@ public sealed class BattleSimulation
         AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster);
 
         var outcomes = new CombatSettlement?[2];
-        ApplyCombatSettlement(nextFighters, contacts, candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
+        ApplyCombatSettlement(state.Frame, nextFighters, contacts,
+            candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
+
+        // 连段收尾（D90）：恢复自由行动的角色清空旧记录（命中帧本身不会到这里——命中后必为受击状态）。
+        UpdateCombos(nextFighters);
 
         // ── 第 7 阶段：KO 裁决（D89）——只依据<b>全部结算完成之后</b>的双方体力，
         //    双方同帧归零即 DoubleKO（不存在先手优势）；已结束的回合原样保留。
@@ -320,6 +329,7 @@ public sealed class BattleSimulation
     /// 不允许负数或溢出；同一命中只扣一次（重复命中抑制属 06C）。</para>
     /// </summary>
     private void ApplyCombatSettlement(
+        int frame,
         FighterState[] fighters,
         IReadOnlyList<AttackContact> contacts,
         bool backHeldP1,
@@ -343,6 +353,24 @@ public sealed class BattleSimulation
                 continue;
 
             FighterState defenderState = fighters[defender];
+            int attacker = 1 - defender;
+
+            // 攻击者的确认记录（D91）：命中/防御确认只属于「当前攻击实例」。
+            // 先于被击者状态写入，避免后面的 with 覆盖；实例身份由 MoveStartedFrame 校验。
+            FighterState attackerState = fighters[attacker];
+            if (attackerState.IsInMove && attackerState.MoveStartedFrame == settled.AttackStartFrame)
+            {
+                fighters[attacker] = settled.Blocked
+                    ? attackerState with { BlockConfirmFrame = frame }
+                    : attackerState with { HitConfirmFrame = frame };
+            }
+
+            // 连段（D90）：用<b>结算前</b>的状态判断目标是否仍在受击延续中；
+            // 成功防御不增加命中数，并立即清空连段（防御方重新获得行动框架）。
+            ComboState comboAfter = settled.Blocked
+                ? ComboState.None
+                : ComboState.AfterHit(defenderState.Combo, attacker, defenderState.LogicState.IsHitReaction());
+
             if (settled.Blocked)
             {
                 fighters[defender] = defenderState with
@@ -356,6 +384,10 @@ public sealed class BattleSimulation
                     // 被击者自身的动作被打断：攻击实例身份一并清除（防御者通常无动作，
                     // 但同帧互中时防御不成立，此处理覆盖所有路径）。
                     MoveStartedFrame = -1,
+                    // 被击者的攻击实例随之中断：确认帧属于旧实例，必须一并清空（D91 不变式）。
+                    HitConfirmFrame = -1,
+                    BlockConfirmFrame = -1,
+                    ComboRecord = comboAfter,
                 };
             }
             else
@@ -378,9 +410,48 @@ public sealed class BattleSimulation
                     Health = healthAfter,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     MoveStartedFrame = -1, // 招式中断（D78）：实例身份随 MoveId 一并清除。
+                    // 确认帧属于被中断的旧实例，必须一并清空（D91 不变式）。
+                    HitConfirmFrame = -1,
+                    BlockConfirmFrame = -1,
+                    ComboRecord = comboAfter,
                 };
             }
         }
+    }
+
+    /// <summary>
+    /// 命中的连段记录归一化（阶段 07B，D90）：<b>帧末</b>状态已不在受击延续中的角色，
+    /// 清空旧连段——「恢复自由行动」的判定落在帧末（含硬直归零转待机的那一帧）。
+    /// </summary>
+    private static void UpdateCombos(FighterState[] fighters)
+    {
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            FighterState fighter = fighters[i];
+            if (fighter.Combo.IsActive && !fighter.LogicState.IsHitReaction())
+                fighters[i] = fighter with { ComboRecord = ComboState.None };
+        }
+    }
+
+    /// <summary>
+    /// 命中/防御确认帧归一化（阶段 07B，D91）：确认只属于当前攻击实例。
+    /// 非动作状态一律清空；动作中若确认帧早于当前发动帧（换招）也清空。
+    /// </summary>
+    private static FighterState NormalizeConfirms(FighterState fighter)
+    {
+        if (!fighter.IsInMove)
+        {
+            return fighter.HitConfirmFrame == -1 && fighter.BlockConfirmFrame == -1
+                ? fighter
+                : fighter with { HitConfirmFrame = -1, BlockConfirmFrame = -1 };
+        }
+
+        int hit = fighter.HitConfirmFrame >= fighter.MoveStartedFrame ? fighter.HitConfirmFrame : -1;
+        int block = fighter.BlockConfirmFrame >= fighter.MoveStartedFrame ? fighter.BlockConfirmFrame : -1;
+
+        return hit == fighter.HitConfirmFrame && block == fighter.BlockConfirmFrame
+            ? fighter
+            : fighter with { HitConfirmFrame = hit, BlockConfirmFrame = block };
     }
 
     /// <summary>单名被击者的结算解析（不修改状态；null = 本帧不被结算）。</summary>

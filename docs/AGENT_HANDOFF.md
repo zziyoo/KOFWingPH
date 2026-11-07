@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 07A：KO 裁决与回合终局，D89——阶段 07 进行中）
+> 最后更新：2026-11-07（阶段 07B：连段统计与招式取消，D90/D91——阶段 07 进行中）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 583，已跳过: 0，总计: 583`
+期望：`失败: 0，通过: 605，已跳过: 0，总计: 605`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -116,6 +116,27 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ```
 
 ---
+
+### 阶段 07B（2026-11-07）连段统计与招式取消（D90/D91）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/State/ComboState.cs` | **新增**：`Count` + `AttackerId` 的记录类型，`AfterHit` 纯函数（延续或重开连段），`Validate`（攻击者 ≠ 自己） |
+| `core/BattleCore/Combat/CancelDefinition.cs` | **新增**：目标招式 / 窗口 `[First,Last]`（自发动帧起算） / 阶段过滤 / 命中·防御确认·空挥；构造期校验 |
+| `core/BattleCore/Combat/MoveDefinition.cs` | 新增 `Cancels`（默认空 = 不可取消） |
+| `core/BattleCore/Combat/FighterDefinition.cs` | 构造期校验：取消目标必须存在且不是自身 |
+| `core/BattleCore/Combat/FighterStateMachine.cs` | **取消路径**：阶段推进前判定窗口+阶段+确认+缓冲，消费一次并进入目标 Startup（新实例）；新增只读 `IsInCancelWindow`（HUD 与内核共用窗口谓词） |
+| `core/BattleCore/Combat/FighterLogicState.cs` | 新增 `IsHitReaction` / `IsInMove` 扩展（连段连续性判定） |
+| `core/BattleCore/State/FighterState.cs` | 新增 `ComboRecord` / `HitConfirmFrame` / `BlockConfirmFrame` + 不变式（确认只在当前实例有效） |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | 结算写入攻击者确认帧；连段更新与帧末重置；`NormalizeConfirms` |
+| `core/BattleCore/Combat/DemoRoster.cs` | Kai 5A 增加「命中确认 → 236A」取消规则（演示数据，窗口 3..10） |
+| `core/BattleCore/BattleCoreInfo.cs` / `State/BattleState.cs` | StateVersion/CoreVersion 7 → 8 |
+| `scripts/BattleScene.cs` / `scenes/Battle.tscn` | HUD 增加 `Combo:` 与两人 `Cancel:`（招式 @经过帧 WINDOW/closed hit@/blk@） |
+| `tests/BattleCore.Tests/ComboCancelTests.cs` | **新增 22 项** |
+
+**验收**：605/605；四构建 0/0；图形 `shots/p07b_cancel_window.png`（WINDOW + hit@）
+与 `shots/p07b_cancel_combo.png`（取消成 236A + Combo 2 + HP 920）。
+**注意**：取消确认必须来自<b>更早帧</b>（同帧确认不能同帧取消）；确认帧在换招/中断后自动清空。
 
 ## 4. 最近完成的修改
 
@@ -678,7 +699,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K43 | **终局后 `Step` 仍推进帧号但完全冻结（D89）** | 若误以为「终局可以继续打」，会看到角色永远不动；若改成禁止 Step，`Frame − 初始帧 == TotalSteps` 与 Godot `Advance` 都需要特判 | 冻结是显式选择：零事件、零接触、角色/回合逐位不变。重开必须新建 `BattleState.CreateDefault()` + 新 `BattleSession`（Godot F5 已实现），**不要**复用旧快照或手工清字段 |
 | K44 | **`RoundState` 三字段互相约束** | InProgress ⇔ None ⇔ 无胜者；P1Win/P2Win ⇔ 胜者 0/1；DoubleKO ⇔ 无胜者。构造期 `Validate` 拒绝不自洽组合 | 不要为「加一个字段」绕过 `Validate`；胜负只能由 `FromFinalHealth`（最终体力）判定，不要在事件层二次推断 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 07A 验收时 583/583 测试通过，可正常启动运行。
+| K45 | **连段连续性用结算前状态、重置用帧末状态（D90）** | 硬直归零转待机的那一帧<b>不算</b>连段延续（该帧再被命中按 1 Hit）；误把帧开始状态当依据会让连段多算一帧 | 修改前先读 `ComboCancelTests.HitOnLastHitstunFrame_*` / `HitOnRecoveryFrame_*` 两条边界测试；连段只存在于被击方记录，攻击者自己不累加 |
+| K46 | **取消确认必须来自更早帧，且只属于当前攻击实例（D91）** | 同帧命中→同帧取消会让新招式在同一帧继续判定（循环风险）；确认帧若跨实例残留会解锁不该有的取消 | `HitConfirmFrame`/`BlockConfirmFrame` 在换招、中断、回待机时一律清空（`Validate` 强制）；窗口是「自发动帧起算的经过帧数 + 阶段」，不要改成渲染时间或 Active 内相对帧 |
+| K47 | **每帧至多取消一次** | 取消后 Tick 立即返回，不存在同帧连锁；这是刻意设计而非遗漏 | 需要「取消链」时应扩展为显式的一帧内多级规则并单独设计阶段顺序，不要放宽 `TryCancel` 的返回时机 |
+
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 07B 验收时 605/605 测试通过，可正常启动运行。
 
 ---
 
@@ -746,8 +771,22 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **本轮阶段 07A：`feat(combat): add deterministic KO and round resolution`**
+  - **本轮阶段 07B：`feat(combat): implement combo tracking and move cancels`**
     （文档与代码同一提交，SHA 由 `git rev-parse HEAD` 读取，不自引用）。提交内容：
+    ```
+    新增: core/BattleCore/State/ComboState.cs
+          core/BattleCore/Combat/CancelDefinition.cs
+          tests/BattleCore.Tests/ComboCancelTests.cs（含 .uid）
+    修改: core/BattleCore/Combat/{MoveDefinition,FighterDefinition,FighterStateMachine,
+            FighterLogicState,DemoRoster}.cs
+          core/BattleCore/State/FighterState.cs
+          core/BattleCore/Simulation/BattleSimulation.cs
+          core/BattleCore/BattleCoreInfo.cs  core/BattleCore/State/BattleState.cs
+          scripts/BattleScene.cs  scenes/Battle.tscn
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **本轮阶段 07A：`feat(combat): add deterministic KO and round resolution`**
+    （`9848744`，已推送）。提交内容：
     ```
     新增: core/BattleCore/State/RoundState.cs
           tests/BattleCore.Tests/RoundResolutionTests.cs（含 .uid）
@@ -826,7 +865,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
 2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D88 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、583 项测试、阶段 07 建议顺序
+3. `docs/PROGRESS.md` — 已完成/未完成边界、605 项测试、阶段 07 建议顺序
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Combat/HitDetection.cs` — 三框几何 + **原始攻击序号**（K38）
@@ -881,7 +920,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 07 进行中**：07A（KO/回合终局，D89）已完成并推送；07B（连段/取消）、07C（击退/击飞/倒地起身）
+4e. **阶段 07 进行中**：07A（KO/回合终局，D89）、07B（连段/取消，D90/D91）已完成并推送；07C（击退/击飞/倒地起身）
    随后推进。阶段 07 完成后才开始阶段 08 的功能（正式精灵/动画、飞行道具、投技、Hitstop、比赛规则、
    联机回滚等，见 `PROGRESS.md` 末尾的阶段 07 结项说明）。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
@@ -916,7 +955,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 583」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 605」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -968,6 +1007,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
       `IList<T>` 与非泛型 `IList` 写操作抛 `NotSupportedException`
 - [ ] 回合契约（D89）：`BattleState.Round` 三字段自洽（`Validate`）；KO 只依据**结算后**最终体力，
       双方同帧归零 = DoubleKO；终局 `Step` 冻结（帧号+1、角色/回合/事件不变）；KO 事件每回合各一次
+- [ ] 连段契约（D90）：连续性看**结算前**受击延续状态、重置看**帧末**状态；硬直归零帧不算延续；
+      防御不计数并清空；同一实例不重复计数（D81）
+- [ ] 取消契约（D91）：规则来自 `MoveDefinition.Cancels`（不在状态机硬编码招式名）；
+      窗口 = 经过帧数 + 阶段；确认必须更早帧且同实例；每帧至多取消一次；新实例 `MoveStartedFrame` = 当帧
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向

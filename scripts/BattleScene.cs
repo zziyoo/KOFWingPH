@@ -256,6 +256,9 @@ public partial class BattleScene : Node2D
                 $"P1 Move: {DescribeMove(p1)}\n" +
                 $"P2 State: {DescribeState(p2)}\n" +
                 $"P2 Move: {DescribeMove(p2)}\n" +
+                $"Combo: P1 {p1.Combo} | P2 {p2.Combo}\n" +
+                $"P1 Cancel: {DescribeCancel(p1, 0, state.Frame)}\n" +
+                $"P2 Cancel: {DescribeCancel(p2, 1, state.Frame)}\n" +
                 $"Round: {DescribeRound(state.Round)}\n" +
                 $"Event: {DescribeLastEvent(_lastEvents)}";
         }
@@ -279,6 +282,23 @@ public partial class BattleScene : Node2D
     /// <summary>回合状态文本：进行中显示 InProgress，终局附结果与重开提示。</summary>
     private static string DescribeRound(RoundState round) =>
         round.IsFinished ? $"{round}  [F5 重开]" : round.ToString();
+
+    /// <summary>
+    /// 取消相关调试文本（只读）：当前招式 / 经过帧数 / 是否处于窗口 / 命中与防御确认帧。
+    /// 窗口判定走内核 <see cref="FighterStateMachine.IsInCancelWindow"/>，表现层不复刻规则。
+    /// </summary>
+    private string DescribeCancel(FighterState fighter, int player, int frame)
+    {
+        if (!fighter.IsInMove || fighter.MoveId is null || fighter.MoveStartedFrame < 0)
+            return "-";
+
+        int elapsed = frame - fighter.MoveStartedFrame;
+        bool window = FighterStateMachine.IsInCancelWindow(fighter, _roster.Fighter(player), frame);
+        string hit = fighter.HitConfirmFrame >= 0 ? $"hit@{fighter.HitConfirmFrame}" : "hit@-";
+        string block = fighter.BlockConfirmFrame >= 0 ? $" blk@{fighter.BlockConfirmFrame}" : string.Empty;
+
+        return $"{fighter.MoveId} @{elapsed} {(window ? "WINDOW" : "closed")} {hit}{block}";
+    }
 
     /// <summary>把最近一帧的权威事件渲染成 HUD 文本（只读消费，按 EventId 语义展示）。</summary>
     private static string DescribeLastEvent(IReadOnlyList<BattleEvent> events)

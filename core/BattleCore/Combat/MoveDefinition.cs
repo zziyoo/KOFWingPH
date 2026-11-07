@@ -23,6 +23,9 @@ public sealed class MoveDefinition
 /// <param name="allowedFrom">允许发动的待机状态集合，不能为 <see cref="MoveAllowedStates.None"/>。</param>
 /// <param name="attacks">攻击判定数据（阶段 06A，D76）；null/空 = 不带攻击框的招式
 /// （识别与状态机时间线照常，只是永不产生命中）。</param>
+/// <param name="cancels">取消规则（阶段 07B，D91）：本招式可取消到哪些招式；
+/// null/空 = 不可取消。目标必须在同一角色配置中且不是自身（由
+/// <see cref="FighterDefinition"/> 构造期校验）。</param>
 /// <exception cref="ArgumentException">ID 为空 / 阶段帧数 &lt; 1 / 允许状态为空。</exception>
 /// <exception cref="ArgumentException">攻击数据的生效帧范围超出 ActiveFrames。</exception>
 public MoveDefinition(
@@ -32,7 +35,8 @@ public MoveDefinition(
     int activeFrames,
     int recoveryFrames,
     MoveAllowedStates allowedFrom = MoveAllowedStates.GroundIdle,
-    IReadOnlyList<AttackDefinition>? attacks = null)
+    IReadOnlyList<AttackDefinition>? attacks = null,
+    IReadOnlyList<CancelDefinition>? cancels = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -71,6 +75,9 @@ public MoveDefinition(
         }
 
         Attacks = Array.AsReadOnly(attackCopy);
+
+        // 取消规则（D91）：防御复制；目标是否存在/是否自身由 FighterDefinition 校验（它知道全表）。
+        Cancels = Array.AsReadOnly((cancels ?? Array.Empty<CancelDefinition>()).ToArray());
     }
 
     /// <summary>招式唯一标识（同一角色内唯一）。</summary>
@@ -93,6 +100,9 @@ public MoveDefinition(
 
     /// <summary>攻击判定数据（阶段 06A，D76；只读，可为空列表 = 无攻击框的招式）。</summary>
     public IReadOnlyList<AttackDefinition> Attacks { get; }
+
+    /// <summary>取消规则（阶段 07B，D91；只读，可为空列表 = 不可取消）。</summary>
+    public IReadOnlyList<CancelDefinition> Cancels { get; }
 
     /// <summary>招式总帧数（诊断用）。</summary>
     public int TotalFrames => StartupFrames + ActiveFrames + RecoveryFrames;

@@ -80,3 +80,18 @@ public enum MoveAllowedStates
     /// <summary>站立或蹲下皆可（大多数地面技的默认）。</summary>
     GroundIdle = Standing | Crouching,
 }
+
+/// <summary>角色逻辑状态的语义查询（阶段 07B，D90）。</summary>
+public static class FighterLogicStateExtensions
+{
+    /// <summary>
+    /// 是否属于<b>受击延续状态</b>——角色在此状态下不能自由行动，
+    /// 因此再次被有效命中时仍计入同一连段（D90）；恢复待机的那一帧不算延续。
+    /// </summary>
+    public static bool IsHitReaction(this FighterLogicState state) =>
+        state == FighterLogicState.Hitstun;
+
+    /// <summary>是否处于招式三阶段（Startup/Active/Recovery）。</summary>
+    public static bool IsInMove(this FighterLogicState state) =>
+        state is FighterLogicState.Startup or FighterLogicState.Active or FighterLogicState.Recovery;
+}
