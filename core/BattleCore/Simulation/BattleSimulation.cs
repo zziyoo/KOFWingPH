@@ -399,6 +399,15 @@ public sealed class BattleSimulation
         IReadOnlyList<AttackContact> contacts = HitDetection.Detect(
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
 
+        // ── 第 6a 阶段：攻击相杀（D98）——两个攻击实例的攻击框正面积重叠，
+        //    且双方都<b>没有</b>打中对方受击框（攻击在空中对撞）。任一方真正命中的帧
+        //    按 D80 正常结算（互中/单方命中），不判相杀：同一帧不能既相杀又命中。
+        bool strikeClash = contacts.Count == 0
+            && FighterBoxes.HitboxesOverlap(
+                nextFighters[0], _roster.Fighter(0), nextFighters[1], _roster.Fighter(1));
+        if (strikeClash)
+            ApplyStrikeClash(nextFighters, _roster);
+
         // AttackActive 必须取<b>结算前</b>视图（下方结算会原地改写 nextFighters）：
         // 本帧确实生效过的攻击不能因为同帧被打断而丢事件——连<b>招式身份</b>一起取，
         // 因为结算会把被中断者的 MoveId 清空。
@@ -412,7 +421,8 @@ public sealed class BattleSimulation
             candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
 
         // ── 第 6b 阶段：投技仲裁与结算（D97）——必须晚于打击结算：有效打击会中断投技。
-        ThrowResolution throwResolution = ApplyThrows(state.Frame, nextFighters, throwAttempts, outcomes);
+        ThrowResolution throwResolution = ApplyThrows(
+            state.Frame, nextFighters, throwAttempts, outcomes, strikeClash);
 
         // 连段收尾（D90）：恢复自由行动的角色清空旧记录（命中帧本身不会到这里——命中后必为受击状态）。
         UpdateCombos(nextFighters);
@@ -424,7 +434,7 @@ public sealed class BattleSimulation
         // ── 第 8 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
         IReadOnlyList<BattleEvent> events = CollectEvents(
             state.Frame, nextFighters, candidates, outcomes, attackActive,
-            throwAttempts, throwResolution, state.Round, nextRound);
+            throwAttempts, throwResolution, strikeClash, state.Round, nextRound);
 
         // ── 第 9 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
@@ -728,6 +738,59 @@ public sealed class BattleSimulation
     }
 
     /// <summary>
+    /// 攻击相杀的<b>状态应用</b>（阶段 08C，D98）：双方的攻击实例同时被打断，直接进入
+    /// 本招式的 <see cref="FighterLogicState.Recovery"/>（剩余帧 = 该招式的 RecoveryFrames）。
+    ///
+    /// <para><b>为什么是 Recovery</b>：它是既有状态里唯一「合法携带 MoveId/MoveStartedFrame、
+    /// 不产生攻击框、走完就能回到待机重新行动」的状态——不需要新状态，也不会绕过 D62 的校验。
+    /// 进入 Recovery 后 <c>GetActiveHitboxes</c> 立即为空，因此同一实例不会在下一次
+    /// Active 帧重复相杀；确认帧一并清空（旧实例的确认不能带到新阶段）。</para>
+    ///
+    /// <para>相杀停顿取双方招式 <c>HitstopFrames</c> 的较大值（D96 同一套字段），
+    /// 冻结期间不会再产生任何相杀/命中事件。</para>
+    /// </summary>
+    private static void ApplyStrikeClash(FighterState[] fighters, FightRoster roster)
+    {
+        int hitstop = 0;
+
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            FighterState fighter = fighters[i];
+            if (fighter.LogicState != FighterLogicState.Active || fighter.MoveId is null)
+                continue;
+
+            MoveDefinition? move = roster.Fighter(i).FindMoveById(fighter.MoveId);
+            if (move is null)
+                continue;
+
+            if (move.Attacks.Count == 0)
+                continue;
+
+            for (int a = 0; a < move.Attacks.Count; a++)
+                hitstop = Math.Max(hitstop, move.Attacks[a].HitstopFrames);
+
+            fighters[i] = fighter with
+            {
+                LogicState = FighterLogicState.Recovery,
+                PhaseRemainingFrames = move.RecoveryFrames,
+                HitConfirmFrame = -1,
+                BlockConfirmFrame = -1,
+            };
+        }
+
+        if (hitstop <= 0)
+            return;
+
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            fighters[i] = fighters[i] with
+            {
+                HitstopRemainingFrames = Math.Max(fighters[i].HitstopRemainingFrames, hitstop),
+            };
+        }
+    }
+
+    /// <summary>
     /// 投技仲裁与结算（阶段 08B，D97）。<b>唯一冲突规则表</b>：
     /// <list type="number">
     /// <item>投技者本帧被<b>有效打击命中</b>（非防御）→ 投技被打断，不成立；</item>
@@ -740,11 +803,15 @@ public sealed class BattleSimulation
         int frame,
         FighterState[] fighters,
         ThrowAttempt[] attempts,
-        CombatSettlement?[] outcomes)
+        CombatSettlement?[] outcomes,
+        bool strikeClash)
     {
         bool[] interrupted = new bool[fighters.Length];
         for (int i = 0; i < fighters.Length; i++)
-            interrupted[i] = outcomes[i] is CombatSettlement { Blocked: false };
+        {
+            // 被有效打击命中、或本帧攻击相杀（招式被迫中断）→ 投技不成立。
+            interrupted[i] = strikeClash || outcomes[i] is CombatSettlement { Blocked: false };
+        }
 
         bool[] valid = new bool[fighters.Length];
         for (int i = 0; i < fighters.Length; i++)
@@ -1086,6 +1153,7 @@ public sealed class BattleSimulation
         AttackActiveSnapshot[] attackActive,
         ThrowAttempt[] throwAttempts,
         ThrowResolution throwResolution,
+        bool strikeClash,
         RoundState previousRound,
         RoundState nextRound)
     {
@@ -1155,7 +1223,11 @@ public sealed class BattleSimulation
             }
         }
 
-        // ⑤ 投技结果（D97）：成功一条 ThrowHit（Amount = 实扣伤害）；双方互投则一条 ThrowClash。
+        // ⑤ 攻击相杀（D98）：双方攻击在空中对撞 → 一条事件，无伤害。
+        if (strikeClash)
+            Add(BattleEventType.StrikeClash, 0, 1, null, 0);
+
+        // ⑥ 投技结果（D97）：成功一条 ThrowHit（Amount = 实扣伤害）；双方互投则一条 ThrowClash。
         //    每帧至多一条（1v1 下投技冲突只有「互相抓」一种，两边都不成立）。
         if (throwResolution.Clash)
             Add(BattleEventType.ThrowClash, 0, 1, null, 0);

@@ -63,6 +63,13 @@ public enum BattleEventType
     /// Source = 0，Target = 1，MoveId = null，Amount = 0。每帧至多一次。
     /// </summary>
     ThrowClash = 11,
+
+    /// <summary>
+    /// 攻击相杀（阶段 08C，D98）：双方攻击框正面积重叠、且双方都<b>没有</b>打中对方受击框
+    /// （攻击在空中对撞）。Source = 0，Target = 1，MoveId = null，Amount = 0。每帧至多一次。
+    /// 两边攻击都中断进入 Recovery，不产生伤害。
+    /// </summary>
+    StrikeClash = 12,
 }
 
 /// <summary>

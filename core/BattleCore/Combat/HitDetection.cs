@@ -63,6 +63,40 @@ public static class FighterBoxes
             fighter.PositionY + StandHeight);
 
     /// <summary>
+    /// 两个攻击实例的攻击框是否在同一帧<b>正面积重叠</b>（阶段 08C，D98 的几何前提）。
+    ///
+    /// <para>只做几何：两侧都必须处于 Active 且各自有生效攻击框；任一侧没有攻击框
+    /// （待机/收招/无招式）直接返回 false。判定用 <see cref="FixedRect.Overlaps"/>
+    /// （D76 正面积规则）——<b>仅边缘接触不算相杀</b>。攻击序号（D84）不参与本判定。</para>
+    /// </summary>
+    public static bool HitboxesOverlap(
+        FighterState first, FighterDefinition firstDefinition,
+        FighterState second, FighterDefinition secondDefinition)
+    {
+        ArgumentNullException.ThrowIfNull(firstDefinition);
+        ArgumentNullException.ThrowIfNull(secondDefinition);
+
+        IReadOnlyList<ActiveHitbox> firstBoxes = GetActiveHitboxesWithIndex(first, firstDefinition);
+        if (firstBoxes.Count == 0)
+            return false;
+
+        IReadOnlyList<ActiveHitbox> secondBoxes = GetActiveHitboxesWithIndex(second, secondDefinition);
+        if (secondBoxes.Count == 0)
+            return false;
+
+        for (int i = 0; i < firstBoxes.Count; i++)
+        {
+            for (int j = 0; j < secondBoxes.Count; j++)
+            {
+                if (firstBoxes[i].Box.Overlaps(secondBoxes[j].Box))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// 该角色当帧的<b>生效攻击框</b>列表（随角色位置与朝向镜像）。
     /// 无招式 / 非 Active 阶段 / 招式无攻击数据 / 当前帧不在攻击生效范围内 → 空列表。
     ///
