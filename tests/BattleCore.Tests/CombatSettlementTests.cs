@@ -191,10 +191,11 @@ public class CombatSettlementTests
     }
 
     [Fact]
-    public void AirborneDefender_SettlementSkipped()
+    public void AirborneDefender_EntersAirHitstun_InsteadOfBeingSkipped()
     {
-        // 空中被击显式跳过（06B 不做空中受击）：接触存在但不结算——
-        // 不掉血、不进入地面 Hitstun（禁止产生 Y>0 的非法地面状态）。
+        // 阶段 07C（D93）取代 06B 的「空中被击显式跳过」：空中目标同样结算伤害，
+        // 但进入 AirHitstun（保持原轨迹 / 不产生非法地面状态），落地才回到地面状态。
+        // 本招式没有击飞配置 → 不改变目标速度、不留倒地计划。
         var sim = NewSim();
         BattleState state = new BattleState(0, new[]
         {
@@ -211,8 +212,14 @@ public class CombatSettlementTests
         BattleStepResult result = sim.Step(state, FrameInput.Empty(0));
 
         Assert.Single(result.Contacts); // 几何接触存在
-        Assert.Equal(1000, P2(result.State).Health);
-        Assert.Equal(FighterLogicState.Airborne, P2(result.State).LogicState);
+        Assert.Equal(970, P2(result.State).Health);
+        Assert.Equal(FighterLogicState.AirHitstun, P2(result.State).LogicState);
+
+        // 运动阶段先于结算：本帧已按重力积分的轨迹被原样保留（vy 2 → 1.5，y 50 → 51.5）。
+        Assert.Equal(FixedPoint.FromFraction(103, 2), P2(result.State).PositionY);
+        Assert.Equal(FixedPoint.FromFraction(3, 2), P2(result.State).VelocityY);
+        Assert.Equal(JumpKind.None, P2(result.State).JumpKind);            // 击飞不是跳跃
+        Assert.Equal(0, P2(result.State).LandingKnockdownFrames);          // 非击飞 → 无倒地计划
     }
 
     // ─────────────────────────────────────────────────────────────

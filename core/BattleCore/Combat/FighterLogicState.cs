@@ -60,6 +60,27 @@ public enum FighterLogicState
     /// <summary>防御硬直（阶段 06B，D78）：成功防御结算进入，不掉血；
     /// 其余语义与 Hitstun 对称。</summary>
     Blockstun = 8,
+
+    /// <summary>
+    /// 空中受击（阶段 07C，D93）：被击飞或空中被打中后进入，持续到<b>落地</b>
+    /// （本阶段没有任何空中行动，因此不需要独立的空中硬直计时）。
+    /// 携带权威速度，按 <c>AirborneMovement</c> 同一套定点积分推进；落地转
+    /// <see cref="Knockdown"/>（或 <see cref="Wakeup"/> / 待机）。不可防御、不可行动。
+    /// </summary>
+    AirHitstun = 9,
+
+    /// <summary>
+    /// 倒地（阶段 07C，D93）：落地后贴地倒下的状态，倒计时存
+    /// <c>StunRemainingFrames</c>；期间不可行动、可被命中（本阶段无起身无敌）。
+    /// 归零后若配置了起身帧数则转 <see cref="Wakeup"/>，否则同帧回到待机更新。
+    /// </summary>
+    Knockdown = 10,
+
+    /// <summary>
+    /// 起身（阶段 07C，D93）：从倒地恢复的过程，倒计时存 <c>StunRemainingFrames</c>；
+    /// 期间不可行动、可被命中；归零同帧回到待机更新与指令消费（与硬直恢复同语义）。
+    /// </summary>
+    Wakeup = 11,
 }
 
 /// <summary>
@@ -89,7 +110,10 @@ public static class FighterLogicStateExtensions
     /// 因此再次被有效命中时仍计入同一连段（D90）；恢复待机的那一帧不算延续。
     /// </summary>
     public static bool IsHitReaction(this FighterLogicState state) =>
-        state == FighterLogicState.Hitstun;
+        state is FighterLogicState.Hitstun
+            or FighterLogicState.AirHitstun
+            or FighterLogicState.Knockdown
+            or FighterLogicState.Wakeup;
 
     /// <summary>是否处于招式三阶段（Startup/Active/Recovery）。</summary>
     public static bool IsInMove(this FighterLogicState state) =>

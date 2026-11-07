@@ -60,7 +60,10 @@ public readonly record struct FighterState(
     int LastHitAttackStartFrame = -1,
     ComboState? ComboRecord = null,
     int HitConfirmFrame = -1,
-    int BlockConfirmFrame = -1)
+    int BlockConfirmFrame = -1,
+    FixedPoint KnockbackFriction = default,
+    int LandingKnockdownFrames = 0,
+    int LandingWakeupFrames = 0)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -138,28 +141,48 @@ public readonly record struct FighterState(
                     $"角色 {Id} 处于待机状态 {LogicState} 但阶段剩余帧数为 {PhaseRemainingFrames}（必须为 0）。");
         }
 
-        // 空中运动不变式（阶段 05B，D68/D69）：
-        // - 地面状态（待机/预备跳/动作三阶段）必须在地面（Y=0）、零速度、无跳跃类型——
-        //   本阶段不做空中招式，动作只在地面发生；
-        // - PreJump 携带 1..∞ 的预备窗口剩余帧（由运动配置限制）；
-        // - Airborne 必须在空中（Y > 0）且携带跳跃类型（垂直速度在顶点可以为 0）。
+        // 空中 / 地面几何与速度不变式（阶段 05B D68/D69；阶段 07C D92/D93 扩展）：
+        // - Airborne：必须在空中（Y > 0）且携带跳跃类型（顶点垂直速度可为 0）；
+        // - AirHitstun：<b>击飞当帧 Y 仍为 0</b>（位置由下一帧的空中积分推进），
+        //   因此允许 Y == 0 但要求垂直速度为正；不携带跳跃类型（击飞不是跳跃）；
+        // - 地面状态一律 Y == 0、VelocityY == 0；除受击/防御硬直的击退外速度必须为零。
         // 新增枚举值不能绕过校验：Enum.IsDefined 通过后仍按状态逐项检查（D62 的延伸）。
-        if (LogicState == FighterLogicState.Airborne)
+        if (LogicState is FighterLogicState.Airborne or FighterLogicState.AirHitstun)
         {
-            if (PositionY <= FixedPoint.Zero)
+            if (LogicState == FighterLogicState.Airborne)
+            {
+                if (PositionY <= FixedPoint.Zero)
+                    throw new InvalidOperationException(
+                        $"角色 {Id} 处于空中但高度为 {PositionY}（空中状态必须 Y > 0；触地在同一帧内完成修正）。");
+                if (JumpKind == Combat.JumpKind.None)
+                    throw new InvalidOperationException($"角色 {Id} 处于空中但没有跳跃类型。");
+            }
+            else
+            {
+                if (PositionY < FixedPoint.Zero)
+                    throw new InvalidOperationException(
+                        $"角色 {Id} 处于空中受击但高度为负：{PositionY}。");
+                if (PositionY == FixedPoint.Zero && VelocityY <= FixedPoint.Zero)
+                    throw new InvalidOperationException(
+                        $"角色 {Id} 处于空中受击且高度为 0，但垂直速度 {VelocityY} 不为正" +
+                        "（击飞首帧之后必须由空中积分抬升；地面受击不应进入该状态）。");
+                if (JumpKind != Combat.JumpKind.None)
+                    throw new InvalidOperationException(
+                        $"角色 {Id} 处于空中受击但携带跳跃类型 {JumpKind}（击飞不是跳跃，必须为 None）。");
+            }
+
+            if (KnockbackFriction != FixedPoint.Zero)
                 throw new InvalidOperationException(
-                    $"角色 {Id} 处于空中但高度为 {PositionY}（空中状态必须 Y > 0；触地在同一帧内完成修正）。");
-            if (JumpKind == Combat.JumpKind.None)
-                throw new InvalidOperationException($"角色 {Id} 处于空中但没有跳跃类型。");
+                    $"角色 {Id} 处于空中状态 {LogicState} 但携带地面击退摩擦 {KnockbackFriction}。");
         }
         else
         {
             if (PositionY != FixedPoint.Zero)
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于地面状态 {LogicState} 但高度为 {PositionY}（必须为 0）。");
-            if (VelocityX != FixedPoint.Zero || VelocityY != FixedPoint.Zero)
+            if (VelocityY != FixedPoint.Zero)
                 throw new InvalidOperationException(
-                    $"角色 {Id} 处于地面状态 {LogicState} 但携带速度 ({VelocityX}, {VelocityY})（必须为零）。");
+                    $"角色 {Id} 处于地面状态 {LogicState} 但携带垂直速度 {VelocityY}（必须为 0）。");
             if (JumpKind != Combat.JumpKind.None)
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于地面状态 {LogicState} 但携带跳跃类型 {JumpKind}。");
@@ -167,34 +190,76 @@ public readonly record struct FighterState(
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于起跳预备但剩余帧数为 {PhaseRemainingFrames}（必须 ≥ 1）。");
 
-            // 硬直不变式（阶段 06B，D78）：Hitstun/Blockstun 携带 ≥ 1 的剩余帧；
-            // 其余所有状态不得携带硬直计数（新枚举值不能绕过校验——D62 延伸）。
-            if (LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun)
+            // 地面击退（阶段 07C，D92）：只有受击/防御硬直可以携带水平速度，
+            // 且速度与摩擦必须同时存在或同时为 0（避免「有速度但永不衰减」的非法组合）。
+            bool carriesKnockback = LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun;
+            if (carriesKnockback)
             {
-                if (StunRemainingFrames < 1)
+                if ((VelocityX == FixedPoint.Zero) != (KnockbackFriction == FixedPoint.Zero))
                     throw new InvalidOperationException(
-                        $"角色 {Id} 处于 {LogicState} 但硬直剩余帧数为 {StunRemainingFrames}（必须 ≥ 1）。");
+                        $"角色 {Id} 处于 {LogicState}，击退速度 {VelocityX} 与摩擦 {KnockbackFriction} " +
+                        "必须同时为零或同时非零。");
             }
-            else if (StunRemainingFrames != 0)
+            else
             {
-                throw new InvalidOperationException(
-                    $"角色 {Id} 处于 {LogicState} 但携带硬直剩余帧数 {StunRemainingFrames}（必须为 0）。");
+                if (VelocityX != FixedPoint.Zero)
+                    throw new InvalidOperationException(
+                        $"角色 {Id} 处于地面状态 {LogicState} 但携带水平速度 {VelocityX}（必须为 0）。");
+                if (KnockbackFriction != FixedPoint.Zero)
+                    throw new InvalidOperationException(
+                        $"角色 {Id} 处于地面状态 {LogicState} 但携带击退摩擦 {KnockbackFriction}（必须为 0）。");
             }
+        }
 
-            // 攻击实例身份（阶段 06C，D81）：动作期间必须携带发动帧（≥ 0），
-            // 非动作状态必须为 -1——「发动帧 + 攻击者 ID」构成攻击实例唯一标识，
-            // 供重复命中抑制与事件流使用。被击记录无不变式（单调记录，随快照携带）。
-            if (IsInMove)
-            {
-                if (MoveStartedFrame < 0)
-                    throw new InvalidOperationException(
-                        $"角色 {Id} 处于 {LogicState} 但缺少攻击发动帧（MoveStartedFrame={MoveStartedFrame}）。");
-            }
-            else if (MoveStartedFrame != -1)
-            {
+        // 硬直计数（阶段 06B D78 / 阶段 07C D93）：受击、防御、倒地、起身携带 ≥ 1 的剩余帧；
+        // AirHitstun 与其余状态不得携带（空中受击持续到落地，没有独立计时）。
+        if (LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun
+            or FighterLogicState.Knockdown or FighterLogicState.Wakeup)
+        {
+            if (StunRemainingFrames < 1)
                 throw new InvalidOperationException(
-                    $"角色 {Id} 处于非动作状态 {LogicState} 但携带攻击发动帧 {MoveStartedFrame}（必须为 -1）。");
-            }
+                    $"角色 {Id} 处于 {LogicState} 但硬直剩余帧数为 {StunRemainingFrames}（必须 ≥ 1）。");
+        }
+        else if (StunRemainingFrames != 0)
+        {
+            throw new InvalidOperationException(
+                $"角色 {Id} 处于 {LogicState} 但携带硬直剩余帧数 {StunRemainingFrames}（必须为 0）。");
+        }
+
+        // 落地计划（阶段 07C，D93）：AirHitstun 携带「倒地/起身帧数」计划；
+        // 落地后倒地帧数转为 StunRemaining，起身帧数继续携带到倒地结束。
+        if (LogicState is FighterLogicState.AirHitstun or FighterLogicState.Knockdown)
+        {
+            if (LandingKnockdownFrames < 0 || LandingWakeupFrames < 0)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 的落地计划帧数不能为负：({LandingKnockdownFrames}, {LandingWakeupFrames})。");
+
+            // 空中受击允许「无倒地计划」（被非击飞攻击打中空中目标 → 落地直接站起，D93）；
+            // 击飞攻击的「落地必倒地」由 AttackDefinition 构造期保证。
+            if (LogicState == FighterLogicState.Knockdown && LandingKnockdownFrames != 0)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于倒地但重复携带倒地计划 {LandingKnockdownFrames}（必须为 0）。");
+        }
+        else if (LandingKnockdownFrames != 0 || LandingWakeupFrames != 0)
+        {
+            throw new InvalidOperationException(
+                $"角色 {Id} 处于 {LogicState} 但携带落地计划 " +
+                $"({LandingKnockdownFrames}, {LandingWakeupFrames})（必须为 0）。");
+        }
+
+        // 攻击实例身份（阶段 06C，D81）：动作期间必须携带发动帧（≥ 0），
+        // 非动作状态必须为 -1——「发动帧 + 攻击者 ID」构成攻击实例唯一标识，
+        // 供重复命中抑制与事件流使用。被击记录无不变式（单调记录，随快照携带）。
+        if (IsInMove)
+        {
+            if (MoveStartedFrame < 0)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于 {LogicState} 但缺少攻击发动帧（MoveStartedFrame={MoveStartedFrame}）。");
+        }
+        else if (MoveStartedFrame != -1)
+        {
+            throw new InvalidOperationException(
+                $"角色 {Id} 处于非动作状态 {LogicState} 但携带攻击发动帧 {MoveStartedFrame}（必须为 -1）。");
         }
 
         // 连段记录（阶段 07B，D90）：无连段必须 AttackerId=-1；有连段时攻击者必须是 0/1 且不是自己。

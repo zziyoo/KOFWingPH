@@ -42,7 +42,7 @@ public class FighterStateValidationTests
     [Theory]
     [InlineData(999)]
     [InlineData(-1)]
-    [InlineData(9)] // 06B 起合法枚举为 0..8（Standing..Blockstun），9 是第一个未定义值
+    [InlineData(12)] // 07C 起合法枚举为 0..11（Standing..Wakeup），12 是第一个未定义值
     [InlineData(100)]
     public void Validate_RejectsUndefinedStates_WithExplicitReason(int raw)
     {

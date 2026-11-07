@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 07B：连段统计与招式取消，D90/D91——阶段 07 进行中）
+> 最后更新：2026-11-07（阶段 07C：击退/击飞/空中受击/倒地起身，D92/D93——阶段 07 结项）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 605，已跳过: 0，总计: 605`
+期望：`失败: 0，通过: 621，已跳过: 0，总计: 621`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -137,6 +137,28 @@ cd /d C:\Users\32360\Desktop\NewKOF
 **验收**：605/605；四构建 0/0；图形 `shots/p07b_cancel_window.png`（WINDOW + hit@）
 与 `shots/p07b_cancel_combo.png`（取消成 236A + Combo 2 + HP 920）。
 **注意**：取消确认必须来自<b>更早帧</b>（同帧确认不能同帧取消）；确认帧在换招/中断后自动清空。
+
+### 阶段 07C（2026-11-07）击退、击飞、空中受击、倒地与起身（D92/D93）—— 阶段 07 结项
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Combat/AttackDefinition.cs` | **D92/D93**：新增 `GroundKnockback` / `GroundKnockbackFriction` / `BlockKnockback` / `LaunchVelocityX` / `LaunchVelocityY` / `KnockdownFrames` / `WakeupFrames`；构造期校验（非负、击退必须有摩擦、击飞必须 ≥ 1 倒地帧） |
+| `core/BattleCore/Combat/FighterLogicState.cs` | 新增 `AirHitstun(9)` / `Knockdown(10)` / `Wakeup(11)`；`IsHitReaction` 扩展到空中受击与倒地/起身 |
+| `core/BattleCore/State/FighterState.cs` | 新增 `KnockbackFriction` / `LandingKnockdownFrames` / `LandingWakeupFrames`；`Validate` 重写空中/地面分支（击飞首帧 Y=0+vy>0 例外、倒地计划归属、击退速度与摩擦成对） |
+| `core/BattleCore/Combat/FighterStateMachine.cs` | 空中受击原样保持；倒地/起身倒计时（倒地归零 → 起身或同帧回待机） |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | 运动阶段：地面击退逐帧位移+摩擦、空中受击积分与落地转倒地/起身/站立；结算：空中目标不再跳过、击飞/击退/倒地计划写入；`NormalizeLandingPlan` |
+| `core/BattleCore/Combat/HitDetection.cs` | 倒地时受击框降为蹲下高度（贴地） |
+| `core/BattleCore/Combat/DemoRoster.cs` | 演示数据：5A 击退 2/摩擦 0.5/防御击退 1.5；623A 升龙击飞（6/1.5，倒地 12/起身 8）；BackDraft 击退 3；214B 扫腿改为扫倒（2.5，倒地 12/起身 8） |
+| `core/BattleCore/BattleCoreInfo.cs` / `State/BattleState.cs` | StateVersion/CoreVersion 8 → 9 |
+| `scripts/BattleScene.cs` | HUD 状态行对 Knockdown/Wakeup 显示剩余帧 |
+| `tests/BattleCore.Tests/KnockbackLaunchTests.cs` | **新增 16 项** |
+| `tests/BattleCore.Tests/CombatSettlementTests.cs` | 空中被击用例按 D93 新契约更新（原「跳过」→「进入 AirHitstun」） |
+| `tests/BattleCore.Tests/FighterStateValidationTests.cs` | 未定义枚举取样值 9 → 12（0..11 已合法） |
+
+**验收**：621/621；四构建 0/0；图形 `shots/p07c_knockback.png` / `p07c_airhitstun.png` /
+`p07c_knockdown.png` / `p07c_wakeup.png`（P1 被扫倒的完整链路）。
+**注意**：击飞当帧位置仍为 0（速度已设置），下一帧才离地——这是 D93 的显式语义，别当成 bug；
+623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
 
@@ -703,7 +725,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K46 | **取消确认必须来自更早帧，且只属于当前攻击实例（D91）** | 同帧命中→同帧取消会让新招式在同一帧继续判定（循环风险）；确认帧若跨实例残留会解锁不该有的取消 | `HitConfirmFrame`/`BlockConfirmFrame` 在换招、中断、回待机时一律清空（`Validate` 强制）；窗口是「自发动帧起算的经过帧数 + 阶段」，不要改成渲染时间或 Active 内相对帧 |
 | K47 | **每帧至多取消一次** | 取消后 Tick 立即返回，不存在同帧连锁；这是刻意设计而非遗漏 | 需要「取消链」时应扩展为显式的一帧内多级规则并单独设计阶段顺序，不要放宽 `TryCancel` 的返回时机 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 07B 验收时 605/605 测试通过，可正常启动运行。
+| K48 | **击退位移发生在运动阶段（D92）** | 若在结算里直接改坐标，会绕过场地钳制（D70）与双人最小间距（D73），墙角/越身行为立即退化 | 位置只能由运动阶段写入；击退速度存 `VelocityX`、衰减用 `KnockbackFriction`，两者必须同时为零或同时非零（速度归零即清摩擦） |
+| K49 | **击飞当帧 `AirHitstun` 的 Y 仍为 0（D93）** | `Validate` 允许这个唯一例外（要求垂直速度为正）；下一帧由空中积分抬升。写成「Y 必须 > 0」会让击飞首帧无法提交 | 碰撞/受击框查询直接用 `PositionY`，不要假设空中状态一定离地；落地转 `Knockdown` 由 `LandingKnockdownFrames` 决定 |
+| K50 | **空中被击不再跳过（D93），倒地计划由配置保证** | 「击飞必倒地」靠 `AttackDefinition` 构造期强制 `KnockdownFrames ≥ 1`，而不是状态不变式；非击飞攻击打中空中目标落地直接站起 | 改这条规则会影响 `AirborneDefender_*` 与 `KnockdownAndWakeup_*` 两组测试，先读注释再动 |
+
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 07C 验收时 621/621 测试通过，可正常启动运行。
 
 ---
 
@@ -771,8 +797,21 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **本轮阶段 07B：`feat(combat): implement combo tracking and move cancels`**
+  - **本轮阶段 07C：`feat(combat): add knockback launch and airborne hit reactions`**
     （文档与代码同一提交，SHA 由 `git rev-parse HEAD` 读取，不自引用）。提交内容：
+    ```
+    新增: tests/BattleCore.Tests/KnockbackLaunchTests.cs（含 .uid）
+    修改: core/BattleCore/Combat/{AttackDefinition,FighterLogicState,FighterStateMachine,
+            HitDetection,DemoRoster}.cs
+          core/BattleCore/State/{FighterState,BattleState}.cs
+          core/BattleCore/Simulation/BattleSimulation.cs
+          core/BattleCore/BattleCoreInfo.cs
+          scripts/BattleScene.cs
+          tests/BattleCore.Tests/{CombatSettlementTests,FighterStateValidationTests}.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **本轮阶段 07B：`feat(combat): implement combo tracking and move cancels`**
+    （`d3e4ddc`，已推送）。提交内容：
     ```
     新增: core/BattleCore/State/ComboState.cs
           core/BattleCore/Combat/CancelDefinition.cs
@@ -865,7 +904,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
 2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D88 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、605 项测试、阶段 07 建议顺序
+3. `docs/PROGRESS.md` — 已完成/未完成边界、621 项测试、阶段 08 安全入口
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Combat/HitDetection.cs` — 三框几何 + **原始攻击序号**（K38）
@@ -920,9 +959,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 07 进行中**：07A（KO/回合终局，D89）、07B（连段/取消，D90/D91）已完成并推送；07C（击退/击飞/倒地起身）
-   随后推进。阶段 07 完成后才开始阶段 08 的功能（正式精灵/动画、飞行道具、投技、Hitstop、比赛规则、
-   联机回滚等，见 `PROGRESS.md` 末尾的阶段 07 结项说明）。
+4e. **阶段 07 已结项**（07A D89 / 07B D90-D91 / 07C D92-D93），621 项测试。
+   阶段 08 安全入口（按依赖顺序，详见 `PROGRESS.md` 阶段 07 总结）：① 比赛规则（多回合/计时/选人，
+   建在 `RoundState` 之上）；② Hitstop；③ 投技；④ 飞行道具；⑤ 招式数据外置；⑥ 联机回滚。
+   **不要**在没有新决策的情况下改动 D92/D93 的状态簇或 D89 的终局语义。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
 6. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
    与 `NewKOF.csproj` 的 `Compile Include`。
@@ -955,7 +995,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 605」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 621」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -1011,6 +1051,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
       防御不计数并清空；同一实例不重复计数（D81）
 - [ ] 取消契约（D91）：规则来自 `MoveDefinition.Cancels`（不在状态机硬编码招式名）；
       窗口 = 经过帧数 + 阶段；确认必须更早帧且同实例；每帧至多取消一次；新实例 `MoveStartedFrame` = 当帧
+- [ ] 击退与击飞（D92/D93）：击退位移只在运动阶段逐帧施加（经过 D70/D73）；方向 = 远离攻击者；
+      击飞当帧 Y=0 且 vy>0（唯一例外）；空中受击不携带 JumpKind、不可防御；
+      落地 → Knockdown(knockdownFrames) → Wakeup(wakeupFrames) → Standing；倒地 Hurtbox 降为蹲下高度
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向

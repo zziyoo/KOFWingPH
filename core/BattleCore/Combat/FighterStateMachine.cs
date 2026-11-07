@@ -78,6 +78,7 @@ public static class FighterStateMachine
     /// 非动作状态为 -1。动作阶段间携带，消费同帧赋值为当帧号）。</param>
     /// <param name="hitConfirmFrame">本攻击实例最近一次有效命中的帧（阶段 07B，D91；-1 = 尚未命中）。</param>
     /// <param name="blockConfirmFrame">本攻击实例最近一次被防御的帧（阶段 07B，D91；-1 = 尚未被防御）。</param>
+    /// <param name="landingWakeupFrames">倒地结束后要进入的起身帧数（阶段 07C，D93；0 = 直接站起）。</param>
     public static FighterActionTick Tick(
         FighterLogicState state,
         string? moveId,
@@ -90,7 +91,8 @@ public static class FighterStateMachine
         int stunRemainingFrames = 0,
         int moveStartedFrame = -1,
         int hitConfirmFrame = -1,
-        int blockConfirmFrame = -1)
+        int blockConfirmFrame = -1,
+        int landingWakeupFrames = 0)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -164,12 +166,33 @@ public static class FighterStateMachine
                 recognition, ConsumedMatch: null,
                 Launch: new JumpLaunch(kind, horizontal, vertical));
         }
-        else if (state == FighterLogicState.Airborne)
+        else if (state is FighterLogicState.Airborne or FighterLogicState.AirHitstun)
         {
-            // 空中：状态机原样保持（重力积分与落地在运动阶段完成，D69）。
+            // 空中 / 空中受击：状态机原样保持（重力积分与落地在运动阶段完成，D69/D93）。
             // 不消费指令、不做待机更新、不响应「上」（空中无跳，B5）。
-            return new FighterActionTick(FighterLogicState.Airborne, null, 0,
-                recognition, ConsumedMatch: null);
+            return new FighterActionTick(state, null, 0, recognition, ConsumedMatch: null);
+        }
+        else if (state is FighterLogicState.Knockdown or FighterLogicState.Wakeup)
+        {
+            // 倒地 / 起身（D93）：只倒计时，不消费指令、不做待机更新、不能起跳。
+            if (stunRemainingFrames < 1)
+                throw new InvalidOperationException(
+                    $"帧 {frame}：角色 {definition.FighterId} 处于 {state} 但剩余帧数为 " +
+                    $"{stunRemainingFrames}（状态损坏，不允许静默修正为待机）。");
+
+            int remaining = stunRemainingFrames - 1;
+            if (remaining > 0)
+                return new FighterActionTick(state, null, 0, recognition, ConsumedMatch: null,
+                    StunRemainingFrames: remaining);
+
+            // 倒地归零：有起身帧数 → 起身；否则同帧回到待机更新（可消费，D60）。
+            if (state == FighterLogicState.Knockdown && landingWakeupFrames > 0)
+            {
+                return new FighterActionTick(FighterLogicState.Wakeup, null, 0,
+                    recognition, ConsumedMatch: null,
+                    StunRemainingFrames: landingWakeupFrames);
+            }
+            // 归零：继续执行待机更新与消费（无独立 return）。
         }
         else if (state is FighterLogicState.Hitstun or FighterLogicState.Blockstun)
         {

@@ -30,9 +30,17 @@ public sealed class AttackDefinition
     /// <param name="damage">基础伤害（非负整数体力值，06B；默认 0 = 无伤害）。</param>
     /// <param name="hitstunFrames">命中硬直帧数（≥ 1；06B）。</param>
     /// <param name="blockstunFrames">防御硬直帧数（≥ 1；06B）。</param>
+    /// <param name="groundKnockback">地面命中击退初速（世界单位/帧，≥ 0；方向 = 远离攻击者，07C/D92）。</param>
+    /// <param name="groundKnockbackFriction">击退摩擦（世界单位/帧²，&gt; 0 当 <paramref name="groundKnockback"/> &gt; 0）。</param>
+    /// <param name="blockKnockback">被防御时的击退初速（≥ 0；默认 0 = 防御不掉位）。</param>
+    /// <param name="launchVelocityX">击飞水平初速（≥ 0；方向 = 远离攻击者）。</param>
+    /// <param name="launchVelocityY">击飞垂直初速（≥ 0；&gt; 0 即「这一击会击飞」）。</param>
+    /// <param name="knockdownFrames">落地后的倒地帧数（击飞时 ≥ 1）。</param>
+    /// <param name="wakeupFrames">倒地后的起身帧数（0 = 直接站起）。</param>
     /// <exception cref="ArgumentOutOfRangeException">半宽/半高 ≤ 0、帧号 &lt; 0、
-    /// 伤害 &lt; 0 或硬直帧数 &lt; 1。</exception>
-    /// <exception cref="ArgumentException">lastActiveFrame &lt; firstActiveFrame。</exception>
+    /// 伤害 &lt; 0 或硬直帧数 &lt; 1，或击退/击飞参数越界。</exception>
+    /// <exception cref="ArgumentException">lastActiveFrame &lt; firstActiveFrame，
+    /// 或击退/击飞参数组合不自洽。</exception>
     public AttackDefinition(
         FixedPoint offsetForward,
         FixedPoint offsetUp,
@@ -43,7 +51,14 @@ public sealed class AttackDefinition
         AttackHeight height = AttackHeight.Mid,
         int damage = 0,
         int hitstunFrames = 1,
-        int blockstunFrames = 1)
+        int blockstunFrames = 1,
+        FixedPoint? groundKnockback = null,
+        FixedPoint? groundKnockbackFriction = null,
+        FixedPoint? blockKnockback = null,
+        FixedPoint launchVelocityX = default,
+        FixedPoint launchVelocityY = default,
+        int knockdownFrames = 0,
+        int wakeupFrames = 0)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -64,6 +79,28 @@ public sealed class AttackDefinition
             throw new ArgumentOutOfRangeException(nameof(blockstunFrames), blockstunFrames,
                 "防御硬直帧数必须 ≥ 1（防御必进入 Blockstun）。");
 
+        // 击退 / 击飞参数（阶段 07C，D92/D93）：全部非负，且组合自洽。
+        FixedPoint knockback = groundKnockback ?? FixedPoint.Zero;
+        FixedPoint friction = groundKnockbackFriction ?? FixedPoint.Zero;
+        FixedPoint blockPush = blockKnockback ?? FixedPoint.Zero;
+
+        ValidateMagnitude(knockback, nameof(groundKnockback), MaxKnockbackUnits);
+        ValidateMagnitude(friction, nameof(groundKnockbackFriction), MaxKnockbackUnits);
+        ValidateMagnitude(blockPush, nameof(blockKnockback), MaxKnockbackUnits);
+        ValidateMagnitude(launchVelocityX, nameof(launchVelocityX), MaxLaunchUnits);
+        ValidateMagnitude(launchVelocityY, nameof(launchVelocityY), MaxLaunchUnits);
+
+        if (knockback > FixedPoint.Zero && friction <= FixedPoint.Zero)
+            throw new ArgumentException(
+                "配置了地面击退就必须配置正的击退摩擦，否则角色会无限滑行。", nameof(groundKnockbackFriction));
+        if (knockdownFrames < 0)
+            throw new ArgumentOutOfRangeException(nameof(knockdownFrames), knockdownFrames, "倒地帧数不能为负。");
+        if (wakeupFrames < 0)
+            throw new ArgumentOutOfRangeException(nameof(wakeupFrames), wakeupFrames, "起身帧数不能为负。");
+        if (launchVelocityY > FixedPoint.Zero && knockdownFrames < 1)
+            throw new ArgumentException(
+                "击飞必须配置倒地帧数（≥ 1）：落地后不允许直接恢复站立。", nameof(knockdownFrames));
+
         OffsetForward = offsetForward;
         OffsetUp = offsetUp;
         HalfWidth = halfWidth;
@@ -74,6 +111,13 @@ public sealed class AttackDefinition
         Damage = damage;
         HitstunFrames = hitstunFrames;
         BlockstunFrames = blockstunFrames;
+        GroundKnockback = knockback;
+        GroundKnockbackFriction = friction;
+        BlockKnockback = blockPush;
+        LaunchVelocityX = launchVelocityX;
+        LaunchVelocityY = launchVelocityY;
+        KnockdownFrames = knockdownFrames;
+        WakeupFrames = wakeupFrames;
     }
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
@@ -105,4 +149,44 @@ public sealed class AttackDefinition
 
     /// <summary>防御硬直帧数（≥ 1）。</summary>
     public int BlockstunFrames { get; }
+
+    /// <summary>地面命中击退初速（世界单位/帧，≥ 0；方向 = 远离攻击者）。0 = 不击退。</summary>
+    public FixedPoint GroundKnockback { get; }
+
+    /// <summary>击退摩擦（世界单位/帧²，向 0 衰减）；配置击退时必须为正。</summary>
+    public FixedPoint GroundKnockbackFriction { get; }
+
+    /// <summary>被防御时的击退初速（≥ 0；默认 0）。</summary>
+    public FixedPoint BlockKnockback { get; }
+
+    /// <summary>击飞水平初速（≥ 0；方向 = 远离攻击者）。</summary>
+    public FixedPoint LaunchVelocityX { get; }
+
+    /// <summary>击飞垂直初速（≥ 0）；&gt; 0 表示这一击会击飞。</summary>
+    public FixedPoint LaunchVelocityY { get; }
+
+    /// <summary>落地后的倒地帧数（击飞时必须 ≥ 1）。</summary>
+    public int KnockdownFrames { get; }
+
+    /// <summary>倒地后的起身帧数（0 = 直接从倒地回到待机）。</summary>
+    public int WakeupFrames { get; }
+
+    /// <summary>这一击是否会击飞（垂直初速 &gt; 0）。</summary>
+    public bool Launches => LaunchVelocityY > FixedPoint.Zero;
+
+    /// <summary>单帧击退/摩擦配置上限（健全性边界）。</summary>
+    public const int MaxKnockbackUnits = 32;
+
+    /// <summary>单帧击飞初速上限（健全性边界）。</summary>
+    public const int MaxLaunchUnits = 64;
+
+    private static void ValidateMagnitude(FixedPoint value, string paramName, int maxUnits)
+    {
+        if (value < FixedPoint.Zero)
+            throw new ArgumentOutOfRangeException(paramName, value,
+                "击退/击飞数值必须是非负的<b>大小</b>；方向由命中时双方的权威相对位置决定。");
+        if (value > FixedPoint.FromInt(maxUnits))
+            throw new ArgumentOutOfRangeException(paramName, value,
+                $"击退/击飞数值超过每帧上限 {maxUnits}：{value}。");
+    }
 }

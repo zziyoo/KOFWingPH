@@ -39,7 +39,9 @@ public static class FighterBoxes
     /// </summary>
     public static FixedRect GetHurtbox(FighterState fighter)
     {
-        FixedPoint height = fighter.LogicState == FighterLogicState.Crouching
+        // 姿态相关（D76/D93）：蹲下与倒地贴地（70 高）；起身与其余状态用站立高度。
+        FixedPoint height = fighter.LogicState
+            is FighterLogicState.Crouching or FighterLogicState.Knockdown
             ? CrouchHeight
             : StandHeight;
 

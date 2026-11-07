@@ -98,6 +98,9 @@ public sealed class BattleSimulation
         public int StunRemainingFrames;
         public int MoveStartedFrame;
         public bool MoveStartedThisFrame;
+        public FixedPoint KnockbackFriction;
+        public int LandingKnockdownFrames;
+        public int LandingWakeupFrames;
 
         /// <summary>是否处于地面可转向状态（站立/蹲下；动作与空中朝向冻结，D72）。</summary>
         public readonly bool CanTurn =>
@@ -160,7 +163,8 @@ public sealed class BattleSimulation
                 fighter.StunRemainingFrames,
                 fighter.MoveStartedFrame,
                 fighter.HitConfirmFrame,
-                fighter.BlockConfirmFrame);
+                fighter.BlockConfirmFrame,
+                fighter.LandingWakeupFrames);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -169,6 +173,12 @@ public sealed class BattleSimulation
             FixedPoint vy = FixedPoint.Zero;
             FighterLogicState logic = tick.State;
             JumpKind jumpKind = JumpKind.None;
+
+            // 落地计划（D93）：只有空中受击会消耗它们，落地后立即清空。
+            int landingKnockdown = fighter.LandingKnockdownFrames;
+            int landingWakeup = fighter.LandingWakeupFrames;
+            int stunRemaining = tick.StunRemainingFrames;
+            FixedPoint knockbackFriction = FixedPoint.Zero;
 
             if (tick.State == FighterLogicState.Airborne)
             {
@@ -197,12 +207,73 @@ public sealed class BattleSimulation
                     jumpKind = JumpKind.None;
                 }
             }
+            else if (tick.State == FighterLogicState.AirHitstun)
+            {
+                // 空中受击（D93）：与跳跃共用同一套定点积分；落地转倒地 / 起身 / 站立。
+                AirborneTick air = AirborneMovement.Integrate(
+                    fighter.PositionX,
+                    fighter.PositionY,
+                    fighter.VelocityX,
+                    fighter.VelocityY,
+                    definition.Movement.JumpGravity);
+
+                x = air.PositionX;
+                y = air.PositionY;
+                vx = air.VelocityX;
+                vy = air.VelocityY;
+
+                if (air.Landed)
+                {
+                    // 触地：贴地、速度归零；倒地计划转为状态计时（D93 时间线）。
+                    y = FixedPoint.Zero;
+                    vx = FixedPoint.Zero;
+                    vy = FixedPoint.Zero;
+                    jumpKind = JumpKind.None;
+
+                    if (landingKnockdown > 0)
+                    {
+                        logic = FighterLogicState.Knockdown;
+                        stunRemaining = landingKnockdown;
+                        landingKnockdown = 0;
+                    }
+                    else if (landingWakeup > 0)
+                    {
+                        logic = FighterLogicState.Wakeup;
+                        stunRemaining = landingWakeup;
+                        landingWakeup = 0;
+                    }
+                    else
+                    {
+                        logic = FighterLogicState.Standing;
+                        stunRemaining = 0;
+                    }
+                }
+            }
+            else if (tick.State is FighterLogicState.Hitstun or FighterLogicState.Blockstun)
+            {
+                // 地面击退（D92）：每帧位移 = 当前速度，速度按摩擦向 0 衰减且不过零。
+                // 位移发生在运动阶段，因此仍然经过场地钳制（D70）与双人最小间距（D73）。
+                FixedPoint speed = fighter.VelocityX;
+                if (speed != FixedPoint.Zero)
+                {
+                    x = fighter.PositionX + speed;
+                    FixedPoint friction = fighter.KnockbackFriction;
+                    FixedPoint next = speed > FixedPoint.Zero ? speed - friction : speed + friction;
+                    if ((speed > FixedPoint.Zero && next < FixedPoint.Zero)
+                        || (speed < FixedPoint.Zero && next > FixedPoint.Zero))
+                        next = FixedPoint.Zero;
+
+                    vx = next;
+                    // 速度归零即摩擦失效（不变式：两者同时为零或同时非零）。
+                    knockbackFriction = next == FixedPoint.Zero ? FixedPoint.Zero : friction;
+                }
+            }
             else if (tick.State == FighterLogicState.Standing)
             {
                 // 地面步行（D65）：仅站立待机响应前后输入。
                 x = GroundMovement.StepX(tick.State, fighter.PositionX, fighter.Facing, resolved, definition.Movement);
             }
-            // PreJump / Crouching / 动作三阶段：原地（速度归零，坐标不变）。
+            // PreJump / Crouching / 动作三阶段 / 倒地 / 起身：原地（速度归零，坐标不变）。
 
             candidates[i] = new FighterCandidate
             {
@@ -219,9 +290,12 @@ public sealed class BattleSimulation
                 UpHeld = resolved.Up,
                 BackHeld = resolved.Back,
                 Health = fighter.Health,
-                StunRemainingFrames = tick.StunRemainingFrames,
+                StunRemainingFrames = stunRemaining,
                 MoveStartedFrame = tick.MoveStartedFrame,
                 MoveStartedThisFrame = tick.ConsumedMatch is not null,
+                KnockbackFriction = knockbackFriction,
+                LandingKnockdownFrames = landingKnockdown,
+                LandingWakeupFrames = landingWakeup,
             };
         }
 
@@ -258,10 +332,15 @@ public sealed class BattleSimulation
                 Health = candidates[i].Health,
                 StunRemainingFrames = candidates[i].StunRemainingFrames,
                 MoveStartedFrame = candidates[i].MoveStartedFrame,
+                KnockbackFriction = candidates[i].KnockbackFriction,
+                LandingKnockdownFrames = candidates[i].LandingKnockdownFrames,
+                LandingWakeupFrames = candidates[i].LandingWakeupFrames,
             };
 
             // 命中/防御确认属于「当前攻击实例」：换招、被中断或回到待机后必须清空（D91）。
             nextFighters[i] = NormalizeConfirms(nextFighters[i]);
+            // 落地计划只属于空中受击/倒地状态（D93）。
+            nextFighters[i] = NormalizeLandingPlan(nextFighters[i]);
         }
 
         // ── 第 6 阶段：命中结算（D78/D79/D80/D81）——接触检测 + 双方同时判定（互不先手）
@@ -379,6 +458,10 @@ public sealed class BattleSimulation
                     MoveId = null,
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
+                    // 防御击退（D92）：独立配置，默认 0；仍然遵守「速度与摩擦同时存在」不变式。
+                    VelocityX = settled.KnockbackX,
+                    VelocityY = FixedPoint.Zero,
+                    KnockbackFriction = settled.KnockbackFriction,
                     // 被防御亦视为该攻击实例已结算（D81）：记录发动帧，抑制后续帧重复结算。
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     // 被击者自身的动作被打断：攻击实例身份一并清除（防御者通常无动作，
@@ -389,18 +472,68 @@ public sealed class BattleSimulation
                     BlockConfirmFrame = -1,
                     ComboRecord = comboAfter,
                 };
+                continue; // 防御不会击飞：到此为止。
+            }
+
+            int healthAfter = defenderState.Health - settled.Damage;
+            if (healthAfter < 0)
+                healthAfter = 0; // 体力下限：不允许负数（结算显式钳制，不依赖下游校验）。
+
+            // 事件/结算的唯一事实来源：本次<b>实际</b>扣除的体力
+            // （攻击配置伤害可能被 max(0, …) 截断——Target 只剩 10 时 30 伤害只扣 10）。
+            int appliedDamage = defenderState.Health - healthAfter;
+            outcomes[defender] = settled with { Damage = appliedDamage };
+
+            if (settled.Launch)
+            {
+                // 击飞 / 空中追击（D93）：进入空中受击，速度由<b>攻击配置</b>决定（方向远离攻击者）。
+                // 地面目标当帧位置仍为 0——位置从下一帧起由空中积分推进（Validate 允许 Y=0 且 vy>0）。
+                fighters[defender] = defenderState with
+                {
+                    LogicState = FighterLogicState.AirHitstun,
+                    MoveId = null,
+                    PhaseRemainingFrames = 0,
+                    StunRemainingFrames = 0,
+                    Health = healthAfter,
+                    VelocityX = settled.LaunchVelocityX,
+                    VelocityY = settled.LaunchVelocityY,
+                    JumpKind = JumpKind.None, // 击飞不是跳跃：不携带跳跃类型
+                    KnockbackFriction = FixedPoint.Zero,
+                    LandingKnockdownFrames = settled.KnockdownFrames,
+                    LandingWakeupFrames = settled.WakeupFrames,
+                    LastHitAttackStartFrame = settled.AttackStartFrame,
+                    MoveStartedFrame = -1,
+                    HitConfirmFrame = -1,
+                    BlockConfirmFrame = -1,
+                    ComboRecord = comboAfter,
+                };
+            }
+            else if (settled.AirHit)
+            {
+                // 空中被非击飞攻击命中（D93）：保持原轨迹继续下落，落地直接站起（无倒地计划）。
+                fighters[defender] = defenderState with
+                {
+                    LogicState = FighterLogicState.AirHitstun,
+                    MoveId = null,
+                    PhaseRemainingFrames = 0,
+                    StunRemainingFrames = 0,
+                    Health = healthAfter,
+                    VelocityX = defenderState.VelocityX,
+                    VelocityY = defenderState.VelocityY,
+                    JumpKind = JumpKind.None,
+                    KnockbackFriction = FixedPoint.Zero,
+                    LandingKnockdownFrames = 0,
+                    LandingWakeupFrames = 0,
+                    LastHitAttackStartFrame = settled.AttackStartFrame,
+                    MoveStartedFrame = -1,
+                    HitConfirmFrame = -1,
+                    BlockConfirmFrame = -1,
+                    ComboRecord = comboAfter,
+                };
             }
             else
             {
-                int healthAfter = defenderState.Health - settled.Damage;
-                if (healthAfter < 0)
-                    healthAfter = 0; // 体力下限：不允许负数（结算显式钳制，不依赖下游校验）。
-
-                // 事件/结算的唯一事实来源：本次<b>实际</b>扣除的体力
-                // （攻击配置伤害可能被 max(0, …) 截断——Target 只剩 10 时 30 伤害只扣 10）。
-                int appliedDamage = defenderState.Health - healthAfter;
-                outcomes[defender] = settled with { Damage = appliedDamage };
-
+                // 地面命中（D92）：进入受击硬直，可携带逐帧衰减的水平击退。
                 fighters[defender] = defenderState with
                 {
                     LogicState = FighterLogicState.Hitstun,
@@ -408,6 +541,9 @@ public sealed class BattleSimulation
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
                     Health = healthAfter,
+                    VelocityX = settled.KnockbackX,
+                    VelocityY = FixedPoint.Zero,
+                    KnockbackFriction = settled.KnockbackFriction,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     MoveStartedFrame = -1, // 招式中断（D78）：实例身份随 MoveId 一并清除。
                     // 确认帧属于被中断的旧实例，必须一并清空（D91 不变式）。
@@ -431,6 +567,23 @@ public sealed class BattleSimulation
             if (fighter.Combo.IsActive && !fighter.LogicState.IsHitReaction())
                 fighters[i] = fighter with { ComboRecord = ComboState.None };
         }
+    }
+
+    /// <summary>
+    /// 落地计划归一化（阶段 07C，D93）：只有 <see cref="FighterLogicState.AirHitstun"/> 可以携带
+    /// 完整的落地计划；<see cref="FighterLogicState.Knockdown"/> 只保留待用的起身帧数；
+    /// 其余状态必须为 0（落地/起身完成后立即清空，防止旧计划污染下一次击飞）。
+    /// </summary>
+    private static FighterState NormalizeLandingPlan(FighterState fighter)
+    {
+        if (fighter.LogicState == FighterLogicState.AirHitstun)
+            return fighter;
+
+        bool cleared = fighter.LandingKnockdownFrames == 0 && fighter.LandingWakeupFrames == 0;
+        if (fighter.LogicState == FighterLogicState.Knockdown)
+            return fighter.LandingKnockdownFrames == 0 ? fighter : fighter with { LandingKnockdownFrames = 0 };
+
+        return cleared ? fighter : fighter with { LandingKnockdownFrames = 0, LandingWakeupFrames = 0 };
     }
 
     /// <summary>
@@ -462,10 +615,8 @@ public sealed class BattleSimulation
         bool backHeld)
     {
         FighterState defenderState = fighters[defender];
-
-        // 空中被击显式跳过（06B 范围外；几何接触仍可被 06A 观测）。
-        if (defenderState.LogicState == FighterLogicState.Airborne)
-            return null;
+        bool defenderAirborne = defenderState.LogicState
+            is FighterLogicState.Airborne or FighterLogicState.AirHitstun;
 
         // 取针对该被击者的第一条接触（Detect 顺序确定：攻击者 0→1、攻击序号升序）。
         AttackContact contact = default;
@@ -499,18 +650,49 @@ public sealed class BattleSimulation
             return null;
 
         // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
-        bool guarding = defenderState.LogicState switch
+        // 空中不可防御（D93）：Airborne / AirHitstun 一率不成立。
+        bool guarding = !defenderAirborne && defenderState.LogicState switch
         {
             FighterLogicState.Standing => backHeld,
             FighterLogicState.Crouching => backHeld,
-            _ => false, // 动作/PreJump/硬直中不能防御。
+            _ => false, // 动作/PreJump/硬直/倒地中不能防御。
         } && GuardCovers(attack.Height, defenderState.LogicState);
 
-        return guarding
-            ? new CombatSettlement(Blocked: true, Damage: 0, StunFrames: attack.BlockstunFrames,
-                MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame)
-            : new CombatSettlement(Blocked: false, Damage: attack.Damage, StunFrames: attack.HitstunFrames,
-                MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame);
+        // 击退/击飞方向（D92/D93）：按<b>命中时双方的权威相对位置</b>决定「远离攻击者」；
+        // 位置完全相同时退化为攻击者的朝向（确定性平局规则）。
+        int direction = defenderState.PositionX > attackerState.PositionX ? 1
+            : defenderState.PositionX < attackerState.PositionX ? -1
+            : (attackerState.Facing == Facing.Right ? 1 : -1);
+
+        FixedPoint knockback = guarding ? attack.BlockKnockback : attack.GroundKnockback;
+        FixedPoint knockbackX = direction > 0 ? knockback : -knockback;
+        FixedPoint friction = knockback == FixedPoint.Zero
+            ? FixedPoint.Zero
+            : attack.GroundKnockbackFriction;
+
+        if (guarding)
+        {
+            return new CombatSettlement(
+                Blocked: true, Damage: 0, StunFrames: attack.BlockstunFrames,
+                MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame,
+                AirHit: false, Launch: false,
+                KnockbackX: knockbackX, KnockbackFriction: friction,
+                LaunchVelocityX: FixedPoint.Zero, LaunchVelocityY: FixedPoint.Zero,
+                KnockdownFrames: 0, WakeupFrames: 0);
+        }
+
+        bool launches = attack.Launches;
+        return new CombatSettlement(
+            Blocked: false, Damage: attack.Damage, StunFrames: attack.HitstunFrames,
+            MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame,
+            AirHit: defenderAirborne, Launch: launches,
+            KnockbackX: launches ? FixedPoint.Zero : knockbackX,
+            KnockbackFriction: launches ? FixedPoint.Zero : friction,
+            LaunchVelocityX: launches ? (direction > 0 ? attack.LaunchVelocityX : -attack.LaunchVelocityX)
+                : FixedPoint.Zero,
+            LaunchVelocityY: launches ? attack.LaunchVelocityY : FixedPoint.Zero,
+            KnockdownFrames: launches ? attack.KnockdownFrames : 0,
+            WakeupFrames: launches ? attack.WakeupFrames : 0);
     }
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
@@ -676,12 +858,28 @@ public sealed class BattleSimulation
     /// <param name="StunFrames">硬直帧数（命中硬直或防御硬直）。</param>
     /// <param name="MoveId">攻击招式 ID。</param>
     /// <param name="AttackStartFrame">攻击实例的发动帧（D81；写入被击者的已结算记录）。</param>
+    /// <param name="AirHit">被击者在结算前是否处于空中（Airborne / AirHitstun，D93）。</param>
+    /// <param name="Launch">本次是否击飞（攻击配置了垂直初速且未被防御）。</param>
+    /// <param name="KnockbackX">地面击退的有符号水平速度（世界单位/帧；0 = 不击退）。</param>
+    /// <param name="KnockbackFriction">击退摩擦（向 0 衰减）；无击退时为 0。</param>
+    /// <param name="LaunchVelocityX">击飞有符号水平初速（远离攻击者）。</param>
+    /// <param name="LaunchVelocityY">击飞垂直初速（向上）。</param>
+    /// <param name="KnockdownFrames">落地后的倒地帧数（击飞时 ≥ 1）。</param>
+    /// <param name="WakeupFrames">倒地后的起身帧数。</param>
     private readonly record struct CombatSettlement(
         bool Blocked,
         int Damage,
         int StunFrames,
         string MoveId,
-        int AttackStartFrame);
+        int AttackStartFrame,
+        bool AirHit,
+        bool Launch,
+        FixedPoint KnockbackX,
+        FixedPoint KnockbackFriction,
+        FixedPoint LaunchVelocityX,
+        FixedPoint LaunchVelocityY,
+        int KnockdownFrames,
+        int WakeupFrames);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。

@@ -315,9 +315,10 @@ public partial class BattleScene : Node2D
         return $"{last.Type} {actors}{move}{amount} (id={last.EventId})";
     }
 
-    /// <summary>状态行：硬直状态附加剩余帧数（阶段 06B）。</summary>
+    /// <summary>状态行：带倒计时的状态附加剩余帧数（06B 硬直 / 07C 倒地·起身）。</summary>
     private static string DescribeState(FighterState fighter) =>
         fighter.LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun
+            or FighterLogicState.Knockdown or FighterLogicState.Wakeup
             ? $"{fighter.LogicState}({fighter.StunRemainingFrames})"
             : fighter.LogicState.ToString();
 

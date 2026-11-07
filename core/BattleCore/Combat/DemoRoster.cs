@@ -71,7 +71,11 @@ public static class DemoRoster
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(70),
                         halfWidth: FixedPoint.FromInt(20), halfHeight: FixedPoint.FromInt(20),
-                        height: AttackHeight.Mid, damage: 30, hitstunFrames: 12, blockstunFrames: 8),
+                        height: AttackHeight.Mid, damage: 30, hitstunFrames: 12, blockstunFrames: 8,
+                        // 07C（D92）：轻击退 2 单位/帧、摩擦 0.5；防御击退 1.5（演示数据）。
+                        groundKnockback: FixedPoint.FromInt(2),
+                        groundKnockbackFriction: FixedPoint.FromFraction(1, 2),
+                        blockKnockback: FixedPoint.FromFraction(3, 2)),
                 },
                 cancels: new[]
                 {
@@ -94,10 +98,16 @@ public static class DemoRoster
                 attacks: new[]
                 {
                     // 升龙：攻击框偏上（High，蹲防失败）。
+                    // 07C（D93）：升龙击飞——垂直初速 6、水平 1.5（远离攻击者），
+                    // 落地倒地 12 帧、起身 8 帧。
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(35), offsetUp: FixedPoint.FromInt(95),
                         halfWidth: FixedPoint.FromInt(22), halfHeight: FixedPoint.FromInt(30),
-                        height: AttackHeight.High, damage: 60, hitstunFrames: 18, blockstunFrames: 12),
+                        height: AttackHeight.High, damage: 60, hitstunFrames: 18, blockstunFrames: 12,
+                        launchVelocityX: FixedPoint.FromFraction(3, 2),
+                        launchVelocityY: FixedPoint.FromInt(6),
+                        knockdownFrames: 12,
+                        wakeupFrames: 8),
                 }),
         },
         // 运动配置（D64/D68）：Kai——前行 2.0 / 后撤 1.5 单位每帧；预备跳 3 帧；
@@ -138,7 +148,10 @@ public static class DemoRoster
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(60),
                         halfWidth: FixedPoint.FromInt(24), halfHeight: FixedPoint.FromInt(24),
-                        height: AttackHeight.Mid, damage: 45, hitstunFrames: 15, blockstunFrames: 10),
+                        height: AttackHeight.Mid, damage: 45, hitstunFrames: 15, blockstunFrames: 10,
+                        // 07C（D92）：中距离击退 3 单位/帧、摩擦 0.5。
+                        groundKnockback: FixedPoint.FromInt(3),
+                        groundKnockbackFriction: FixedPoint.FromFraction(1, 2)),
                 }),
             new MoveDefinition(SweepPrototype, "214B",
                 startupFrames: 3, activeFrames: 4, recoveryFrames: 9,
@@ -148,7 +161,13 @@ public static class DemoRoster
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(20),
                         halfWidth: FixedPoint.FromInt(30), halfHeight: FixedPoint.FromInt(18),
-                        height: AttackHeight.Low, damage: 40, hitstunFrames: 14, blockstunFrames: 10),
+                        height: AttackHeight.Low, damage: 40, hitstunFrames: 14, blockstunFrames: 10,
+                        // 07C（D92/D93）：扫腿把对手扫倒——小幅上抛（垂直 2.5、水平 1），
+                        // 落地倒地 12 帧、起身 8 帧（演示数据，便于图形验收倒地/起身链路）。
+                        launchVelocityX: FixedPoint.FromInt(1),
+                        launchVelocityY: FixedPoint.FromFraction(5, 2),
+                        knockdownFrames: 12,
+                        wakeupFrames: 8),
                 }),
         },
         // 运动配置（D64/D68）：Rei 与 Kai 刻意不同——证明 P1/P2 可携带不同运动数据：
