@@ -49,6 +49,7 @@ public sealed class BattleSession
 {
     private readonly BattleSimulation _simulation = new();
     private readonly int _initialFrame;
+    private readonly Action<FrameInput, BattleState>? _frameCommitted;
 
     /// <summary>逻辑帧调度器。</summary>
     public FixedStepScheduler Scheduler { get; }
@@ -56,11 +57,22 @@ public sealed class BattleSession
     /// <summary>当前权威状态。外部只读；更新只能经由 <see cref="Advance"/> 或 <see cref="StepExact"/>。</summary>
     public BattleState CurrentState { get; private set; }
 
-    public BattleSession(BattleState? initialState = null, FixedStepScheduler? scheduler = null)
+    /// <param name="initialState">初始状态；null 表示 <see cref="BattleState.CreateDefault"/>。</param>
+    /// <param name="scheduler">调度器；null 表示默认调度器。</param>
+    /// <param name="frameCommitted">
+    /// 可选提交观察者：每个逻辑帧<b>完整提交之后</b>（状态、输入历史、记账均已落定）调用一次，
+    /// 入参为该帧输入与该帧的权威状态。供指令识别等<b>只读</b>派生层使用。
+    /// <b>不得抛异常</b>；若抛出，异常照常向上传播（已提交的帧与记账保持一致，不会回滚）。
+    /// </param>
+    public BattleSession(
+        BattleState? initialState = null,
+        FixedStepScheduler? scheduler = null,
+        Action<FrameInput, BattleState>? frameCommitted = null)
     {
         CurrentState = initialState ?? BattleState.CreateDefault();
         Scheduler = scheduler ?? new FixedStepScheduler();
         _initialFrame = CurrentState.Frame;
+        _frameCommitted = frameCommitted;
     }
 
     /// <summary>
@@ -133,6 +145,9 @@ public sealed class BattleSession
                 // 只有真正提交后才记账，保证 TotalSteps 不会跑在状态前面。
                 Scheduler.CommitStep();
                 committed++;
+
+                // 本帧已完整提交：通知只读观察者（如指令识别）。
+                _frameCommitted?.Invoke(input, nextState);
             }
         }
         catch
@@ -194,6 +209,9 @@ public sealed class BattleSession
             inputSource?.Commit(input);
             CurrentState = nextState;
             Scheduler.CommitStep();
+
+            // 与 Advance 相同：完整提交后才通知观察者。
+            _frameCommitted?.Invoke(input, nextState);
         }
     }
 

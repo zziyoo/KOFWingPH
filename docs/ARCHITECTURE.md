@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — NewKOF 架构说明
 
-> 最后更新：阶段 02 完成（2026-11-07）
+> 最后更新：阶段 03B-1 完成（2026-11-07）
 > 本文描述**已确定**的架构与**未决定**的问题。修改代码前请先读本文件。
 
 ---
@@ -47,6 +47,12 @@ NewKOF/
 │       ├── Input/FrameInput.cs
 │       ├── Input/InputBuffer.cs        # ★ 阶段 03A：渲染采样 → 逻辑帧输入（边沿闩锁 + 历史）
 │       ├── Input/DirectionResolver.cs  # ★ 阶段 03A：SOCD + 绝对方向 → 相对朝向
+│       ├── Commands/                   # ★ 阶段 03B-1：指令识别（纯数据 + 识别器）
+│       │   ├── CommandDirection.cs     # 相对朝向九宫格方向
+│       │   ├── CommandDefinition.cs    # 指令数据（序列 / 按键 / 跨度 / 容差 / 优先级 / 时效）
+│       │   ├── CommandMatch.cs         # 识别结果（完成帧 / 按键帧 / 诊断）
+│       │   ├── CommandRecognizer.cs    # 方向变化压缩 + 匹配 + 冲突裁决 + 缓冲
+│       │   └── CommandCatalog.cs       # 默认四条指令（236A / 623A / 214B / 66）
 │       ├── State/FighterState.cs
 │       ├── State/BattleState.cs
 │       └── Simulation/
@@ -56,7 +62,7 @@ NewKOF/
 │           └── BattleSession.cs        # ★ 阶段 02：调度 + 模拟 + 状态绑定
 │
 ├── tests/
-│   └── BattleCore.Tests/      # 独立 xUnit 测试工程（123 个测试）
+│   └── BattleCore.Tests/      # 独立 xUnit 测试工程（173 个测试）
 │       ├── BattleCore.Tests.csproj
 │       ├── BattleSimulationTests.cs        # 阶段 01：8 个
 │       ├── FixedStepSchedulerTests.cs      # 阶段 02：调度器测试
@@ -67,7 +73,8 @@ NewKOF/
 │       ├── SchedulerNumericalRobustnessTests.cs # 阶段 02 补修：NaN/溢出/精度健壮性
 │       ├── InputBufferTests.cs             # 阶段 03A：电平/边沿/双人独立/历史连续性
 │       ├── DirectionResolverTests.cs       # 阶段 03A：SOCD 与相对朝向
-│       └── InputPipelineTests.cs           # 阶段 03A：输入与逻辑帧绑定、暂停、多帧批次
+│       ├── InputPipelineTests.cs           # 阶段 03A：输入与逻辑帧绑定、暂停、多帧批次
+│       └── CommandRecognitionTests.cs      # 阶段 03B-1：指令识别、冲突、换边、帧率一致性
 │
 ├── docs/                      # 交接文档（本目录）
 └── shots/                     # 验收截图输出（git 忽略）
@@ -102,6 +109,8 @@ NewKOF (表现层)  ─────────┘
 | `FrameInput` | 一帧内双方输入（不可变值类型） | 输入归一化、SOCD、命令识别 |
 | `InputBuffer` | **渲染采样 → 逻辑帧输入**：电平保持、按下边沿闩锁、两阶段提交、只读历史（默认 600 帧窗口） | 键盘/手柄 API、SOCD、指令识别、完整录像 |
 | `DirectionResolver` | **SOCD 清理 + 绝对方向 → 相对朝向**（纯函数） | 输入录制、状态推进 |
+| `CommandRecognizer` | **逐帧输入 → 指令 ID**：方向变化压缩、按键边沿匹配、冲突裁决、结果缓冲 | 招式发动/取消/硬直、移动、任何 Godot API |
+| `CommandDefinition` / `CommandCatalog` | 指令定义（纯数据）与默认指令表 | 识别流程、角色专属数值 |
 | `BattleStepResult` | 单次 Step 的结果描述 | 权威判定 |
 | `BattleScene` (Godot) | 把 `delta` 交给 `BattleSession`、把状态映射为画面 | 任何权威判定、**任何时间累积逻辑**、输入历史 |
 | `KeyboardInputMap` (Godot) | 键盘事件 → `InputBits`，喂给 `InputBuffer` | SOCD、指令识别、权威判定 |
@@ -121,9 +130,15 @@ BattleScene._Process(delta)
          │         → BattleSimulation.Step(...)    // 算出候选状态，暂不赋值
          │         → buffer.Commit(input)          // 成功后才写历史、消费边沿
          │         → CurrentState = nextState      // 提交成功后才落权威状态
-         │         → Scheduler.CommitStep()        // 最后记账
+         │         → Scheduler.CommitStep()        // 记账
+         │         → frameCommitted(input, state)  // 03B-1：只读派生（指令识别）
          └─> 异常时: Scheduler.RecordDroppedSteps(剩余预算) + throw
 ```
+
+**指令识别接线（阶段 03B-1）**：`BattleSession` 的可选 `frameCommitted` 回调在每帧
+**完整提交之后**调用一次；`BattleScene` 用它把 `(input, 当帧 state.Facing)` 喂给
+`CommandRecognizer.Observe`。识别不在 `Step` 内执行，也不参与状态推进；
+Godot 层只读取 `LastMatch` 显示到 HUD。
 
 **提交顺序的异常语义（阶段 03A 最终补修）**：
 
@@ -229,6 +244,17 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | **D35** | **输入两阶段提交：`IInputSource.Prepare` → `Step()` → `Commit()`** | 旧 `Take()` 立即写历史并清边沿，`Step()` 失败后留下幻影帧，重试同一帧还会因帧号不连续而抛异常（已用复现测试证实）。现在：准备阶段不写历史/不清边沿；模拟成功后才提交输入，再记账。失败帧不写入历史、不消费边沿，重试得到同一输入。`Take()` 收为 `internal`，防止表现层把它当作 `Func<int,FrameInput>` 传给会话。 |
 | **D36** | **候选状态最后落盘：`nextState` 在 `Commit` 成功前不赋给 `CurrentState`** | 旧顺序「`CurrentState = Step(...)` → `Commit` → `CommitStep`」在 `Commit` 抛异常时会让状态前进而计数不动，直接破坏帧同步不变量（已用 `CommitFailSource` 复现：帧号 1 vs 期望 0）。现改为 `nextState = Step(...)`（局部变量）→ `Commit` → `CurrentState = nextState` → `CommitStep`。`Advance` 与 `StepExact` 共用该顺序。 |
 
+### 阶段 03B-1 决策（基础指令识别）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D37** | **指令识别放在 `BattleCore.Commands`，完全数据驱动** | 新增指令只加 `CommandDefinition` 数据，识别器内没有 per-move 分支。识别器可在无 GUI 环境下用逐帧日志完整测试；Godot 只负责显示。 |
+| **D38** | **方向历史按「变化」压缩，条目保存当帧朝向解析后的相对方向** | 按住 N 帧只算一个元素，才能区分「↓ 按住 10 帧再 →」与真正的 ↓↘→。每个条目在**它发生的那一帧**的朝向下经 `DirectionResolver` 换算；换边只影响之后的条目，**不得**用当前朝向重算历史（否则换边前的输入含义被改写）。 |
+| **D39** | **末方向允许在按键容差内「稍早完成」** | 按键可能在末方向之后 1–3 帧才按下；若只允许「末方向 == 当前方向」，623（→↓↘）在继续滚到 → 后就永远无法成立，236 与 623 也无法在同一帧竞争。匹配从最近的方向条目向前尝试，末尾条目距当前帧 ≤ 容差即视为候选。 |
+| **D40** | **冲突裁决：优先级降序 → 序列长度降序 → 指令 ID 序数升序** | 完全确定，与字典遍历、定义顺序、对象创建顺序无关（测试用「定义顺序反转」固定）。优先级满足「升龙压波动」的格斗惯例；长度作为次级键让更复杂的指令压过更简单的；ID 序数只作最终兜底。 |
+| **D41** | **按键边沿一次性消费；识别结果按逻辑帧过期** | 一次 0→1 边沿最多完成一条指令，消费后同一边沿不会在后续帧重复触发。结果带 `ExpiresAtFrame = RecognizedFrame + BufferLifetimeFrames`，过期在下一帧 `Observe` 时移除；`LastMatch` 仅供显示，不参与消费语义。 |
+| **D42** | **`BattleSession` 提供可选 `frameCommitted(input, state)` 观察者** | 指令识别需要「当帧输入 + 当帧朝向」，且必须发生在状态/输入/记账都提交之后。观察者在 `CommitStep` 与 `committed++` 之后调用，不改变调度与提交契约；契约要求实现不得抛异常（若抛，帧已提交且记账保持一致，异常照常传播）。 |
+
 
 
 ### 离线原型限定（重要）
@@ -280,7 +306,8 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 4. ~~**输入归一化策略**~~ **阶段 03A 已决定（D26–D28）**：SOCD 左右同时 → 中立、上下同时 → 上优先；录制层存绝对方向，相对朝向只在解析层应用。**仍待决定**：是否改为「后输入优先」——那需要先扩展 `FrameInput` 记录事件顺序。
 5. **碰撞几何**：采用 AABB 还是 OBB？推挤算法（对称分配 vs 墙角余量）尚未定。
 6. **事件流设计**：表现层如何消费 `(frame, eventId)` 事件？阶段 01 尚无事件流，直接轮询状态。
-7. **规则数据格式**：招式定义用 JSON / 自定义文本 / C# 代码？加载期校验策略？
+7. **规则数据格式**：指令定义已采用 **C# 数据**（D37，03B-1）；**招式/帧数据**的格式
+   （JSON / 自定义文本 / C# 代码）与加载期校验策略仍待定。
 8. **回合与比赛规则**：`RoundSystem` 何时引入？KO 判定放在 Step 的哪个阶段？
 9. **`CaptureHelper` 的归属**：目前放在 `scripts/`。是否移入独立 `tools/` 目录或改为 Godot EditorPlugin？
 10. **状态版本号语义**：`BattleState.StateVersion` 目前为常量 1，尚未定义升级/迁移规则。

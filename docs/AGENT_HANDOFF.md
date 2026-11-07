@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 03A 结项：最终补修完成，已提交并推送）
+> 最后更新：2026-11-07（阶段 03B-1 完成：拳皇式基础指令识别）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 147，已跳过: 0，总计: 147`
+期望：`失败: 0，通过: 173，已跳过: 0，总计: 173`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,34 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 03B-1（2026-11-07）拳皇式基础指令识别 —— 本地提交（未推送）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Commands/CommandDirection.cs` | 新增：相对朝向九宫格方向 |
+| `core/BattleCore/Commands/CommandDefinition.cs` | 新增：指令数据（序列 / 按键 / 跨度 / 容差 / 优先级 / 时效） |
+| `core/BattleCore/Commands/CommandMatch.cs` | 新增：识别结果（完成帧 / 按键帧 / 优先级 / 诊断） |
+| `core/BattleCore/Commands/CommandRecognizer.cs` | 新增：方向变化压缩、边沿匹配、冲突裁决、结果缓冲 |
+| `core/BattleCore/Commands/CommandCatalog.cs` | 新增：默认 236A / 623A / 214B / 66 |
+| `core/BattleCore/Input/DirectionResolver.cs` | `AttackMask` → public `AttackButtons`（唯一事实来源） |
+| `core/BattleCore/Simulation/BattleSession.cs` | 新增可选 `frameCommitted(input, state)` 提交后观察者 |
+| `scripts/BattleScene.cs` | 接入识别器；HUD 增加 `P1/P2 Command` 两行 |
+| `scenes/Battle.tscn` | HUD 面板高度 96 → 130（容纳五行） |
+| `tests/BattleCore.Tests/CommandRecognitionTests.cs` | 新增 26 项 |
+
+**规则**：方向历史按变化压缩；每个条目用**当帧朝向**解析（换边不重算历史）；
+序列必须连续；末方向可在按键容差内稍早完成；超时按首尾跨度；
+按键只认边沿且一次边沿最多完成一条指令；冲突裁决 = 优先级降序 → 长度降序 → ID 序数升序；
+结果按逻辑帧过期（默认 8 帧）。
+
+**验收**：173/173 测试通过；核心与表现层 0 警告 0 错误；Godot 无头导入 `[ DONE ]`；
+图形运行 HUD 显示 `P1 Command: 236A` / `P1 Command: 66`
+（见 `shots/command_236a.png`、`shots/command_66.png`）。
+变异验证：不消费边沿 / 长度优先 / 跨度边界 / 忽略朝向 四种变异分别触发 1、1、1、4 项失败。
+
+**已知限制**：快速双击（松开与再按落在同一逻辑帧之间）会被 `InputBuffer` 合并，
+66 需要至少一个逻辑帧的中立（K19）；跳过 ↘ 的快速 236 不匹配（严格连续，K20）。
 
 ### 阶段 03A 最终补修（2026-11-07）输入与战斗状态原子提交 —— 已提交 `0bd0c6d` 并推送
 
@@ -297,15 +325,19 @@ cd /d C:\Users\32360\Desktop\NewKOF
 | K9 | ~~`CommitStep()` / `RecordDroppedSteps()` 为 public~~ **已解决（2026-11-07）** | 原 public 可让外部把 `TotalSteps` 推到状态前面 | 已改为 `internal` + `InternalsVisibleTo("BattleCore.Tests")`，并加反射测试 `AccountingMutators_AreNotPartOfPublicApi` 固定形状（D25）。生产代码只有 `BattleSession` 能记账 |
 | K10 | 单次超大 delta（数百秒级）存在浮点边界行为 | 已用整除 + 饱和保护消除 NaN 与丢帧，但极端值下余量会被归零（记为丢弃） | 正常渲染（16ms 级 delta）完全不受影响；超大 delta 仅出现在挂起/调试场景 |
 | K11 | **丢帧策略仅适用于离线原型** | 未来联机回滚不能沿用 `DroppedStepCount` 丢弃策略（会造成状态分叉） | 联机阶段必须重新设计时间预算策略并单独验收 |
-| K12 | `InputBuffer.History` **无上限增长** | 约 16 B/帧 ≈ 3.4 MB/小时；长时间挂机会吃内存 | 原型够用。若做长跑/录制，加环形缓冲或按需 `Clear()`（尚未提供，避免过早设计） |
+| K12 | ~~`InputBuffer.History` **无上限增长**~~ **已解决（阶段 03A）** | 原约 16 B/帧 ≈ 3.4 MB/小时；现默认只保留最近 600 帧（`Capacity`），超出淘汰最旧帧并置 `IsHistoryTruncated` | 完整录像仍需独立模块（K16） |
 | K13 | **键位硬编码**，无重绑定 | 只有 `KeyboardInputMap.TryMap` 一处映射，改键需改代码 | 键位重绑定 UI 属后续阶段；手柄映射未做 |
-| K14 | 两次逻辑帧之间多次按下会**合并成一帧** | 快速双击在 `InputBits` 里只体现为一帧按下 | 按 D31 属已知限制，`CoalescedPressCount` 可观测；逐次事件流留给指令识别阶段 |
+| K14 | 两次逻辑帧之间多次按下会**合并成一帧** | 快速双击在 `InputBits` 里只体现为一帧按下 | 按 D31 属已知限制，`CoalescedPressCount` 可观测；逐次事件流仍未实现（K19） |
 | K15 | **普通 `Func<int,FrameInput>` 输入源无法回滚** | 模拟失败后会话会以同一帧号再次调用它；若委托有副作用（如 `buffer.Take`），会重复提交 | 契约要求「同一帧号返回同一输入（幂等）」；生产路径必须传 `IInputSource`（`InputBuffer`），`Take()` 已收为 internal 防误用 |
 | K16 | **输入历史只保留最近 600 帧** | 更早的帧被淘汰，`IsHistoryTruncated == true`，不能再用于回放/长窗口识别 | 完整输入录像需独立模块（未实现）；若做重放，先设计录像格式，不要拉长这个缓冲 |
 | K17 | `BattleSession.Advance` 允许 `inputSource` 与 `inputProvider` 二选一 | 同时传入会抛 `ArgumentException` | 保持显式；不要为了省参做成隐式优先级 |
 | K18 | **`Commit()` 失败「无副作用」靠输入源自己实现** | 会话能保证自己的状态/计数不前进，但无法回滚第三方源内部已发生的写入 | `InputBuffer` 把校验放在写入前；自定义 `IInputSource` 必须遵守该契约，否则只有它自己脏，帧同步仍不被破坏 |
+| K19 | **快速双击（松开 + 再按落在同一逻辑帧之间）被合并** | 逻辑输入日志中没有中立帧，`66` 不会触发（Godot 实测复现） | 属电平格式的已知合并语义（K14/D31）；真实手感需要逐次事件流，属后续输入格式扩展 |
+| K20 | **指令方向序列要求严格连续** | 跳过 ↘ 的快速 236（↓ 直接到 →）不会被 `236A` 匹配 | 当前刻意严格，避免误判；若需宽松匹配，应在 `CommandDefinition` 增加显式配置，而不是放宽识别器默认行为 |
+| K21 | **`frameCommitted` 观察者不得抛异常** | 若抛，异常会在帧已提交、记账已完成之后向上传播（状态不会半提交） | 实现方必须自行保证不抛；第三方接入时不要把可能失败的业务逻辑塞进观察者 |
+| K22 | 识别结果缓冲按逻辑帧过期，暂停时不流逝 | 暂停期间 `ExpiresAtFrame` 不会推进 | 设计如此：缓冲是逻辑帧语义，不是真实时间语义 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 02 补修验收时 93/93 测试通过（当前总数 141），可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 03B-1 验收时 173/173 测试通过，可正常启动运行。
 
 ---
 
@@ -320,9 +352,19 @@ cd /d C:\Users\32360\Desktop\NewKOF
   - `1538395` / `083abd5` — 仅文档
   - `bc048c8` — 仅文档（同步 `f145275` 状态）
   - **`0bd0c6d` — 阶段 03A 最终补修（输入与战斗状态原子提交顺序），已推送**
+  - **本轮 03B-1：本地提交 `feat(input): implement phase 03B-1 command recognition`（未推送）。**
+    SHA 用 `git log --oneline -1` 读取。提交内容（19 文件）：
+    ```
+    新增: core/BattleCore/Commands/（5 个 .cs + 5 个 .uid）
+          tests/BattleCore.Tests/CommandRecognitionTests.cs（+ .uid）
+    修改: core/BattleCore/Input/DirectionResolver.cs
+          core/BattleCore/Simulation/BattleSession.cs
+          scripts/BattleScene.cs  scenes/Battle.tscn
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
   - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本节记录的是写文档时的状态，
     不要当作实时 HEAD。
-  - **工作区：干净**（最终补修已提交并推送 `0bd0c6d`）。
+  - **工作区：干净**（03B-1 已创建本地提交，未推送）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -356,7 +398,8 @@ cd /d C:\Users\32360\Desktop\NewKOF
 - **构建产物**（被忽略，不影响源码）：
   - `bin/`、`obj/`（根目录、`core/BattleCore/`、`tests/BattleCore.Tests/`）
   - `.godot/`
-  - `shots/`（验收截图：`input_p1p2.png` 双人输入、`input_paused.png` 暂停；
+  - `shots/`（验收截图：`input_p1p2.png` 双人输入、`input_paused.png` 暂停、
+    `command_236a.png` 指令 236A、`command_66.png` 双击前；
     历史：`battle_01.png`、`battle_02.png`、`final.png`、`p02.png`）
 - **安全备份**：`C:\Users\32360\Desktop\NewKOF_backups\NewKOF_pre_phase03a_20261107.tar.gz`
   （阶段 03A 开始前的完整工作区，含当时未提交的补修代码）
@@ -372,18 +415,20 @@ cd /d C:\Users\32360\Desktop\NewKOF
 **按顺序阅读：**
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
-2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D36 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、141 项测试、下一阶段计划
+2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D42 决策）与第 5 节（未决定问题）
+3. `docs/PROGRESS.md` — 已完成/未完成边界、173 项测试、下一阶段计划
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Input/InputBuffer.cs` — **阶段 03A 核心**：边沿闩锁、两阶段提交、只读历史
 7. `core/BattleCore/Input/IInputSource.cs` — 输入提交契约（Prepare/Commit）
 8. `core/BattleCore/Input/DirectionResolver.cs` — SOCD 与相对朝向规则
-9. `core/BattleCore/Simulation/BattleSimulation.cs` — 内核入口 `Step()` 契约
-10. `core/BattleCore/State/BattleState.cs` — 不可变状态与所有权
-11. `tests/BattleCore.Tests/` — 十一个测试文件构成当前回归基线
-12. `scripts/BattleScene.cs` — 表现层如何只读消费状态（**应保持极薄**）
-13. `scripts/KeyboardInputMap.cs` — 键位映射，唯一接触 Godot 输入 API 的地方
+9. `core/BattleCore/Commands/CommandRecognizer.cs` — **阶段 03B-1 核心**：方向压缩、匹配、冲突、缓冲
+10. `core/BattleCore/Commands/CommandDefinition.cs` / `CommandCatalog.cs` — 指令数据与默认表
+11. `core/BattleCore/Simulation/BattleSimulation.cs` — 内核入口 `Step()` 契约
+12. `core/BattleCore/State/BattleState.cs` — 不可变状态与所有权
+13. `tests/BattleCore.Tests/` — 十二个测试文件构成当前回归基线
+14. `scripts/BattleScene.cs` — 表现层如何只读消费状态（**应保持极薄**）
+15. `scripts/KeyboardInputMap.cs` — 键位映射，唯一接触 Godot 输入 API 的地方
 
 **参考资料（只读，禁止修改）：**
 
@@ -404,11 +449,11 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 1. ~~实现阶段 03 输入链路~~ **已完成（03A）**。后续若要改键位/加手柄，只动
    `KeyboardInputMap`（或新增 `GamepadInputMap`），**不要**把映射写进 `BattleScene` 或内核。
-2. ~~提交阶段 03A / 专项补修~~ **已推送 `0be9919`、`f145275`、`bc048c8`**。
-3. **提交 03A 最终补修** — 代码与测试已就绪（147/147、Godot 已验证），
-   等用户明确授权后按第 6 节文件清单提交。
-4. **阶段 03B：拳皇式指令识别** — 方向指令、蓄力、输入缓冲、换边识别、指令优先级。
-   **只处理输入与整数逻辑帧**：不需要运动系统、不需要改 `FighterState`、
+2. ~~提交阶段 03A 各轮补修~~ **已推送 `0be9919`、`f145275`、`bc048c8`、`0bd0c6d`**。
+3. ~~阶段 03B-1 基础指令识别~~ **已完成并创建本地提交**：236A / 623A / 214B / 66、
+   相对朝向与换边、冲突优先级、按键边沿消费、结果缓冲。
+4. **阶段 03B-2：蓄力与扩展指令** — 蓄力保持帧、超必杀重复序列、按角色拆分指令表、
+   招式系统消费接口。**只处理输入与整数逻辑帧**：不需要运动系统、不需要改 `FighterState`、
    不需要先定运动定点数格式。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
 6. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
@@ -440,7 +485,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 147」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 173」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -450,7 +495,10 @@ cd /d C:\Users\32360\Desktop\NewKOF
 - [ ] `history[^1].Frame == CurrentState.Frame - 1`（`IsAlignedWith`），不用 `Count == Frame`
 - [ ] `BattleSession` 中 `CurrentState` 只在 `Commit` 成功后才赋值（`nextState` 是局部变量）
 - [ ] 输入只有两条合法路径：`IInputSource`（两阶段）或幂等委托；`Take()` 不得被表现层当委托用
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D36）与代码实现一致
+- [ ] 指令识别只在 `core/BattleCore/Commands/`；`scripts/` 只读取 `LastMatch` 显示，不做判定
+- [ ] 方向历史按「变化」压缩，每个条目用**当帧朝向**解析；换边不得重算历史条目
+- [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D42）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

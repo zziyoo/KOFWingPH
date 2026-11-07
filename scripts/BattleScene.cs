@@ -1,5 +1,6 @@
 using System.Text;
 using Godot;
+using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Simulation;
 using NewKOF.BattleCore.State;
@@ -22,6 +23,10 @@ namespace NewKOF;
 /// 阶段 03A：输入链路已接通。键位见 <see cref="KeyboardInputMap"/>，
 /// F1 切换暂停（仅阻止时间驱动推进），HUD 显示最近一个已消费逻辑帧的双人输入。
 ///
+/// 阶段 03B-1：指令识别已接入。识别器在 <c>BattleCore</c> 内，由会话的
+/// 「帧已提交」回调驱动；HUD 只显示 <see cref="CommandRecognizer.LastMatch"/>，
+/// 不参与任何识别判定，也不引入角色动作或伤害。
+///
 /// 阶段 02 修改原因（阶段 01 缺陷）：
 /// 旧实现用 <c>(int)(delta*1e6)</c> 截断 + 整数 16666us 间隔，
 /// 导致逻辑帧总数随渲染帧率漂移（240FPS 跑 600 秒少 5 帧）。
@@ -34,6 +39,12 @@ public partial class BattleScene : Node2D
 
     /// <summary>逻辑帧输入缓冲（内核层）。边沿闩锁与帧号连续性都在这里保证。</summary>
     private readonly InputBuffer _inputBuffer = new();
+
+    /// <summary>
+    /// 指令识别器（内核层）。每提交一帧由会话回调喂入；
+    /// 本类只读取识别结果用于显示，不做任何识别判定。
+    /// </summary>
+    private readonly CommandRecognizer _commandRecognizer = new(CommandCatalog.CreateDefault());
 
     /// <summary>键盘映射（表现层）。本类是唯一接触 Godot 输入 API 的地方。</summary>
     private KeyboardInputMap _inputMap = null!;
@@ -62,7 +73,11 @@ public partial class BattleScene : Node2D
 
         _session = new BattleSession(
             initialState: BattleState.CreateDefault(),
-            scheduler: new FixedStepScheduler(MaxStepsPerAdvance));
+            scheduler: new FixedStepScheduler(MaxStepsPerAdvance),
+            // 每帧完整提交后（状态/输入/记账都已落定）再做只读识别，
+            // 不改变调度与输入提交契约。
+            frameCommitted: (input, state) =>
+                _commandRecognizer.Observe(input, state.Fighter(0).Facing, state.Fighter(1).Facing));
 
         _inputMap = new KeyboardInputMap(_inputBuffer);
 
@@ -147,9 +162,14 @@ public partial class BattleScene : Node2D
             _hudLabel.Text =
                 $"Logic Frame: {state.Frame}{pauseTag}\n" +
                 $"P1: {Describe(last.Player1)}\n" +
-                $"P2: {Describe(last.Player2)}";
+                $"P2: {Describe(last.Player2)}\n" +
+                $"P1 Command: {DescribeCommand(_commandRecognizer.LastMatch(0))}\n" +
+                $"P2 Command: {DescribeCommand(_commandRecognizer.LastMatch(1))}";
         }
     }
+
+    /// <summary>把识别结果渲染成 HUD 文本；从未识别到时显示 "-"。</summary>
+    private static string DescribeCommand(CommandMatch? match) => match?.CommandId ?? "-";
 
     /// <summary>把输入位渲染成紧凑的调试文本；无输入显示 "-"。</summary>
     private static string Describe(InputBits bits)

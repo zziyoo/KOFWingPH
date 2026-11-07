@@ -39,7 +39,11 @@ public readonly record struct RelativeInput(
 /// </summary>
 public static class DirectionResolver
 {
-    private const InputBits AttackMask =
+    /// <summary>
+    /// 四个攻击键的掩码。指令识别需要用它区分「方向位」与「按键位」，
+    /// 因此公开为唯一事实来源，避免各处重复定义。
+    /// </summary>
+    public const InputBits AttackButtons =
         InputBits.LightPunch | InputBits.HeavyPunch | InputBits.LightKick | InputBits.HeavyKick;
 
     /// <summary>按当前朝向解析一帧原始输入。</summary>
@@ -66,6 +70,6 @@ public static class DirectionResolver
         bool resolvedUp = up;
         bool resolvedDown = down && !up;
 
-        return new RelativeInput(forward, back, resolvedUp, resolvedDown, raw & AttackMask);
+        return new RelativeInput(forward, back, resolvedUp, resolvedDown, raw & AttackButtons);
     }
 }
