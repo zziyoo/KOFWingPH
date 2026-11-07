@@ -369,13 +369,17 @@ public sealed class CommandRecognizer
             int startFrame;
             if (isCharge)
             {
-                // 蓄力检查（D51/D52）：蓄力量与释放窗口来自释放挂起状态。
+                // 蓄力检查（D51/D52/D54）：蓄力量与释放窗口来自释放挂起状态。
                 // 保持时长不受 MaxSequenceFrames 约束（否则长蓄力反而失效）；
-                // 蓄力不足不能靠释放窗口补足；释放窗口已过则不得匹配。
+                // 蓄力不足不能靠释放窗口补足；释放窗口已过则不得匹配；
+                // 尾段必须属于本次释放之后的新手势——释放前的旧方向条目
+                // 不得被借用（D54：否则旧 Forward + 容差内按键可幽灵完成蓄力）。
                 ChargePendingState pending = player.ChargePendings[definitionIndex];
                 if (!pending.HasPending)
                     continue;
                 if (pending.AmountHeld < definition.ChargeHoldFrames)
+                    continue;
+                if (endFrame < pending.ReleasedAtFrame)
                     continue;
                 if (endFrame - pending.ReleasedAtFrame > definition.ChargeReleaseToleranceFrames)
                     continue;
