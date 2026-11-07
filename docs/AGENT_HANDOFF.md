@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 05B：跳跃/落地/边界/推挤/朝向，D66–D72——阶段 05 结项）
+> 最后更新：2026-11-07（阶段 05 最终专项补修：推挤求解 D73 / GroundY D74 / JumpKind D75——阶段 05 结项）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 460，已跳过: 0，总计: 460`
+期望：`失败: 0，通过: 485，已跳过: 0，总计: 485`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,23 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 05 最终专项补修（2026-11-07）推挤统一求解 / 防穿越 / GroundY / JumpKind（D73–D75）—— 阶段 05 结项
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Simulation/BattleSimulation.cs` | **D73**：`ApplySeparation` 重写为统一求解——① 帧开始双方都在地面 → 以帧开始顺序为约束（**禁止地面角色单帧交换左右**；高速相向不再穿越）；涉及空中（越身/落地帧）以候选顺序为准（越身合法，新地面顺序落地帧建立）；② 对称分配缺口 + **墙角残差再分配**（触墙方无法承担的份额由仍有墙余量的一方承担：贴墙 640 时对方收敛到 **580**，废除旧 582/640 残留）；③ 奇数原始单位余数显式归 P1；闭式求解无迭代无震荡 |
+| `core/BattleCore/Simulation/StageDefinition.cs` | **D74**：构造期拒绝任何非零 `GroundY`（当前场地模型只支持 Y=0 平地；正/负/分数全部 `ArgumentException`） |
+| `core/BattleCore/State/FighterState.cs` | **D75**：`Validate` 增加 `Enum.IsDefined(JumpKind)`——未定义跳跃类型（如 999/-1）任何状态拒绝，消息含具体非法值 |
+| `tests/BattleCore.Tests/GroundCrossingTests.cs` | **新增 9 项**：32/32 相向不穿越（回投到 ∓30）、32 冲静止者、32v1 精确对半、镜像、百帧无震荡、动作中被冲不穿越、越身合法且落地建序保持、贴墙高速单帧求解、双跑一致 |
+| `tests/BattleCore.Tests/StageBoundaryTests.cs` | **新增 9 项 / 更正 1 项**：右墙 580/640（旧断言 582/640 是把求解缺陷固定为预期，已更正）、左墙镜像、双方同推右/左墙、精确间距不动、1 raw 缺口精确消除、贴墙落地残差归落地者、GroundY 拒绝（10/−10/0.5）与默认合法 |
+| `tests/BattleCore.Tests/JumpTests.cs` | **新增 7 项**：JumpKind 未定义值（Airborne+999/−1、地面三态+999）Validate 拒绝、BattleState 构造门拒绝 |
+
+**复现证据（修复前实测 22 项失败）**：墙角 582/640（7 项）、高速穿越（6 项）、GroundY 接受非零（3 项）、
+JumpKind 999 入快照（5 项）+ 1 项测试自身预期修正。
+**变异验证（已还原）**：禁用墙角残差再分配 → 4/5 墙角测试失败；取消帧开始顺序约束 → 5/9 穿越测试失败。
+**验收**：485/485；四构建 0 警告 0 错误；无头导入 `[ DONE ]`；图形运行六张截图
+（右墙 580/640、左墙 −640/−580 ×2、相向不穿越、大跳空中 37.5、落地不连跳）全部命中。
 
 ### 阶段 05B（2026-11-07）跳跃、落地、场地边界、推挤与自动朝向（D66–D72）—— 阶段 05 结项
 
@@ -540,7 +557,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K32 | **Godot 运行时直接加载 `.godot/mono/temp/bin/Debug` 旧程序集** | 改代码后直接跑 `--shot` 验收会看到旧行为（实测 05A 踩坑：截图显示旧 HUD 且角色不移动） | 截图验收前先 `dotnet build NewKOF.csproj`（默认 Debug 配置即写入该目录；`-c Release` 只更新 Release 目录） |
 | K33 | **`FighterState.PositionX/PositionY` 已是 `FixedPoint`** | 直接当 int 用会编译失败；`Assert.Equal(-120, f.PositionX)` 因泛型推断失败也编译不过 | 读整数用 `PositionXUnits`（向零截断）或 `PositionX.ToIntTruncated()`；整数字面量赋值/传参可隐式转换（= 世界单位）；比较用 `FixedPoint.FromInt(...)` 或 `== -120`（运算符可隐式转换）；Godot 显示用 `ToDouble()`，**浮点绝不写回权威状态** |
 | K34 | **跳跃/落地/推挤/朝向的帧语义全部有测试 pinned** | 改动积分顺序（D69）、落地消费时机、推挤分配、朝向更新时刻中的任何一项都会破坏逐值断言 | 修改前先读 `JumpTests`/`StageBoundaryTests`/`MovementDeterminismTests` 的注释（含解析推导）；「落地帧不消费」「墙优先于间距」「平局 P1 左 P2 右」是显式选择，不是偶然行为 |
-| K35 | **双人推挤靠墙会收敛到「墙侧角色贴墙 + 另一侧间距 ≈ 最小值」的稳定点**（如 582/640） | 对称分配 + 墙钳制的解析结果；一方持续推进时整体以小步长确定性蠕动（间距恒为最小值） | 设计如此；不要改成「靠墙即完全静止」或「墙侧角色被推离墙面」——两者都会破坏镜像对称测试 |
+| K35 | **双人推挤由统一求解器完成（D73）**：墙角残差再分配——贴墙方不动、剩余位移全部由另一侧承担（贴墙 640 时对方收敛到 **580**，间距恰 60）；帧开始双方都在地面时以帧开始顺序为约束（高速相向不穿越）；奇数原始单位余数归 P1 | 旧算法「平分后钳制」会残留 582/640 且放任高速地面穿越（修复前实测）；旧测试把 582 固定为预期已更正 | 不要改回「平分后即钳制」的单遍算法（变异验证会使 4 项墙角测试失败）；不要取消帧开始顺序约束（5 项穿越测试失败）；空中越身不受约束（落地帧以候选顺序建立新地面顺序） |
+| K36 | **`StageDefinition` 只接受 GroundY=0（D74）** | 落地判定/状态校验/出生高度/Godot 显示全部以 Y=0 为基准，非零配置会产生双重权威地面高度 | 需要平台/斜坡时必须统一扩展全部关联模块与测试，不能只改一个判断 |
+| K37 | **`JumpKind` 在 `Validate` 中完整枚举校验（D75）** | `(JumpKind)999` 此前能借 Airborne+Y>0 进入权威快照 | 与 D62 同一模式；`JumpLaunch.Kind` 只由状态机产生，无需额外入口校验 |
 
 **无阻塞性问题。** 编译 0 警告 0 错误，阶段 05B 验收时 460/460 测试通过，可正常启动运行。
 
@@ -580,8 +599,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/{BattleSimulationTests,Phase04IntegrationTests}.cs（2 处断言改整数视图）
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **本轮阶段 05B：`feat(movement): implement jumps landing and stage boundaries`**
-    （创建后用 `git rev-parse HEAD` 读取 SHA）。提交内容：
+  - **阶段 05B：`feat(movement): implement jumps landing and stage boundaries`（`ba2c426`），已推送。**
+    提交内容：
     ```
     新增: core/BattleCore/Combat/{JumpKind,AirborneMovement}.cs
           core/BattleCore/Simulation/StageDefinition.cs
@@ -594,7 +613,16 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/{GroundMovementTests,FighterStateValidationTests,FighterStateMachineTests}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **工作区：干净**（阶段 05B 提交并推送后）。
+  - **本轮阶段 05 专项补修：`fix(movement): resolve corner push and ground crossing edge cases`**
+    （创建后用 `git rev-parse HEAD` 读取 SHA）。提交内容：
+    ```
+    修改: core/BattleCore/Simulation/{BattleSimulation,StageDefinition}.cs
+          core/BattleCore/State/FighterState.cs
+          tests/BattleCore.Tests/{StageBoundaryTests,JumpTests}.cs
+    新增: tests/BattleCore.Tests/GroundCrossingTests.cs（含 .uid）
+    修改: docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **工作区：干净**（阶段 05 专项补修提交并推送后）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -729,7 +757,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 460」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 485」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -760,9 +788,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 跳跃链路（D67/D68/D69）：起跳 = 「上」边沿（`UpHeldLastFrame` 随快照携带，防自动连跳）；
       PreJump 不可取消不消费；类型/水平方向在起跳帧按当帧输入锁定；积分顺序固定
       （vy−g → 坐标 → 触地）；落地帧不消费、次帧消费——帧语义由测试逐值 pinned
-- [ ] 场地与双人（D70/D71/D72）：候选 X 统一钳制（含空中）；推挤仅双方非空中、
-      对称分配、平局 P1 左 P2 右、墙优先于间距；朝向帧末更新、仅地面待机、等距保持；
-      输入始终按帧开始朝向解析（D46 不变）
+- [ ] 场地与双人（D70/D71/D73）：候选 X 统一钳制（含空中）；推挤仅双方非空中、
+      对称分配、余数归 P1、**墙角残差再分配（贴墙 640 → 对方 580，不残留 582）**；
+      **帧开始双方都在地面时禁止单帧交换左右（防高速穿越）**，越身/落地帧以候选顺序为准；
+      朝向帧末更新、仅地面待机、等距保持；输入始终按帧开始朝向解析（D46 不变）
+- [ ] `StageDefinition` 只接受 GroundY=0（D74）；`JumpKind` 在 Validate 完整枚举校验（D75）
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向

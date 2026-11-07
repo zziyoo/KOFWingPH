@@ -91,6 +91,13 @@ public readonly record struct FighterState(
             throw new InvalidOperationException(
                 $"角色 {Id} 携带未定义的角色逻辑状态：{LogicState}（{(int)LogicState}）。");
 
+        // 跳跃类型完整枚举检查（05 专项补修 P2，与 D62 同一模式）：
+        // 未定义的 JumpKind（如 (JumpKind)999）此前能借「Airborne + Y>0 + 999 ≠ None」
+        // 通过校验进入权威快照。None 合法但只能用于地面（下方分支强制）。
+        if (!Enum.IsDefined(JumpKind))
+            throw new InvalidOperationException(
+                $"角色 {Id} 携带未定义的跳跃类型：{JumpKind}（{(int)JumpKind}）。");
+
         // 动作状态不变式（D57）：阶段剩余帧数不允许为负；动作期间必须带 MoveId 且
         // 剩余 ≥ 1（阶段切换在归零的同一帧完成，不产生 0 帧的中间状态）；
         // 待机状态必须无 MoveId 且剩余为 0。

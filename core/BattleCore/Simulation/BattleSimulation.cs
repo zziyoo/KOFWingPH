@@ -21,9 +21,12 @@ namespace NewKOF.BattleCore.Simulation;
 ///          <see cref="GroundMovement.StepX"/> 步行（D65）；其余状态原地；</item>
 /// <item><b>场地边界（D70）</b>：双方候选 X 一律钳制到 [MinX, MaxX]（含空中；含边界值，
 ///       不反弹、不振荡、不穿墙）；</item>
-/// <item><b>双人最小间距（D71）</b>：仅双方都<b>不在空中</b>时强制——按中点对称推开；
-///       完全重叠时平局规则固定（P1 向左、P2 向右）；推挤后再钳制边界
-///       （<b>墙优先于间距</b>：靠墙时最终间距可小于最小值，但绝不越界）；</item>
+/// <item><b>双人最小间距（D71 修订）</b>：仅双方都<b>不在空中</b>时强制——
+///       帧开始双方都在地面时以帧开始顺序为约束（<b>禁止地面角色单帧交换左右</b>，
+///       涉及空中时以候选顺序为准，越身合法）；按缺口对称分配（奇数原始单位余数归 P1），
+///       触墙方无法承担的份额由仍有墙余量的一方补足（<b>墙角不残留重叠</b>，
+///       如贴墙 640 时对方收敛到 580 而非 582）；完全重叠平局规则固定
+///       （P1 向左、P2 向右）；同帧双方候选统一求解，无迭代、无逐帧震荡；</item>
 /// <item><b>朝向更新（D72）</b>：帧末进行——地面待机（站立/蹲下）面向对手最终位置；
 ///       X 相等时保持原朝向（不抖动）；PreJump/Airborne/动作三阶段朝向冻结。
 ///       本帧输入始终按帧开始朝向解析（D46 不变），帧末朝向只影响后续帧；</item>
@@ -191,12 +194,12 @@ public sealed class BattleSimulation
         for (int i = 0; i < candidates.Length; i++)
             candidates[i].PositionX = _stage.ClampX(candidates[i].PositionX);
 
-        // ── 第 4 阶段：双人最小间距（D71）——仅双方都不在空中时强制。
-        if (candidates[0].LogicState != FighterLogicState.Airborne &&
-            candidates[1].LogicState != FighterLogicState.Airborne)
-        {
-            ApplySeparation(candidates);
-        }
+        // ── 第 4 阶段：双人最小间距（D71 修订：帧开始顺序约束 + 墙角残差再分配）。
+        bool bothGroundAtFrameStart =
+            state.Fighters[0].LogicState != FighterLogicState.Airborne &&
+            state.Fighters[1].LogicState != FighterLogicState.Airborne;
+        ApplySeparation(candidates, bothGroundAtFrameStart,
+            state.Fighters[0].PositionX, state.Fighters[1].PositionX);
 
         // ── 第 5 阶段：朝向更新（D72）——帧末执行，基于最终候选位置。
         for (int i = 0; i < candidates.Length; i++)
@@ -241,43 +244,112 @@ public sealed class BattleSimulation
     }
 
     /// <summary>
-    /// 双人最小间距推挤（D71）：基于同一帧的两个候选位置对称分配——
-    /// 不因先更新 P1 后更新 P2 而产生先手优势。完全重叠的平局规则固定：P1 向左、P2 向右。
-    /// 推挤后重新钳制边界：<b>墙优先于间距</b>，靠墙时允许最终间距小于最小值，但绝不越界。
+    /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。
+    ///
+    /// <para><b>顺序约束（防地面穿越）</b>：帧开始双方都在地面（非 Airborne）时，
+    /// 以<b>帧开始相对顺序</b>为约束——地面角色禁止在一个逻辑帧内交换左右；
+    /// 完全重叠的初态平局规则保持确定（P1 视为在左）。涉及空中（一方帧开始为
+    /// Airborne——合法越身或落地帧）时以<b>候选顺序</b>为准，新地面顺序在落地帧建立；
+    /// 空中越身不被本约束禁止。</para>
+    ///
+    /// <para><b>求解（闭式，同帧双方统一计算，无迭代、无逐帧震荡）</b>：</para>
+    /// <list type="number">
+    /// <item>候选间距 ≥ 最小间距 → 不推挤；</item>
+    /// <item>否则按缺口对称分配（deficit/2；<b>奇数原始单位的余数归 P1</b>——与 D71
+    ///       平局规则同源，身份映射下镜像一致）；</item>
+    /// <item>钳制到场地边界（D70）；</item>
+    /// <item>若钳制后间距仍不足（一方触墙无法承担份额）：<b>剩余量由仍有墙余量的
+    ///       一方承担</b>——二次对称分配、触墙方取其可用量、剩余全给未触墙方
+    ///       （两侧同时触墙意味着间距已 = 场地宽度 ≥ 最小间距，由 StageDefinition
+    ///       构造期校验保证不会发生）。墙角不再残留重叠（旧算法会停在 582/640）。</item>
+    /// </list>
+    ///
+    /// <para>全部运算为 <see cref="FixedPoint"/> 整数算术（deficit/2 对偶数原始值精确、
+    /// 奇数原始值向零截断后余数显式归属 P1），无浮点、无 NaN、无静默溢出；
+    /// 纯函数——只修改候选副本，不入原快照，Step 失败整体丢弃。</para>
     /// </summary>
-    private void ApplySeparation(Span<FighterCandidate> candidates)
+    /// <param name="candidates">双方候选（本帧「识别 → 状态机 → 运动」之后）。</param>
+    /// <param name="bothGroundAtFrameStart">帧开始双方是否都在地面（决定顺序约束来源）。</param>
+    /// <param name="frameStartP1X">帧开始 P1 的 X（顺序约束基准）。</param>
+    /// <param name="frameStartP2X">帧开始 P2 的 X（顺序约束基准）。</param>
+    private void ApplySeparation(
+        Span<FighterCandidate> candidates,
+        bool bothGroundAtFrameStart,
+        FixedPoint frameStartP1X,
+        FixedPoint frameStartP2X)
     {
-        FixedPoint separation = _stage.MinimumFighterSeparation;
-        FixedPoint dx = candidates[0].PositionX - candidates[1].PositionX;
-        FixedPoint magnitude = dx < FixedPoint.Zero ? -dx : dx;
-
-        if (magnitude < separation)
+        // 仅双方候选都非空中时强制（有一方在空中 → 不推挤，允许越身）。
+        if (candidates[0].LogicState == FighterLogicState.Airborne ||
+            candidates[1].LogicState == FighterLogicState.Airborne)
         {
-            FixedPoint overlap = separation - magnitude;
-            FixedPoint half = overlap / FixedPoint.FromInt(2); // 向零截断（D63），确定性
-
-            if (dx > FixedPoint.Zero)
-            {
-                // P1 在右：P1 继续向右、P2 向左。
-                candidates[0].PositionX += half;
-                candidates[1].PositionX -= half;
-            }
-            else if (dx < FixedPoint.Zero)
-            {
-                // P1 在左：P1 向左、P2 向右。
-                candidates[0].PositionX -= half;
-                candidates[1].PositionX += half;
-            }
-            else
-            {
-                // 完全重叠（异常初态/空中落地同点）：平局规则固定——P1 向左、P2 向右。
-                candidates[0].PositionX -= half;
-                candidates[1].PositionX += half;
-            }
-
-            // 墙优先于间距：推挤不得把任何人推出场地。
-            candidates[0].PositionX = _stage.ClampX(candidates[0].PositionX);
-            candidates[1].PositionX = _stage.ClampX(candidates[1].PositionX);
+            return;
         }
+
+        FixedPoint separation = _stage.MinimumFighterSeparation;
+        FixedPoint p1Cand = candidates[0].PositionX;
+        FixedPoint p2Cand = candidates[1].PositionX;
+
+        // 顺序约束（P1-B）：帧开始双方都在地面 → 禁止本帧交换左右；
+        // 涉及空中（越身/落地帧）→ 以候选顺序为准（新地面顺序在落地帧建立）。
+        bool p1IsLeft = bothGroundAtFrameStart
+            ? frameStartP1X <= frameStartP2X
+            : p1Cand <= p2Cand;
+
+        int lo = p1IsLeft ? 0 : 1; // 本帧结束时必须在左侧的角色
+        int hi = 1 - lo;
+        FixedPoint loCand = candidates[lo].PositionX;
+        FixedPoint hiCand = candidates[hi].PositionX;
+        FixedPoint gap = hiCand - loCand;
+
+        if (gap >= separation)
+            return; // 候选已满足顺序与间距。
+
+        FixedPoint deficit = separation - gap;
+
+        // 第一次分配：对称分摊缺口；奇数原始单位的余数归 P1（身份规则，镜像一致）。
+        FixedPoint half = deficit / FixedPoint.FromInt(2); // 向零截断（仅奇数 raw 丢失 1 单位）
+        FixedPoint p1Share = deficit - half;
+        FixedPoint p2Share = half;
+        FixedPoint loShare = lo == 0 ? p1Share : p2Share;
+        FixedPoint hiShare = hi == 0 ? p1Share : p2Share;
+
+        FixedPoint loFinal = _stage.ClampX(loCand - loShare);
+        FixedPoint hiFinal = _stage.ClampX(hiCand + hiShare);
+
+        // 墙角残差再分配（P1-A）：触墙方无法承担的份额由仍有余量的一方补足。
+        FixedPoint newGap = hiFinal - loFinal;
+        if (newGap < separation)
+        {
+            FixedPoint residual = separation - newGap;
+            FixedPoint roomLo = loFinal - _stage.MinX;
+            FixedPoint roomHi = _stage.MaxX - hiFinal;
+
+            FixedPoint halfResidual = residual / FixedPoint.FromInt(2);
+            FixedPoint p1ResidualShare = residual - halfResidual; // 余数归 P1
+            FixedPoint p2ResidualShare = halfResidual;
+            FixedPoint loResidualShare = lo == 0 ? p1ResidualShare : p2ResidualShare;
+            FixedPoint hiResidualShare = hi == 0 ? p1ResidualShare : p2ResidualShare;
+
+            FixedPoint takeLo = loResidualShare < roomLo ? loResidualShare : roomLo;
+            FixedPoint takeHi = hiResidualShare < roomHi ? hiResidualShare : roomHi;
+            FixedPoint leftover = residual - takeLo - takeHi;
+            if (leftover > FixedPoint.Zero)
+            {
+                // 恰有一侧触墙（两侧同时触墙 ⟹ 间距 = 场地宽度 ≥ 最小间距，不会发生）：
+                // 剩余量全给仍有余量的一方。
+                if (roomLo > takeLo)
+                    loFinal -= leftover;
+                else
+                    hiFinal += leftover;
+            }
+
+            loFinal -= takeLo;
+            hiFinal += takeHi;
+            loFinal = _stage.ClampX(loFinal);
+            hiFinal = _stage.ClampX(hiFinal);
+        }
+
+        candidates[lo].PositionX = loFinal;
+        candidates[hi].PositionX = hiFinal;
     }
 }

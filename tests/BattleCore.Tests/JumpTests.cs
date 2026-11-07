@@ -396,7 +396,7 @@ public class JumpTests
     [Fact]
     public void Validate_AirborneInvariants()
     {
-        // 空中必须 Y > 0 且携带跳跃类型。
+        // 空中必须 Y > 0 且携带合法跳跃类型。
         var air = new FighterState(
             Id: 0, MaxHealth: 1000, Health: 1000, PositionX: -120, PositionY: 5,
             Facing: Facing.Right, LogicState: FighterLogicState.Airborne,
@@ -411,6 +411,42 @@ public class JumpTests
         Assert.Throws<InvalidOperationException>(() => new FighterState(
             Id: 0, MaxHealth: 1000, Health: 1000, PositionX: -120, PositionY: 5,
             Facing: Facing.Right, LogicState: FighterLogicState.Airborne).Validate()); // 无跳跃类型拒绝
+    }
+
+    [Theory]
+    [InlineData(FighterLogicState.Airborne, 999, "999")]
+    [InlineData(FighterLogicState.Airborne, -1, "-1")]
+    [InlineData(FighterLogicState.Standing, 999, "999")]
+    [InlineData(FighterLogicState.Crouching, 999, "999")]
+    [InlineData(FighterLogicState.PreJump, 999, "999")]
+    public void Validate_RejectsUndefinedJumpKind(FighterLogicState state, int rawKind, string rawText)
+    {
+        // P2 专项补修：未定义的 JumpKind 一律拒绝（与 D62 对 LogicState 的处理一致）。
+        // 修复前：(JumpKind)999 + Airborne + Y>0 能通过校验进入权威快照。
+        var fighter = new FighterState(
+            Id: 0, MaxHealth: 1000, Health: 1000,
+            PositionX: -120, PositionY: state == FighterLogicState.Airborne ? 5 : 0,
+            Facing: Facing.Right, LogicState: state,
+            JumpKind: (JumpKind)rawKind,
+            PhaseRemainingFrames: state == FighterLogicState.PreJump ? 3 : 0,
+            VelocityY: state == FighterLogicState.Airborne ? FixedPoint.FromInt(3) : FixedPoint.Zero);
+
+        var ex = Assert.Throws<InvalidOperationException>(fighter.Validate);
+        Assert.Contains("未定义", ex.Message);
+        Assert.Contains(rawText, ex.Message); // 错误原因包含具体非法值
+    }
+
+    [Fact]
+    public void BattleState_Construction_RejectsUndefinedJumpKind()
+    {
+        // 第一道门：非法跳跃类型不能进入权威快照（BattleState 构造期拒绝）。
+        Assert.Throws<InvalidOperationException>(() => new BattleState(0, new[]
+        {
+            new FighterState(Id: 0, MaxHealth: 1000, Health: 1000,
+                PositionX: -120, PositionY: 5, Facing: Facing.Right,
+                LogicState: FighterLogicState.Airborne, JumpKind: (JumpKind)999),
+            FighterState.Create(1, 1000, 120, Facing.Left),
+        }, BattleState.CreateDefault().StateVersion));
     }
 
     [Fact]

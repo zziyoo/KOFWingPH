@@ -136,21 +136,148 @@ public class StageBoundaryTests
     [Fact]
     public void PushAgainstWall_WallPriorityOverSeparation_ConvergesStable()
     {
-        // P2 已在右墙（640），P1 从 500 持续推进：
-        // P2 被钳制在 640（绝不推出边界），P1 单调收敛到 582 后稳定（无振荡）。
+        // 专项补修后的正确行为（D71 修订）：P2 贴墙无法承担外推份额时，
+        // 剩余重叠量由 P1 承担——最终 580/640，间距恰 60。
+        // （修复前的旧算法长期稳定在 582/640、间距 58——旧断言接受残留重叠，是错误预期。）
         BattleState state = Run(
             CustomState(500, Facing.Right, 640, Facing.Left),
             Hold(InputBits.Right, InputBits.None), 150);
 
         Assert.Equal(FixedPoint.FromInt(640), P2(state).PositionX);
-        Assert.Equal(FixedPoint.FromInt(582), P1(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(580), P1(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(60), P2(state).PositionX - P1(state).PositionX);
 
-        // 稳定性：再推 100 帧位置逐位不变。
+        // 稳定性：再推 100 帧位置逐位不变（无震荡）。
         BattleState longer = Run(
             CustomState(500, Facing.Right, 640, Facing.Left),
             Hold(InputBits.Right, InputBits.None), 250);
         Assert.Equal(P1(state).PositionX, P1(longer).PositionX);
         Assert.Equal(P2(state).PositionX, P2(longer).PositionX);
+    }
+
+    [Fact]
+    public void LeftWall_Mirror_PusherTakesResidual()
+    {
+        // 左墙镜像：P1 贴左墙（-640），P2 从右侧持续向左推进（1.75/帧，接触在 f≈400）
+        // → P1=-640 / P2=-580，间距恰 60。
+        BattleState state = Run(
+            CustomState(-640, Facing.Right, 120, Facing.Left),
+            Hold(InputBits.None, InputBits.Left), 600);
+
+        Assert.Equal(FixedPoint.FromInt(-640), P1(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(-580), P2(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(60), P2(state).PositionX - P1(state).PositionX);
+    }
+
+    [Fact]
+    public void BothPushTowardRightWall_StableSeparation()
+    {
+        // 双方同时向右墙推进：P1 步行 2.0 推着 P2（后退 1.25 也向右）→
+        // P2 先贴墙（640），P1 收敛到 580。
+        BattleState state = Run(
+            BattleState.CreateDefault(), Hold(InputBits.Right, InputBits.Right), 1200);
+
+        Assert.Equal(FixedPoint.FromInt(640), P2(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(580), P1(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(60), P2(state).PositionX - P1(state).PositionX);
+    }
+
+    [Fact]
+    public void BothPushTowardLeftWall_StableSeparation()
+    {
+        // 双方同时向左墙推进：P2 前进 1.75 快于 P1 后退 1.5 → P2 追上并推 P1 贴左墙
+        // → P1=-640 / P2=-580。
+        BattleState state = Run(
+            BattleState.CreateDefault(), Hold(InputBits.Left, InputBits.Left), 1200);
+
+        Assert.Equal(FixedPoint.FromInt(-640), P1(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(-580), P2(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(60), P2(state).PositionX - P1(state).PositionX);
+    }
+
+    [Fact]
+    public void ExactSeparationDistance_NoDisplacement()
+    {
+        // 距离恰好等于最小间距（60）：不推挤，位置恒定。
+        BattleState state = Run(CustomState(-30, Facing.Right, 30, Facing.Left), Hold(InputBits.None, InputBits.None), 100);
+
+        Assert.Equal(FixedPoint.FromInt(-30), P1(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(30), P2(state).PositionX);
+    }
+
+    [Fact]
+    public void OneRawUnitDeficit_CorrectedExactly_NoPermanentResidue()
+    {
+        // 间距仅差 1 个 Q16.16 原始单位：deficit = 1 raw（奇数）→ 余数归 P1
+        // → P1 恰好补进 1 raw，间距精确回到 60，无永久残差。
+        // （修复前：旧算法把 1 raw 对半截断为 0，间距永久保持 60−1 raw。）
+        var state = new BattleState(0, new[]
+        {
+            new FighterState(Id: 0, MaxHealth: 1000, Health: 1000,
+                PositionX: FixedPoint.FromRaw(1), PositionY: FixedPoint.Zero, Facing: Facing.Right),
+            new FighterState(Id: 1, MaxHealth: 1000, Health: 1000,
+                PositionX: FixedPoint.FromInt(60), PositionY: FixedPoint.Zero, Facing: Facing.Left),
+        }, BattleState.CreateDefault().StateVersion);
+
+        BattleState after = Run(state, Hold(InputBits.None, InputBits.None), 10);
+
+        Assert.Equal(FixedPoint.FromRaw(0), P1(after).PositionX);
+        Assert.Equal(FixedPoint.FromInt(60), P2(after).PositionX);
+        Assert.Equal(FixedPoint.FromInt(60), P2(after).PositionX - P1(after).PositionX);
+    }
+
+    [Fact]
+    public void LandingOverlapAtWall_ResidualGoesToLander()
+    {
+        // 一方靠墙、另一方跳跃落地造成重叠：P1 从 525 前大跳（水平 3.0×25 积分帧）
+        // 落地候选 X=600，P2 贴墙 640 → 间距 40：落地帧一次性求解 → P1=580 / P2=640。
+        // （帧 27 = 落地帧；Run 需 28 帧把它包含进来。）
+        BattleState state = Run(
+            CustomState(525, Facing.Right, 640, Facing.Left),
+            Hold(InputBits.Up | InputBits.Right, InputBits.None), 28);
+
+        Assert.Equal(FighterLogicState.Standing, P1(state).LogicState);
+        Assert.Equal(FighterLogicState.Standing, P2(state).LogicState);
+        Assert.Equal(FixedPoint.FromInt(640), P2(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(580), P1(state).PositionX);
+        Assert.Equal(FixedPoint.FromInt(60), P2(state).PositionX - P1(state).PositionX);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GroundY 配置限制（P2 专项补修：当前场地模型只支持 Y=0 平地）
+    // ─────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(-10)]
+    public void StageDefinition_RejectsNonZeroGroundY(int groundY)
+    {
+        Assert.Throws<ArgumentException>(() => new StageDefinition(
+            FixedPoint.FromInt(-640), FixedPoint.FromInt(640),
+            FixedPoint.FromInt(groundY), FixedPoint.FromInt(60)));
+    }
+
+    [Fact]
+    public void StageDefinition_RejectsFractionalGroundY()
+    {
+        Assert.Throws<ArgumentException>(() => new StageDefinition(
+            FixedPoint.FromInt(-640), FixedPoint.FromInt(640),
+            FixedPoint.FromFraction(1, 2), FixedPoint.FromInt(60)));
+    }
+
+    [Fact]
+    public void StageDefinition_ZeroGroundY_AndDefaultStage_AreAccepted()
+    {
+        var explicitZero = new StageDefinition(
+            FixedPoint.FromInt(-640), FixedPoint.FromInt(640),
+            FixedPoint.Zero, FixedPoint.FromInt(60));
+        Assert.Equal(FixedPoint.Zero, explicitZero.GroundY);
+
+        var def = StageDefinition.CreateDefault();
+        Assert.Equal(FixedPoint.Zero, def.GroundY);
+        Assert.Equal(FixedPoint.FromInt(-640), def.MinX);
+        Assert.Equal(FixedPoint.FromInt(640), def.MaxX);
+        Assert.Equal(FixedPoint.FromInt(60), def.MinimumFighterSeparation);
     }
 
     [Fact]
