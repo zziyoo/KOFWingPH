@@ -25,7 +25,9 @@ namespace NewKOF.BattleCore.Simulation;
 ///       <c>TotalSteps</c> 超过真实提交的帧数。</item>
 /// <item>不推进时（暂停 / 欠帧不足）绝不调用 <c>Step()</c>。</item>
 /// <item><b>输入与战斗状态一致提交</b>：使用 <see cref="IInputSource"/> 时，
-///       顺序恒为「准备输入 → 执行模拟 → 提交输入 → 帧记账」。模拟失败时这次准备的结果
+///       顺序恒为「准备输入 → 模拟出候选状态 → 提交输入 → 落权威状态 → 帧记账」。
+///       <b>候选状态在输入提交成功之前不会赋给 <c>CurrentState</c></b>，
+///       因此模拟失败或提交失败都不会让状态/计数跑在输入前面。失败后这次准备的结果
 ///       被直接丢弃：不写输入历史、不消费按下边沿，重试同一帧仍是同一输入。
 ///       普通 <see cref="Func{T,TResult}"/> 输入源无法回滚，故要求其对同一帧号幂等。</item>
 /// </list>
@@ -118,11 +120,15 @@ public sealed class BattleSession
                         $"输入提供者返回帧号({input.Frame})与当前逻辑帧({frame})不一致。");
                 }
 
-                CurrentState = _simulation.Step(CurrentState, input).State;
+                // 先算出候选状态但**不赋值**：Step() 或 Commit() 抛异常时，
+                // 权威状态必须原地不动，否则会破坏 Frame - 初始帧号 == TotalSteps。
+                BattleState nextState = _simulation.Step(CurrentState, input).State;
 
-                // 模拟成功后才提交输入（写历史 + 消费边沿）；
-                // 失败时这次 Prepare 的结果被直接丢弃，重试同一帧仍是同一输入。
+                // 模拟成功后才提交输入（写历史 + 消费边沿）。
+                // Commit 失败时 nextState 被丢弃，状态与计数都不前进。
                 inputSource?.Commit(input);
+
+                CurrentState = nextState;
 
                 // 只有真正提交后才记账，保证 TotalSteps 不会跑在状态前面。
                 Scheduler.CommitStep();
@@ -183,10 +189,10 @@ public sealed class BattleSession
                     $"输入提供者返回帧号({input.Frame})与当前逻辑帧({frame})不一致。");
             }
 
-            CurrentState = _simulation.Step(CurrentState, input).State;
-
-            // 与 Advance 共用同一契约：模拟成功后才提交输入，再记账。
+            // 与 Advance 共用同一提交顺序：候选状态 → 提交输入 → 落状态 → 记账。
+            BattleState nextState = _simulation.Step(CurrentState, input).State;
             inputSource?.Commit(input);
+            CurrentState = nextState;
             Scheduler.CommitStep();
         }
     }

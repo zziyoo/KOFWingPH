@@ -51,6 +51,37 @@ public class InputIntegrityTests
         public void Commit(FrameInput input) => _inner.Commit(input);
     }
 
+    /// <summary>
+    /// 在指定帧的 <see cref="Commit"/> 抛异常的输入源（只失败一次）。
+    /// 用于构造「<c>Step()</c> 已成功算出候选状态，但输入提交失败」的路径。
+    /// 它自身不做任何写入，符合 <see cref="IInputSource.Commit"/> 的无副作用失败契约。
+    /// </summary>
+    private sealed class CommitFailSource : IInputSource
+    {
+        private readonly InputBuffer _inner;
+        private readonly int _failOnFrame;
+        private bool _failed;
+
+        public CommitFailSource(InputBuffer inner, int failOnFrame)
+        {
+            _inner = inner;
+            _failOnFrame = failOnFrame;
+        }
+
+        public FrameInput Prepare(int frame) => _inner.Prepare(frame);
+
+        public void Commit(FrameInput input)
+        {
+            if (!_failed && input.Frame == _failOnFrame)
+            {
+                _failed = true;
+                throw new InvalidOperationException("输入提交故障");
+            }
+
+            _inner.Commit(input);
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────
     // 缺陷 1：History 只读是假的（返回的仍是 List<T>）
     // ─────────────────────────────────────────────────────────────
@@ -322,6 +353,126 @@ public class InputIntegrityTests
         Assert.Equal(2, buffer.History.Count);
         Assert.Equal(100, buffer.History[0].Frame);
         Assert.True(buffer.IsAlignedWith(102));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // P1：Commit 失败不得推进战斗状态、不得记账
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Advance_CommitThrows_DoesNotAdvanceStateOrAccount()
+    {
+        var session = new BattleSession();
+        var buffer = new InputBuffer();
+        buffer.Sample(InputBits.Right, InputBits.None);
+        var source = new CommitFailSource(buffer, failOnFrame: 0);
+
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: source));
+
+        // Step() 已经算出候选状态，但提交失败：权威状态、帧计数、输入历史都不得前进
+        Assert.Equal(0, session.CurrentState.Frame);
+        Assert.Equal(0, session.Scheduler.TotalSteps);
+        Assert.True(session.IsFrameSyncIntact);
+        Assert.Empty(buffer.History);
+
+        // 时间预算已被消耗但未执行 → 记为丢弃，账目仍可解释
+        Assert.Equal(1, session.Scheduler.DroppedStepCount);
+    }
+
+    [Fact]
+    public void StepExact_CommitThrows_DoesNotAdvanceStateOrAccount()
+    {
+        var session = new BattleSession();
+        var buffer = new InputBuffer();
+        buffer.Sample(InputBits.Down, InputBits.None);
+        var source = new CommitFailSource(buffer, failOnFrame: 0);
+
+        Assert.Throws<InvalidOperationException>(() => session.StepExact(3, inputSource: source));
+
+        Assert.Equal(0, session.CurrentState.Frame);
+        Assert.Equal(0, session.Scheduler.TotalSteps);
+        Assert.True(session.IsFrameSyncIntact);
+        Assert.Empty(buffer.History);
+
+        // 显式单步没有时间预算，不应产生丢弃计数
+        Assert.Equal(0, session.Scheduler.DroppedStepCount);
+    }
+
+    [Fact]
+    public void MultiFrameBatch_CommitFailureAtSecondFrame_KeepsOnlyCommittedFrames()
+    {
+        var session = new BattleSession(scheduler: new FixedStepScheduler(maxStepsPerAdvance: 3));
+        var buffer = new InputBuffer();
+        buffer.Sample(InputBits.Right, InputBits.None);
+        var source = new CommitFailSource(buffer, failOnFrame: 1);
+
+        Assert.Throws<InvalidOperationException>(() => session.Advance(2 * Step, inputSource: source));
+
+        // 第 0 帧已完整提交（状态 + 记账 + 输入），第 1 帧三者都不得留下
+        Assert.Equal(1, session.CurrentState.Frame);
+        Assert.Equal(1, session.Scheduler.TotalSteps);
+        Assert.Single(buffer.History);
+        Assert.Equal(0, buffer.History[0].Frame);
+        Assert.True(buffer.IsAlignedWith(session.CurrentState.Frame));
+        Assert.True(session.IsFrameSyncIntact);
+        Assert.Equal(1, session.Scheduler.DroppedStepCount);
+    }
+
+    [Fact]
+    public void CommitFailure_ThenRetry_CommitsEdgeExactlyOnce()
+    {
+        var session = new BattleSession();
+        var buffer = new InputBuffer();
+        buffer.Sample(InputBits.HeavyKick, InputBits.None);
+        buffer.Sample(InputBits.None, InputBits.None); // 点击
+        var source = new CommitFailSource(buffer, failOnFrame: 0);
+
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: source));
+        Assert.Equal(0, session.CurrentState.Frame);
+        Assert.Empty(buffer.History);
+
+        // 重试：边沿仍在，落在第 0 帧且只落一次
+        session.Advance(Step, inputSource: source);
+        session.Advance(Step, inputSource: source);
+
+        Assert.Equal(2, session.CurrentState.Frame);
+        Assert.Equal(2, buffer.History.Count);
+        Assert.Equal(InputBits.HeavyKick, buffer.History[0].Player1);
+        Assert.Equal(InputBits.None, buffer.History[1].Player1);
+        Assert.True(session.IsFrameSyncIntact);
+    }
+
+    [Fact]
+    public void InputBufferCommit_RejectsMismatchedFrame_WithoutSideEffects()
+    {
+        var buffer = new InputBuffer();
+        buffer.Sample(InputBits.Right, InputBits.None);
+        FrameInput prepared = buffer.Prepare(0);
+
+        Assert.Throws<InvalidOperationException>(() => buffer.Commit(FrameInput.Empty(5)));
+
+        // 校验失败：历史与 pending 均未被改动
+        Assert.Empty(buffer.History);
+        Assert.Equal(0, buffer.CoalescedPressCount);
+        Assert.Equal(prepared, buffer.Prepare(0));
+    }
+
+    [Fact]
+    public void InputBufferCommit_RejectsStaleInput_WithoutSideEffects()
+    {
+        var buffer = new InputBuffer();
+        buffer.Sample(InputBits.Right, InputBits.None);
+        FrameInput prepared = buffer.Prepare(0);
+
+        // Prepare 之后采样被改动，旧输入不再等于当前状态
+        buffer.Sample(InputBits.Left, InputBits.Right);
+        Assert.Throws<InvalidOperationException>(() => buffer.Commit(prepared));
+
+        Assert.Empty(buffer.History);
+
+        // 边沿未被消费：原 Right 边沿 + 新的 Left 都在
+        FrameInput replay = buffer.Prepare(0);
+        Assert.Equal(InputBits.Right | InputBits.Left, replay.Player1);
     }
 
     // ─────────────────────────────────────────────────────────────
