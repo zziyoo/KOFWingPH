@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — NewKOF 架构说明
 
-> 最后更新：阶段 06A（2026-11-07，含 D76：AABB 判定框与攻击数据）
+> 最后更新：阶段 06B（2026-11-07，含 D77–D80：攻击高度表 / 命中伤害与硬直 / 防御 / 同帧互中）
 > 本文描述**已确定**的架构与**未决定**的问题。修改代码前请先读本文件。
 
 ---
@@ -346,6 +346,15 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | # | 决策 | 理由 |
 |---|---|---|
 | **D76** | **攻击判定采用 AABB（`FixedRect`，MinX/MaxX/MinY/MaxY 全定点）；三框职责严格划分：Pushbox（显示/查询，权威推挤仍由 D73 独占）、Hurtbox（姿态受击框：站立系 120 高、蹲下 70、空中跟随 PositionY）、Hitbox（只来自招式数据 `AttackDefinition`，仅 Active 配置帧范围生效）；相交 = 正面积重叠，边缘接触不算命中，无 epsilon** | 当前无旋转/骨骼，AABB 定点判定可逐位验证、镜像简单。`FixedRect` 构造期拒绝零/负宽高；`AttackDefinition`（前向/向上偏移 + 半宽高 + Active 内 0 起始帧范围 + AttackHeight）挂在 `MoveDefinition.Attacks`（可空 = 无攻击招式），范围超出 ActiveFrames 构造期失败（`int.MaxValue` 哨兵 = 至末帧）。**帧语义：Startup → Active 转换完成的那一逻辑帧即 Active 第 1 帧（elapsed = ActiveFrames − 剩余）**，该帧即产生攻击框；Recovery 首帧不再有。镜像只由权威 Facing 施加（前向偏移 ±），与 Godot 精灵翻转无关；攻击框跟随权威位置；不检测攻击者自己。检测输出为 `BattleStepResult.Contacts`（确定性诊断：先攻击者 0 后 1、按攻击序号），**06A 不结算**——伤害/防御/硬直属 06B，重复命中抑制属 06C。Godot 判定框调试（`DebugBoxDrawer` 顶层节点：Hitbox 红/Hurtbox 蓝/Pushbox 绿轮廓，F2 开关）只做权威几何的显示换算，绝不反向参与判定。 |
+
+### 阶段 06B 决策（命中、伤害、防御与硬直）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D77** | **攻击高度（High/Mid/Low）是 `AttackDefinition` 的显式数据配置，不由 Hitbox 世界 Y 坐标推断；防御表：High 只能站防、Low 只能蹲防、Mid 皆可** | 高度是格斗语义（爆头/段位），几何 Y 会随姿态/体型变化，用几何推断会产生隐性耦合。`GuardCovers(Height, 防御姿态)` 是唯一事实来源（纯函数，测试固定整表）。 |
+| **D78** | **新增 `Hitstun`/`Blockstun` 状态与 `FighterState.StunRemainingFrames`：命中 → Health = max(0, Health − Damage) + Hitstun；成功防御 → 不掉血 + Blockstun；硬直期间不能步行/起跳/发动招式/防御；剩余 −1 归零同帧回到待机更新与消费（与 Recovery 完成同语义）；动作中受击 → 招式中断（MoveId/阶段清空）；被命中者的结算覆盖其当帧 Tick 结果** | 转换边唯一：可受击状态 → Hitstun/Blockstun → 待机；不存在 Hitstun → Startup 等未定义边。结算在运动/推挤**之后**进行（基于最终候选位置），双方结果先并行解析再统一应用（D80）。Validate 不变式：Hitstun/Blockstun 必须 StunRemaining ≥ 1，其他状态必须为 0——新枚举值不能绕过 D62。体力边界由结算显式钳制 max(0, …)（Health − Damage 无溢出风险：Health ≥ 0、Damage ≤ int.MaxValue）。**空中被击显式跳过**（本阶段无空中受击/防御；几何接触仍可观测），测试固定。硬直中不能再防御 → 多帧攻击在 06B 会穿过 Blockstun 命中（**已知中期行为，06C 的攻击实例去重消除**）。 |
+| **D79** | **防御 = 帧末状态为站立/蹲下待机 + 按住「后」（按帧开始朝向解析的相对输入，D46）；防御时机在命中结算前判定，帧末自动转身不回头解释本帧输入；动作中/PreJump/硬直中不能防御** | 用结算时（运动后）的候选状态判定资格——Standing→站防、Crouching→蹲防；「按住后」来自当帧解析输入（与步行/识别同一份 `RelativeInput`），不存在第二套防御输入解释。第一版成功防御不扣血、无削防、无精准防御。 |
+| **D80** | **同帧双方互中：命中结算基于同一份结算前状态先并行解析双方结果、再统一写入——先处理的角色不会打断另一角色同帧成立的攻击；双方都命中则各自掉血并进入硬直（不实现攻击相杀）** | 消除「先扣 P1 血导致 P2 同帧攻击落空」的顺序偏差：结算函数对两名被击者各产出至多一个结果（来自确定性接触顺序的第一条），应用阶段才写状态。镜像场景测试固定（身份保持映射下逐位一致）。 |
 
 
 

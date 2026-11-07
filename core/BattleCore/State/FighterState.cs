@@ -54,7 +54,8 @@ public readonly record struct FighterState(
     FixedPoint VelocityX = default,
     FixedPoint VelocityY = default,
     JumpKind JumpKind = Combat.JumpKind.None,
-    bool UpHeldLastFrame = false)
+    bool UpHeldLastFrame = false,
+    int StunRemainingFrames = 0)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -155,6 +156,20 @@ public readonly record struct FighterState(
             if (LogicState == FighterLogicState.PreJump && PhaseRemainingFrames < 1)
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于起跳预备但剩余帧数为 {PhaseRemainingFrames}（必须 ≥ 1）。");
+
+            // 硬直不变式（阶段 06B，D78）：Hitstun/Blockstun 携带 ≥ 1 的剩余帧；
+            // 其余所有状态不得携带硬直计数（新枚举值不能绕过校验——D62 延伸）。
+            if (LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun)
+            {
+                if (StunRemainingFrames < 1)
+                    throw new InvalidOperationException(
+                        $"角色 {Id} 处于 {LogicState} 但硬直剩余帧数为 {StunRemainingFrames}（必须 ≥ 1）。");
+            }
+            else if (StunRemainingFrames != 0)
+            {
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于 {LogicState} 但携带硬直剩余帧数 {StunRemainingFrames}（必须为 0）。");
+            }
         }
     }
 }

@@ -82,6 +82,9 @@ public sealed class BattleSimulation
         public JumpKind JumpKind;
         public Facing Facing;
         public bool UpHeld;
+        public bool BackHeld;
+        public int Health;
+        public int StunRemainingFrames;
 
         /// <summary>是否处于地面可转向状态（站立/蹲下；动作与空中朝向冻结，D72）。</summary>
         public readonly bool CanTurn =>
@@ -120,7 +123,7 @@ public sealed class BattleSimulation
             RecognitionState recognition = fighter.RecognitionState.Advance(
                 bits, fighter.Facing, state.Frame, i, definition.Commands);
 
-            // 2) 动作状态机 + 起跳 + 指令消费（D58/D60/D67/D68）。
+            // 2) 动作状态机 + 起跳 + 指令消费（D58/D60/D67/D68）；硬直倒计时（D78）。
             RelativeInput resolved = DirectionResolver.Resolve(bits, fighter.Facing);
             FighterActionTick tick = FighterStateMachine.Tick(
                 fighter.LogicState,
@@ -130,7 +133,8 @@ public sealed class BattleSimulation
                 recognition,
                 definition,
                 state.Frame,
-                fighter.UpHeldLastFrame);
+                fighter.UpHeldLastFrame,
+                fighter.StunRemainingFrames);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -187,6 +191,9 @@ public sealed class BattleSimulation
                 JumpKind = jumpKind,
                 Facing = fighter.Facing,
                 UpHeld = resolved.Up,
+                BackHeld = resolved.Back,
+                Health = fighter.Health,
+                StunRemainingFrames = tick.StunRemainingFrames,
             };
         }
 
@@ -201,22 +208,7 @@ public sealed class BattleSimulation
         ApplySeparation(candidates, bothGroundAtFrameStart,
             state.Fighters[0].PositionX, state.Fighters[1].PositionX);
 
-        // ── 第 5 阶段：朝向更新（D72）——帧末执行，基于最终候选位置。
-        for (int i = 0; i < candidates.Length; i++)
-        {
-            if (!candidates[i].CanTurn)
-                continue; // PreJump/Airborne/动作三阶段朝向冻结。
-
-            FixedPoint opponentX = candidates[1 - i].PositionX;
-            FixedPoint myX = candidates[i].PositionX;
-            if (opponentX > myX)
-                candidates[i].Facing = Facing.Right;
-            else if (opponentX < myX)
-                candidates[i].Facing = Facing.Left;
-            // X 相等：保持原朝向（平局不抖动，D72）。
-        }
-
-        // ── 第 6 阶段：全新角色快照（record with：原状态不受影响）。
+        // ── 第 5 阶段：候选 → FighterState（结算前视图；原状态不受影响）。
         var nextFighters = new FighterState[candidates.Length];
         for (int i = 0; i < candidates.Length; i++)
         {
@@ -235,19 +227,170 @@ public sealed class BattleSimulation
                 JumpKind = candidates[i].JumpKind,
                 Facing = candidates[i].Facing,
                 UpHeldLastFrame = candidates[i].UpHeld,
+                Health = candidates[i].Health,
+                StunRemainingFrames = candidates[i].StunRemainingFrames,
             };
+        }
+
+        // ── 第 6 阶段：命中结算（D78/D79/D80）——接触检测 + 双方同时判定（互不先手）。
+        IReadOnlyList<AttackContact> contacts = HitDetection.Detect(
+            nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
+        ApplyCombatSettlement(nextFighters, contacts, candidates[0].BackHeld, candidates[1].BackHeld);
+
+        // ── 第 7 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
+        //    被命中进入硬直的角色朝向冻结（非待机不转向）。
+        for (int i = 0; i < nextFighters.Length; i++)
+        {
+            FighterState fighter = nextFighters[i];
+            if (fighter.LogicState is not (FighterLogicState.Standing or FighterLogicState.Crouching))
+                continue; // PreJump/Airborne/动作/硬直朝向冻结。
+
+            FixedPoint opponentX = nextFighters[1 - i].PositionX;
+            if (opponentX > fighter.PositionX)
+                nextFighters[i] = fighter with { Facing = Facing.Right };
+            else if (opponentX < fighter.PositionX)
+                nextFighters[i] = fighter with { Facing = Facing.Left };
+            // X 相等：保持原朝向（平局不抖动，D72）。
         }
 
         var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion);
 
-        // ── 攻击接触检测（阶段 06A，D76）：基于「钳制/推挤后的最终候选状态」做
-        //    几何层「攻击框 ∩ 受击框」检测，作为确定性诊断输出随结果返回。
-        //    本阶段不结算伤害（06B）；候选基于最终位置，命中判定与表现层无关。
-        IReadOnlyList<AttackContact> contacts = HitDetection.Detect(
-            nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
-
         return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts);
     }
+
+    /// <summary>
+    /// 命中结算（阶段 06B，D78/D79/D80）。
+    ///
+    /// <para><b>同时性（D80）</b>：先基于<b>同一份</b>结算前状态为双方各解析一个
+    /// 命中结果，再统一应用——先处理的角色不会打断另一角色同帧成立的攻击
+    /// （双方同帧互中时各自掉血并进入硬直，无相杀、无先手优势）。</para>
+    ///
+    /// <para><b>防御（D79）</b>：资格 = 帧末状态为站立/蹲下待机 + 按住「后」
+    /// （输入按<b>帧开始朝向</b>解析，D46——帧末转身不回头解释本帧输入）。
+    /// 高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。成功防御不掉血、
+    /// 进入 Blockstun；否则命中：Health = max(0, Health − Damage) 并进入 Hitstun，
+    /// 进行中的招式被中断（MoveId/阶段清空）。动作中（Startup/Active/Recovery）、
+    /// PreJump 与已有硬直中<b>不能防御</b>。空中被击显式跳过（本阶段不做空中受击）。</para>
+    ///
+    /// <para>每次结算每名被击者至多应用一条接触（接触顺序由
+    /// <see cref="HitDetection.Detect"/> 固定）；体力边界由 max(0, …) 保证，
+    /// 不允许负数或溢出；同一命中只扣一次（重复命中抑制属 06C）。</para>
+    /// </summary>
+    private void ApplyCombatSettlement(
+        FighterState[] fighters,
+        IReadOnlyList<AttackContact> contacts,
+        bool backHeldP1,
+        bool backHeldP2)
+    {
+        if (contacts.Count == 0)
+            return;
+
+        // 同时性：先解析双方结果（此时数组仍是结算前状态），再统一应用。
+        // （CombatSettlement 含 string 引用，不可 stackalloc；接触帧才到达此处，2 元素分配可忽略。）
+        var outcomes = new CombatSettlement?[2];
+        for (int defender = 0; defender < fighters.Length; defender++)
+            outcomes[defender] = ResolveSettlement(
+                defender, fighters, contacts,
+                defender == 0 ? backHeldP1 : backHeldP2);
+
+        for (int defender = 0; defender < fighters.Length; defender++)
+        {
+            CombatSettlement? outcome = outcomes[defender];
+            if (outcome is not CombatSettlement settled)
+                continue;
+
+            FighterState defenderState = fighters[defender];
+            if (settled.Blocked)
+            {
+                fighters[defender] = defenderState with
+                {
+                    LogicState = FighterLogicState.Blockstun,
+                    MoveId = null,
+                    PhaseRemainingFrames = 0,
+                    StunRemainingFrames = settled.StunFrames,
+                };
+            }
+            else
+            {
+                int healthAfter = defenderState.Health - settled.Damage;
+                if (healthAfter < 0)
+                    healthAfter = 0; // 体力下限：不允许负数（结算显式钳制，不依赖下游校验）。
+
+                fighters[defender] = defenderState with
+                {
+                    LogicState = FighterLogicState.Hitstun,
+                    MoveId = null,
+                    PhaseRemainingFrames = 0,
+                    StunRemainingFrames = settled.StunFrames,
+                    Health = healthAfter,
+                };
+            }
+        }
+    }
+
+    /// <summary>单名被击者的结算解析（不修改状态；null = 本帧不被结算）。</summary>
+    private CombatSettlement? ResolveSettlement(
+        int defender,
+        FighterState[] fighters,
+        IReadOnlyList<AttackContact> contacts,
+        bool backHeld)
+    {
+        FighterState defenderState = fighters[defender];
+
+        // 空中被击显式跳过（06B 范围外；几何接触仍可被 06A 观测）。
+        if (defenderState.LogicState == FighterLogicState.Airborne)
+            return null;
+
+        // 取针对该被击者的第一条接触（Detect 顺序确定：攻击者 0→1、攻击序号升序）。
+        AttackContact contact = default;
+        bool found = false;
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            if (contacts[i].TargetId == defender)
+            {
+                contact = contacts[i];
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+            return null;
+
+        FighterDefinition attackerDefinition = _roster.Fighter(1 - defender);
+        MoveDefinition? move = attackerDefinition.FindMoveById(contact.MoveId);
+        if (move is null || contact.AttackIndex >= move.Attacks.Count)
+            return null; // 配置与状态不匹配：防御性跳过（正常路径不可达）。
+
+        AttackDefinition attack = move.Attacks[contact.AttackIndex];
+
+        // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
+        bool guarding = defenderState.LogicState switch
+        {
+            FighterLogicState.Standing => backHeld,
+            FighterLogicState.Crouching => backHeld,
+            _ => false, // 动作/PreJump/硬直中不能防御。
+        } && GuardCovers(attack.Height, defenderState.LogicState);
+
+        return guarding
+            ? new CombatSettlement(Blocked: true, Damage: 0, StunFrames: attack.BlockstunFrames, MoveId: contact.MoveId)
+            : new CombatSettlement(Blocked: false, Damage: attack.Damage, StunFrames: attack.HitstunFrames, MoveId: contact.MoveId);
+    }
+
+    /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
+    private static bool GuardCovers(AttackHeight height, FighterLogicState guardState) => height switch
+    {
+        AttackHeight.High => guardState == FighterLogicState.Standing,
+        AttackHeight.Low => guardState == FighterLogicState.Crouching,
+        _ => true, // Mid：站防与蹲防皆可。
+    };
+
+    /// <summary>单次命中的结算结果（不可变）。</summary>
+    /// <param name="Blocked">是否被防御（true = Blockstun 不掉血；false = 命中扣血 + Hitstun）。</param>
+    /// <param name="Damage">伤害（被防御时为 0）。</param>
+    /// <param name="StunFrames">硬直帧数（命中硬直或防御硬直）。</param>
+    /// <param name="MoveId">攻击招式 ID。</param>
+    private readonly record struct CombatSettlement(bool Blocked, int Damage, int StunFrames, string MoveId);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。

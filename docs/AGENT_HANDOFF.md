@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 06A：确定性 AABB 攻击判定，D76）
+> 最后更新：2026-11-07（阶段 06B：命中/伤害/防御/硬直，D77–D80）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 509，已跳过: 0，总计: 509`
+期望：`失败: 0，通过: 528，已跳过: 0，总计: 528`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,22 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 06B（2026-11-07）命中、伤害、防御与硬直（D77–D80）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Combat/FighterLogicState.cs` | 新增 `Hitstun=7`/`Blockstun=8` + 转换图 |
+| `core/BattleCore/State/FighterState.cs` | 新增 `StunRemainingFrames`；Validate：硬直状态必须 ≥ 1、其他状态必须 0 |
+| `core/BattleCore/Combat/AttackDefinition.cs` | 新增 `Damage`/`HitstunFrames`/`BlockstunFrames`（构造期校验） |
+| `core/BattleCore/Combat/FighterStateMachine.cs` | 硬直倒计时分支（归零同帧回待机更新与消费；剩余 < 1 拒绝）；`FighterActionTick.StunRemainingFrames` |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | **D78/D79/D80 结算**：候选 → 结算前视图 → 接触检测 → 双方并行解析（防御表 + max(0, HP−Damage)）→ 统一应用 → 朝向（硬直冻结）→ 快照；`StateVersion`/`CoreVersion` 4→5 |
+| `core/BattleCore/Combat/DemoRoster.cs` | 演示招式接入伤害（5A 30/12/8 Mid、236A 50/16/10、623A 60/18/12 High、BackDraft 45/15/10、Sweep 40/14/10 Low） |
+| `scripts/BattleScene.cs` + `Battle.tscn` | HUD 增加 `HP: x/y` 行与硬直剩余帧显示（`Hitstun(n)`），面板 400 高 |
+| `tests/BattleCore.Tests/CombatSettlementTests.cs` | **新增 19 项**（命中/防御/高度表/互中/中断/边界/完整链路） |
+
+**验收**：528/528；四构建 0/0；图形运行命中（940 + Hitstun）与防御（1000 + Blockstun(8)）截图命中。
+**注意**：Blockstun 中不能再防御（既有设计）→ 多帧攻击在 06B 会穿透防御/重复扣血——**06C 攻击实例去重消除**。
 
 ### 阶段 06A（2026-11-07）确定性 AABB 攻击判定（D76）
 

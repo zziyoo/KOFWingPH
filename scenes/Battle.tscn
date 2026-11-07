@@ -77,8 +77,8 @@ script = ExtResource("2_capture")
 [node name="Hud" type="PanelContainer" parent="."]
 offset_left = 24.0
 offset_top = 20.0
-offset_right = 330.0
-offset_bottom = 350.0
+offset_right = 360.0
+offset_bottom = 400.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
 
 [node name="HudLabel" type="Label" parent="Hud"]

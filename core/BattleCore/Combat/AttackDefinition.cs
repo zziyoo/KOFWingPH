@@ -27,7 +27,11 @@ public sealed class AttackDefinition
     /// <param name="lastActiveFrame">Active 阶段内末个生效帧（含；≥ firstActiveFrame；
     /// <see cref="int.MaxValue"/> = 哨兵「直到 Active 末帧」，由招式的 ActiveFrames 界定）。</param>
     /// <param name="height">攻击高度类别（06B 防御表；默认 Mid）。</param>
-    /// <exception cref="ArgumentOutOfRangeException">半宽/半高 ≤ 0 或帧号 &lt; 0。</exception>
+    /// <param name="damage">基础伤害（非负整数体力值，06B；默认 0 = 无伤害）。</param>
+    /// <param name="hitstunFrames">命中硬直帧数（≥ 1；06B）。</param>
+    /// <param name="blockstunFrames">防御硬直帧数（≥ 1；06B）。</param>
+    /// <exception cref="ArgumentOutOfRangeException">半宽/半高 ≤ 0、帧号 &lt; 0、
+    /// 伤害 &lt; 0 或硬直帧数 &lt; 1。</exception>
     /// <exception cref="ArgumentException">lastActiveFrame &lt; firstActiveFrame。</exception>
     public AttackDefinition(
         FixedPoint offsetForward,
@@ -36,7 +40,10 @@ public sealed class AttackDefinition
         FixedPoint halfHeight,
         int firstActiveFrame = 0,
         int lastActiveFrame = int.MaxValue,
-        AttackHeight height = AttackHeight.Mid)
+        AttackHeight height = AttackHeight.Mid,
+        int damage = 0,
+        int hitstunFrames = 1,
+        int blockstunFrames = 1)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -48,6 +55,14 @@ public sealed class AttackDefinition
         if (lastActiveFrame < firstActiveFrame)
             throw new ArgumentException(
                 $"攻击生效帧范围非法（first={firstActiveFrame} > last={lastActiveFrame}）。", nameof(lastActiveFrame));
+        if (damage < 0)
+            throw new ArgumentOutOfRangeException(nameof(damage), damage, "伤害不能为负。");
+        if (hitstunFrames < 1)
+            throw new ArgumentOutOfRangeException(nameof(hitstunFrames), hitstunFrames,
+                "命中硬直帧数必须 ≥ 1（命中必进入 Hitstun）。");
+        if (blockstunFrames < 1)
+            throw new ArgumentOutOfRangeException(nameof(blockstunFrames), blockstunFrames,
+                "防御硬直帧数必须 ≥ 1（防御必进入 Blockstun）。");
 
         OffsetForward = offsetForward;
         OffsetUp = offsetUp;
@@ -56,6 +71,9 @@ public sealed class AttackDefinition
         FirstActiveFrame = firstActiveFrame;
         LastActiveFrame = lastActiveFrame;
         Height = height;
+        Damage = damage;
+        HitstunFrames = hitstunFrames;
+        BlockstunFrames = blockstunFrames;
     }
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
@@ -78,4 +96,13 @@ public sealed class AttackDefinition
 
     /// <summary>攻击高度类别（06B 防御表使用）。</summary>
     public AttackHeight Height { get; }
+
+    /// <summary>基础伤害（非负整数体力值；命中时 Health = max(0, Health − Damage)）。</summary>
+    public int Damage { get; }
+
+    /// <summary>命中硬直帧数（≥ 1）。</summary>
+    public int HitstunFrames { get; }
+
+    /// <summary>防御硬直帧数（≥ 1）。</summary>
+    public int BlockstunFrames { get; }
 }

@@ -188,22 +188,28 @@ public partial class BattleScene : Node2D
             string pauseTag = _paused ? "  [PAUSED · F1]" : string.Empty;
             _hudLabel.Text =
                 $"Logic Frame: {state.Frame}{pauseTag}\n" +
-                $"P1: {Describe(last.Player1)}\n" +
-                $"P2: {Describe(last.Player2)}\n" +
+                $"P1: {Describe(last.Player1)}  HP: {p1.Health}/{p1.MaxHealth}\n" +
+                $"P2: {Describe(last.Player2)}  HP: {p2.Health}/{p2.MaxHealth}\n" +
                 $"P1 Pos: {DescribePosition(p1)}\n" +
                 $"P1 Vel: {DescribeVelocity(p1)}\n" +
                 $"P2 Pos: {DescribePosition(p2)}\n" +
                 $"P2 Vel: {DescribeVelocity(p2)}\n" +
                 $"P1 Command: {DescribeCommand(LatestCommand(state, 0))}\n" +
                 $"P2 Command: {DescribeCommand(LatestCommand(state, 1))}\n" +
-                $"P1 State: {state.Fighter(0).LogicState}\n" +
-                $"P1 Move: {DescribeMove(state.Fighter(0))}\n" +
-                $"P2 State: {state.Fighter(1).LogicState}\n" +
-                $"P2 Move: {DescribeMove(state.Fighter(1))}";
+                $"P1 State: {DescribeState(p1)}\n" +
+                $"P1 Move: {DescribeMove(p1)}\n" +
+                $"P2 State: {DescribeState(p2)}\n" +
+                $"P2 Move: {DescribeMove(p2)}";
         }
 
         _debugBoxes.Refresh(); // 判定框调试绘制随权威状态刷新。
     }
+
+    /// <summary>状态行：硬直状态附加剩余帧数（阶段 06B）。</summary>
+    private static string DescribeState(FighterState fighter) =>
+        fighter.LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun
+            ? $"{fighter.LogicState}({fighter.StunRemainingFrames})"
+            : fighter.LogicState.ToString();
 
     /// <summary>把权威定点坐标渲染成 HUD 文本（世界坐标，Y 向上，地面为 0；显示用浮点）。</summary>
     private static string DescribePosition(FighterState fighter) =>

@@ -14,13 +14,18 @@ namespace NewKOF.BattleCore.Combat;
 ///       速度——这是唯一由运动阶段写入的状态边，D69）；</item>
 /// <item>任一待机状态（Standing/Crouching）→ <see cref="Startup"/>（消费一条有效指令）；</item>
 /// <item><see cref="Startup"/> → <see cref="Active"/> → <see cref="Recovery"/> → 待机
-///       （按招式数据配置的阶段帧数逐帧推进）。</item>
+///       （按招式数据配置的阶段帧数逐帧推进）；</item>
+/// <item>可受击状态 → <see cref="Hitstun"/> → 待机（被命中结算，阶段 06B/D78；
+///       动作被中断，硬直归零同帧恢复待机更新）；</item>
+/// <item>可防御状态 → <see cref="Blockstun"/> → 待机（成功防御结算，D78；
+///       规则与 Hitstun 对称，不掉血）。</item>
 /// </list>
 ///
 /// <para>
-/// <b>本阶段刻意不含</b> Hitstun/Blockstun（无受击/防御结算）、Knockdown 等——它们属于
-/// 后续阶段的结算规则，不以空实现冒充已支持。本阶段也<b>不做空中攻击</b>：
-/// Startup/Active/Recovery 只在地面发生。</para>
+/// <b>不允许的状态跳转</b>：Hitstun/Blockstun 期间不能步行、起跳或发动招式
+/// （硬直归零同帧才回到待机更新路径）；<b>不存在</b> Hitstun → Startup、
+/// Blockstun → Airborne 等未定义边。本阶段<b>不做空中受击/空中防御</b>——
+/// 空中角色的命中结算被显式跳过（测试固定）。</para>
 /// </summary>
 public enum FighterLogicState
 {
@@ -46,6 +51,15 @@ public enum FighterLogicState
     /// <summary>空中（阶段 05B）：垂直速度受重力积分，水平速度起跳时锁定；
     /// 不消费指令、不空中控制；触地同帧落地回站立（D68/D69）。</summary>
     Airborne = 6,
+
+    /// <summary>受击硬直（阶段 06B，D78）：命中结算进入，剩余帧数存
+    /// <c>FighterState.StunRemainingFrames</c>；期间不能步行/起跳/发动招式；
+    /// 归零同帧回待机更新。动作中受击 → 招式中断（MoveId 清空）。</summary>
+    Hitstun = 7,
+
+    /// <summary>防御硬直（阶段 06B，D78）：成功防御结算进入，不掉血；
+    /// 其余语义与 Hitstun 对称。</summary>
+    Blockstun = 8,
 }
 
 /// <summary>

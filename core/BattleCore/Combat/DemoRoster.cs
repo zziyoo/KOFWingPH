@@ -69,7 +69,7 @@ public static class DemoRoster
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(70),
                         halfWidth: FixedPoint.FromInt(20), halfHeight: FixedPoint.FromInt(20),
-                        height: AttackHeight.Mid),
+                        height: AttackHeight.Mid, damage: 30, hitstunFrames: 12, blockstunFrames: 8),
                 }),
             new MoveDefinition(FireballPrototype, "236A",
                 startupFrames: 4, activeFrames: 3, recoveryFrames: 8,
@@ -78,17 +78,17 @@ public static class DemoRoster
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(50), offsetUp: FixedPoint.FromInt(60),
                         halfWidth: FixedPoint.FromInt(25), halfHeight: FixedPoint.FromInt(25),
-                        height: AttackHeight.Mid),
+                        height: AttackHeight.Mid, damage: 50, hitstunFrames: 16, blockstunFrames: 10),
                 }),
             new MoveDefinition(DragonPunchPrototype, "623A",
                 startupFrames: 3, activeFrames: 5, recoveryFrames: 10,
                 attacks: new[]
                 {
-                    // 升龙：攻击框偏上（High，06B 蹲防失败）。
+                    // 升龙：攻击框偏上（High，蹲防失败）。
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(35), offsetUp: FixedPoint.FromInt(95),
                         halfWidth: FixedPoint.FromInt(22), halfHeight: FixedPoint.FromInt(30),
-                        height: AttackHeight.High),
+                        height: AttackHeight.High, damage: 60, hitstunFrames: 18, blockstunFrames: 12),
                 }),
         },
         // 运动配置（D64/D68）：Kai——前行 2.0 / 后撤 1.5 单位每帧；预备跳 3 帧；
@@ -129,17 +129,17 @@ public static class DemoRoster
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(60),
                         halfWidth: FixedPoint.FromInt(24), halfHeight: FixedPoint.FromInt(24),
-                        height: AttackHeight.Mid),
+                        height: AttackHeight.Mid, damage: 45, hitstunFrames: 15, blockstunFrames: 10),
                 }),
             new MoveDefinition(SweepPrototype, "214B",
                 startupFrames: 3, activeFrames: 4, recoveryFrames: 9,
                 attacks: new[]
                 {
-                    // 扫腿：低位攻击框（Low，06B 站防失败）。
+                    // 扫腿：低位攻击框（Low，站防失败）。
                     new AttackDefinition(
                         offsetForward: FixedPoint.FromInt(45), offsetUp: FixedPoint.FromInt(20),
                         halfWidth: FixedPoint.FromInt(30), halfHeight: FixedPoint.FromInt(18),
-                        height: AttackHeight.Low),
+                        height: AttackHeight.Low, damage: 40, hitstunFrames: 14, blockstunFrames: 10),
                 }),
         },
         // 运动配置（D64/D68）：Rei 与 Kai 刻意不同——证明 P1/P2 可携带不同运动数据：

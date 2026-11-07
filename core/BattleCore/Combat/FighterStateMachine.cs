@@ -20,7 +20,8 @@ public readonly record struct FighterActionTick(
     int PhaseRemainingFrames,
     RecognitionState Recognition,
     CommandMatch? ConsumedMatch,
-    JumpLaunch? Launch = null);
+    JumpLaunch? Launch = null,
+    int StunRemainingFrames = 0);
 
 /// <summary>
 /// 角色<b>动作状态机</b>（阶段 04/05B）：集中、显式、纯函数的状态转换。
@@ -69,6 +70,8 @@ public static class FighterStateMachine
     /// <param name="frame">本逻辑帧号（诊断与异常信息用）。</param>
     /// <param name="upHeldLastFrame">上一逻辑帧解析后的「上」电平（D67 起跳边沿判定；
     /// 默认 false——首次观察时「按住上」即视为新按下）。</param>
+    /// <param name="stunRemainingFrames">帧开始时的硬直剩余帧数（Hitstun/Blockstun 状态使用，
+    /// 其他状态为 0；阶段 06B，D78）。</param>
     public static FighterActionTick Tick(
         FighterLogicState state,
         string? moveId,
@@ -77,7 +80,8 @@ public static class FighterStateMachine
         RecognitionState recognition,
         FighterDefinition definition,
         int frame,
-        bool upHeldLastFrame = false)
+        bool upHeldLastFrame = false,
+        int stunRemainingFrames = 0)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -146,6 +150,21 @@ public static class FighterStateMachine
             // 不消费指令、不做待机更新、不响应「上」（空中无跳，B5）。
             return new FighterActionTick(FighterLogicState.Airborne, null, 0,
                 recognition, ConsumedMatch: null);
+        }
+        else if (state is FighterLogicState.Hitstun or FighterLogicState.Blockstun)
+        {
+            // 硬直（D78）：剩余 −1；归零同帧落到待机更新与消费（与 Recovery 完成同语义）。
+            // 期间不步行、不响应「上」边沿、不消费指令（下方 return 拦截）。
+            if (stunRemainingFrames < 1)
+                throw new InvalidOperationException(
+                    $"帧 {frame}：角色 {definition.FighterId} 处于 {state} 但硬直剩余帧数为 " +
+                    $"{stunRemainingFrames}（状态损坏，不允许静默修正为待机）。");
+
+            int stunRemaining = stunRemainingFrames - 1;
+            if (stunRemaining > 0)
+                return new FighterActionTick(state, null, 0, recognition, ConsumedMatch: null,
+                    StunRemainingFrames: stunRemaining);
+            // 归零：继续执行待机更新与消费（无独立 return）。
         }
 
         // 3) 待机更新（B9）：起跳边沿优先于蹲下切换。
