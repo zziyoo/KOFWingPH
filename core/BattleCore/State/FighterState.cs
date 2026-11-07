@@ -65,7 +65,8 @@ public readonly record struct FighterState(
     int LandingKnockdownFrames = 0,
     int LandingWakeupFrames = 0,
     int MoveElapsedFrames = 0,
-    int HitstopRemainingFrames = 0)
+    int HitstopRemainingFrames = 0,
+    int LastThrowStartFrame = -1)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -101,6 +102,13 @@ public readonly record struct FighterState(
     /// 停顿由命中/成功防御结算写入（攻击方与被击方同值）。
     /// </summary>
     public int HitstopRemainingFrames { get; init; } = HitstopRemainingFrames;
+
+    /// <summary>
+    /// 最近一次<b>抓取到该角色</b>的投技实例发动帧（阶段 08B，D97）：与
+    /// <see cref="LastHitAttackStartFrame"/> 同构，用于「同一投技实例对同一目标只结算一次」。
+    /// -1 = 尚未被投技抓取过；单调记录，随快照携带。
+    /// </summary>
+    public int LastThrowStartFrame { get; init; } = LastThrowStartFrame;
 
     /// <summary>是否处于招式阶段（Startup/Active/Recovery）。</summary>
     public bool IsInMove =>
@@ -276,6 +284,9 @@ public readonly record struct FighterState(
         if (!IsInMove && MoveElapsedFrames != 0)
             throw new InvalidOperationException(
                 $"角色 {Id} 处于非动作状态 {LogicState} 但携带动作经过帧数 {MoveElapsedFrames}（必须为 0）。");
+        if (LastThrowStartFrame < -1)
+            throw new InvalidOperationException(
+                $"角色 {Id} 的被投实例记录非法：LastThrowStartFrame={LastThrowStartFrame}（必须 ≥ -1）。");
         if (HitstopRemainingFrames < 0 || HitstopRemainingFrames > Combat.AttackDefinition.MaxHitstopFrames)
             throw new InvalidOperationException(
                 $"角色 {Id} 的命中停顿剩余帧数越界：{HitstopRemainingFrames}" +

@@ -404,9 +404,15 @@ public sealed class BattleSimulation
         // 因为结算会把被中断者的 MoveId 清空。
         AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster, frozenThisFrame);
 
+        // 投技尝试必须在结算<b>之前</b>采集（结算会改写状态：被打中就不能再抓）。
+        ThrowAttempt[] throwAttempts = CollectThrowAttempts(nextFighters, _roster, frozenThisFrame);
+
         var outcomes = new CombatSettlement?[2];
         ApplyCombatSettlement(state.Frame, nextFighters, contacts,
             candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
+
+        // ── 第 6b 阶段：投技仲裁与结算（D97）——必须晚于打击结算：有效打击会中断投技。
+        ThrowResolution throwResolution = ApplyThrows(state.Frame, nextFighters, throwAttempts, outcomes);
 
         // 连段收尾（D90）：恢复自由行动的角色清空旧记录（命中帧本身不会到这里——命中后必为受击状态）。
         UpdateCombos(nextFighters);
@@ -417,7 +423,8 @@ public sealed class BattleSimulation
 
         // ── 第 8 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
         IReadOnlyList<BattleEvent> events = CollectEvents(
-            state.Frame, nextFighters, candidates, outcomes, attackActive, state.Round, nextRound);
+            state.Frame, nextFighters, candidates, outcomes, attackActive,
+            throwAttempts, throwResolution, state.Round, nextRound);
 
         // ── 第 9 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
@@ -632,6 +639,211 @@ public sealed class BattleSimulation
     }
 
     /// <summary>
+    /// 采集本帧的<b>投技尝试</b>（阶段 08B，D97）。必须在命中结算<b>之前</b>调用：
+    /// 结算会把被打中的人送进 Hitstun，事后判断「能不能抓」会得到完全不同的答案。
+    ///
+    /// <para>资格 = 处于 Active + 招式配置了投技 + 当前经过帧在该投技的生效窗口 +
+    /// 目标状态可投（<see cref="ThrowDefinition.AllowsTarget"/>，空中/倒地/起身一律不可）+
+    /// 目标在投技者<b>面前</b>且水平距离 ≤ 范围 + 本实例尚未抓过该目标（D81 同构去重）。</para>
+    /// </summary>
+    private static ThrowAttempt[] CollectThrowAttempts(
+        FighterState[] fighters, FightRoster roster, bool[] frozenThisFrame)
+    {
+        var attempts = new ThrowAttempt[fighters.Length];
+
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            if (frozenThisFrame[i])
+                continue; // 冻结帧不推进动作时间，生效帧会重复成立。
+
+            FighterState attacker = fighters[i];
+            if (attacker.LogicState != FighterLogicState.Active || attacker.MoveId is null)
+                continue;
+
+            MoveDefinition? move = roster.Fighter(i).FindMoveById(attacker.MoveId);
+            if (move is null || move.Throws.Count == 0)
+                continue;
+
+            int elapsed = move.ActiveFrames - attacker.PhaseRemainingFrames;
+
+            ThrowDefinition? definition = null;
+            int firstActive = int.MaxValue;
+            for (int t = 0; t < move.Throws.Count; t++)
+            {
+                ThrowDefinition candidate = move.Throws[t];
+                if (candidate.FirstActiveFrame < firstActive)
+                    firstActive = candidate.FirstActiveFrame;
+                if (definition is null
+                    && elapsed >= candidate.FirstActiveFrame
+                    && elapsed <= candidate.LastActiveFrame)
+                {
+                    definition = candidate;
+                }
+            }
+
+            if (definition is null)
+                continue;
+
+            int target = 1 - i;
+            FighterState defender = fighters[target];
+            bool inRange = definition.AllowsTarget(defender.LogicState)
+                && defender.LastThrowStartFrame != attacker.MoveStartedFrame
+                && IsWithinThrowReach(attacker, defender, definition.Range);
+
+            attempts[i] = new ThrowAttempt(
+                Active: true,
+                FirstActive: elapsed == firstActive,
+                TargetIndex: target,
+                Definition: definition,
+                MoveId: attacker.MoveId,
+                InRange: inRange);
+        }
+
+        return attempts;
+    }
+
+    /// <summary>
+    /// 投技的几何资格（D97）：目标必须在投技者<b>面前</b>且水平中心距离 ≤ 范围。
+    /// 位置完全重合时视为可抓（确定性的平局规则，与 D92 的「方向退化」同源）。
+    /// </summary>
+    private static bool IsWithinThrowReach(
+        FighterState attacker, FighterState defender, FixedPoint range)
+    {
+        // 只有地面目标可投（状态由 ThrowDefinition.AllowsTarget 先筛过），高度必须贴地。
+        if (defender.PositionY != FixedPoint.Zero)
+            return false;
+
+        FixedPoint dx = defender.PositionX - attacker.PositionX;
+        FixedPoint distance = dx < FixedPoint.Zero ? -dx : dx;
+        if (distance > range)
+            return false;
+
+        if (dx == FixedPoint.Zero)
+            return true; // 完全重合：允许（平局规则固定）。
+
+        bool inFront = attacker.Facing == Facing.Right
+            ? dx > FixedPoint.Zero
+            : dx < FixedPoint.Zero;
+        return inFront;
+    }
+
+    /// <summary>
+    /// 投技仲裁与结算（阶段 08B，D97）。<b>唯一冲突规则表</b>：
+    /// <list type="number">
+    /// <item>投技者本帧被<b>有效打击命中</b>（非防御）→ 投技被打断，不成立；</item>
+    /// <item>目标本帧被有效打击命中 → 抓不住（避免同帧双重结算）；</item>
+    /// <item>双方本帧都有有效投技 → <b>互相冲突，两边都不成立</b>（不固定 P1 先手），发一条 ThrowClash；</item>
+    /// <item>否则该投技成立：扣血 → 目标倒地 → 沿「远离投技者」方向平移（D70 边界 + D73 间距）。</item>
+    /// </list>
+    /// </summary>
+    private ThrowResolution ApplyThrows(
+        int frame,
+        FighterState[] fighters,
+        ThrowAttempt[] attempts,
+        CombatSettlement?[] outcomes)
+    {
+        bool[] interrupted = new bool[fighters.Length];
+        for (int i = 0; i < fighters.Length; i++)
+            interrupted[i] = outcomes[i] is CombatSettlement { Blocked: false };
+
+        bool[] valid = new bool[fighters.Length];
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            if (!attempts[i].Active || !attempts[i].InRange || interrupted[i])
+                continue;
+            if (interrupted[attempts[i].TargetIndex])
+                continue;
+            valid[i] = true;
+        }
+
+        if (valid[0] && valid[1])
+            return new ThrowResolution(Clash: true, Hit: false, Thrower: 0, Target: 1, MoveId: null, Damage: 0);
+
+        int thrower = valid[0] ? 0 : valid[1] ? 1 : -1;
+        if (thrower < 0)
+            return default;
+
+        ThrowAttempt attempt = attempts[thrower];
+        ThrowDefinition definition = attempt.Definition
+            ?? throw new InvalidOperationException(
+                $"帧 {frame}：投技仲裁内部错误（角色 {thrower} 的尝试缺少定义）。");
+
+        int target = attempt.TargetIndex;
+        FighterState attacker = fighters[thrower];
+        FighterState defender = fighters[target];
+
+        int healthAfter = defender.Health - definition.Damage;
+        if (healthAfter < 0)
+            healthAfter = 0;
+        int appliedDamage = defender.Health - healthAfter;
+
+        // 方向 = 远离投技者（与 D92 同一规则：权威相对位置，重合时退化为朝向）。
+        int direction = defender.PositionX > attacker.PositionX ? 1
+            : defender.PositionX < attacker.PositionX ? -1
+            : (attacker.Facing == Facing.Right ? 1 : -1);
+
+        FixedPoint push = direction > 0 ? definition.PushDistance : -definition.PushDistance;
+        FixedPoint targetX = _stage.ClampX(defender.PositionX + push);
+
+        // D73：不得因投技位移与投技者重叠（保持最小间距；仍受 D70 边界约束）。
+        FixedPoint separation = _stage.MinimumFighterSeparation;
+        if (targetX >= attacker.PositionX && targetX < attacker.PositionX + separation)
+            targetX = _stage.ClampX(attacker.PositionX + separation);
+        else if (targetX <= attacker.PositionX && targetX > attacker.PositionX - separation)
+            targetX = _stage.ClampX(attacker.PositionX - separation);
+
+        fighters[target] = defender with
+        {
+            LogicState = FighterLogicState.Knockdown,
+            MoveId = null,
+            PhaseRemainingFrames = 0,
+            StunRemainingFrames = definition.KnockdownFrames,
+            Health = healthAfter,
+            PositionX = targetX,
+            PositionY = FixedPoint.Zero,
+            VelocityX = FixedPoint.Zero,
+            VelocityY = FixedPoint.Zero,
+            JumpKind = JumpKind.None,
+            KnockbackFriction = FixedPoint.Zero,
+            LandingKnockdownFrames = 0,
+            LandingWakeupFrames = definition.WakeupFrames,
+            MoveStartedFrame = -1,
+            MoveElapsedFrames = 0,
+            HitConfirmFrame = -1,
+            BlockConfirmFrame = -1,
+            // 被投记录：同一投技实例不会再抓第二次（D97 去重）。
+            LastThrowStartFrame = attacker.MoveStartedFrame,
+            // 连段（D90）：被投属于受击延续，沿用同一套连段记录。
+            ComboRecord = ComboState.AfterHit(
+                defender.Combo, thrower, defender.LogicState.IsHitReaction()),
+        };
+
+        // 投技者：成功抓取也算「命中确认」（可用于取消规则，D91 同源）。
+        FighterState attackerAfter = fighters[thrower];
+        if (attackerAfter.IsInMove && attackerAfter.MoveStartedFrame == attacker.MoveStartedFrame)
+            fighters[thrower] = attackerAfter with { HitConfirmFrame = frame };
+
+        // 命中停顿（D96）：投技同样可以配置停顿，双方同值。
+        if (definition.HitstopFrames > 0)
+        {
+            fighters[thrower] = fighters[thrower] with
+            {
+                HitstopRemainingFrames = Math.Max(
+                    fighters[thrower].HitstopRemainingFrames, definition.HitstopFrames),
+            };
+            fighters[target] = fighters[target] with
+            {
+                HitstopRemainingFrames = Math.Max(
+                    fighters[target].HitstopRemainingFrames, definition.HitstopFrames),
+            };
+        }
+
+        return new ThrowResolution(
+            Clash: false, Hit: true, Thrower: thrower, Target: target,
+            MoveId: attempt.MoveId, Damage: appliedDamage);
+    }
+
+    /// <summary>
     /// 命中的连段记录归一化（阶段 07B，D90）：<b>帧末</b>状态已不在受击延续中的角色，
     /// 清空旧连段——「恢复自由行动」的判定落在帧末（含硬直归零转待机的那一帧）。
     /// </summary>
@@ -791,6 +1003,24 @@ public sealed class BattleSimulation
     /// <param name="MoveId">该次发动的招式 ID（IsActive 时保证非空）。</param>
     private readonly record struct AttackActiveSnapshot(bool IsActive, string? MoveId);
 
+    /// <summary>本帧某个角色的投技尝试（阶段 08B，D97；结算前采集）。</summary>
+    private readonly record struct ThrowAttempt(
+        bool Active,
+        bool FirstActive,
+        int TargetIndex,
+        ThrowDefinition? Definition,
+        string? MoveId,
+        bool InRange);
+
+    /// <summary>本帧投技的最终仲裁结果（D97）。</summary>
+    private readonly record struct ThrowResolution(
+        bool Clash,
+        bool Hit,
+        int Thrower,
+        int Target,
+        string? MoveId,
+        int Damage);
+
     /// <summary>
     /// 计算本帧「攻击实例首个生效帧」快照（D82 的 AttackActive 语义来源）。
     ///
@@ -854,6 +1084,8 @@ public sealed class BattleSimulation
         FighterCandidate[] candidates,
         CombatSettlement?[] outcomes,
         AttackActiveSnapshot[] attackActive,
+        ThrowAttempt[] throwAttempts,
+        ThrowResolution throwResolution,
         RoundState previousRound,
         RoundState nextRound)
     {
@@ -874,6 +1106,10 @@ public sealed class BattleSimulation
                 throw new InvalidOperationException(
                     $"帧 {frame}：AttackActive 缺少招式身份（结算前快照为空）。" +
                     "生效事件不允许用 null MoveId 表示。");
+            if (type is BattleEventType.ThrowAttempt or BattleEventType.ThrowHit
+                && string.IsNullOrEmpty(moveId))
+                throw new InvalidOperationException(
+                    $"帧 {frame}：{type} 缺少招式身份（投技事件必须可追溯到招式）。");
             events ??= new List<BattleEvent>(8);
             events.Add(new BattleEvent(frame, frame * BattleEvent.MaxEventsPerFrame + seq, type, source, target, moveId, amount));
             seq++;
@@ -893,7 +1129,14 @@ public sealed class BattleSimulation
                 Add(BattleEventType.AttackActive, i, i, attackActive[i].MoveId, 0);
         }
 
-        // ③ 逐被击者：命中/防御 + 硬直开始。
+        // ③ 投技尝试（每次发动的首个生效帧；与 AttackActive 同构，冻结帧已跳过）。
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            if (throwAttempts[i].Active && throwAttempts[i].FirstActive)
+                Add(BattleEventType.ThrowAttempt, i, throwAttempts[i].TargetIndex, throwAttempts[i].MoveId, 0);
+        }
+
+        // ④ 逐被击者：命中/防御 + 硬直开始。
         for (int defender = 0; defender < fighters.Length; defender++)
         {
             if (outcomes[defender] is not CombatSettlement settled)
@@ -912,7 +1155,15 @@ public sealed class BattleSimulation
             }
         }
 
-        // ④ 回合终局（D89）：只在「本帧刚结束」时产生一次——
+        // ⑤ 投技结果（D97）：成功一条 ThrowHit（Amount = 实扣伤害）；双方互投则一条 ThrowClash。
+        //    每帧至多一条（1v1 下投技冲突只有「互相抓」一种，两边都不成立）。
+        if (throwResolution.Clash)
+            Add(BattleEventType.ThrowClash, 0, 1, null, 0);
+        else if (throwResolution.Hit)
+            Add(BattleEventType.ThrowHit, throwResolution.Thrower, throwResolution.Target,
+                throwResolution.MoveId, throwResolution.Damage);
+
+        // ⑥ 回合终局（D89）：只在「本帧刚结束」时产生一次——
         //    单方 KO：Knockout(胜者→败者) + RoundEnded；双 KO：DoubleKnockout(0→1) + RoundEnded。
         //    RoundEnded.Amount = (int)RoundOutcome，是消费方判断胜负的唯一依据。
         if (!previousRound.IsFinished && nextRound.IsFinished)

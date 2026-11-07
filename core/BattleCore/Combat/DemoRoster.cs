@@ -34,6 +34,9 @@ public static class DemoRoster
     /// <summary>Rei 的 214B（扫腿原型）。</summary>
     public const string SweepPrototype = "SweepPrototype";
 
+    /// <summary>站立投技（阶段 08B，D97）：裸重脚键，双方同款。</summary>
+    public const string StandingThrow = "StandingThrow";
+
     /// <summary>角色甲「Kai」的配置。</summary>
     public static FighterDefinition CreateKai() => new(
         "Kai",
@@ -56,6 +59,12 @@ public static class DemoRoster
                 "5A",
                 Array.Empty<CommandDirection>(),
                 InputBits.LightPunch,
+                priority: 5),
+            // 5D：裸重脚键 → 站立投技（D97）。不占用任何已有指令。
+            new CommandDefinition(
+                "5D",
+                Array.Empty<CommandDirection>(),
+                InputBits.HeavyKick,
                 priority: 5),
         },
         new[]
@@ -111,6 +120,22 @@ public static class DemoRoster
                         knockdownFrames: 12,
                         wakeupFrames: 8),
                 }),
+            // 站立投技（08B，D97）：Startup 2 / Active 2 / Recovery 8；范围 70、
+            // 伤害 60、倒地 12 / 起身 8、平移 20、停顿 6。没有攻击框——判定走投技规则。
+            new MoveDefinition(StandingThrow, "5D",
+                startupFrames: 2, activeFrames: 2, recoveryFrames: 8,
+                allowedFrom: MoveAllowedStates.Standing,
+                throws: new[]
+                {
+                    new ThrowDefinition(
+                        throwId: "Throw",
+                        range: FixedPoint.FromInt(70),
+                        damage: 60,
+                        knockdownFrames: 12,
+                        wakeupFrames: 8,
+                        pushDistance: FixedPoint.FromInt(20),
+                        hitstopFrames: 6),
+                }),
         },
         // 运动配置（D64/D68）：Kai——前行 2.0 / 后撤 1.5 单位每帧；预备跳 3 帧；
         // 小跳初速 4.0（腾空 16 帧、最高 14）、大跳初速 6.5（腾空 26 帧、最高 39）、
@@ -139,6 +164,12 @@ public static class DemoRoster
                 new[] { CommandDirection.Down, CommandDirection.DownBack, CommandDirection.Back },
                 InputBits.HeavyPunch,
                 maxSequenceFrames: 20, buttonToleranceFrames: 3, priority: 10),
+            // 5D：裸重脚键 → 站立投技（D97）。与 Kai 同 CommandId、同款投技。
+            new CommandDefinition(
+                "5D",
+                Array.Empty<CommandDirection>(),
+                InputBits.HeavyKick,
+                priority: 5),
         },
         new[]
         {
@@ -170,6 +201,21 @@ public static class DemoRoster
                         launchVelocityY: FixedPoint.FromFraction(5, 2),
                         knockdownFrames: 12,
                         wakeupFrames: 8),
+                }),
+            // 站立投技（08B，D97）：与 Kai 同款（不同招式表里的同名 MoveId 互不影响）。
+            new MoveDefinition(StandingThrow, "5D",
+                startupFrames: 2, activeFrames: 2, recoveryFrames: 8,
+                allowedFrom: MoveAllowedStates.Standing,
+                throws: new[]
+                {
+                    new ThrowDefinition(
+                        throwId: "Throw",
+                        range: FixedPoint.FromInt(70),
+                        damage: 60,
+                        knockdownFrames: 12,
+                        wakeupFrames: 8,
+                        pushDistance: FixedPoint.FromInt(20),
+                        hitstopFrames: 6),
                 }),
         },
         // 运动配置（D64/D68）：Rei 与 Kai 刻意不同——证明 P1/P2 可携带不同运动数据：

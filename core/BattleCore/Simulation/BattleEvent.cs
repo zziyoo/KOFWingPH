@@ -44,6 +44,25 @@ public enum BattleEventType
     /// 每个回合恰好一次，只在结束时的那一帧出现。
     /// </summary>
     RoundEnded = 8,
+
+    /// <summary>
+    /// 投技实例进入生效帧（阶段 08B，D97）：Source = 投技者，Target = 目标，
+    /// MoveId = 招式 ID，Amount = 0。每次发动只发一次（与 <see cref="AttackActive"/> 同构）。
+    /// 它的存在本身就是「投技挥空/未命中」的确定性证据——命中另有 <see cref="ThrowHit"/>。
+    /// </summary>
+    ThrowAttempt = 9,
+
+    /// <summary>
+    /// 投技抓取成功（阶段 08B，D97）：Source = 投技者，Target = 被投者，
+    /// MoveId = 招式 ID，Amount = <b>实扣伤害</b>（与 <see cref="Hit"/> 同语义）。
+    /// </summary>
+    ThrowHit = 10,
+
+    /// <summary>
+    /// 双方同帧有效投技互相冲突（阶段 08B，D97）：<b>两边都不成立</b>、都不造成伤害。
+    /// Source = 0，Target = 1，MoveId = null，Amount = 0。每帧至多一次。
+    /// </summary>
+    ThrowClash = 11,
 }
 
 /// <summary>

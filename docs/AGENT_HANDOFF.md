@@ -1,8 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-08（阶段 08A：命中停顿 Hitstop 与动作有效时间，D96——阶段 08 进行中，
-> 663 项测试）
+> 最后更新：2026-11-08（阶段 08B：地面投技，D97——阶段 08 进行中，683 项测试）
 
 ---
 
@@ -62,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 663，已跳过: 0，总计: 663`
+期望：`失败: 0，通过: 683，已跳过: 0，总计: 683`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -162,6 +161,22 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 08B（2026-11-08）地面投技（D97）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Combat/ThrowDefinition.cs` | **新增**：投技数据（范围 / 生效窗口 / 伤害 / 倒地·起身 / 平移 / 停顿 / 可投类别）+ `AllowsTarget` 状态归类 |
+| `core/BattleCore/Combat/MoveDefinition.cs` | 新增 `Throws`（窗口须在 Active 内、同一招式内 ThrowId 唯一） |
+| `core/BattleCore/State/FighterState.cs` | 新增 `LastThrowStartFrame`（被投实例去重记录） |
+| `core/BattleCore/Simulation/BattleEvent.cs` | 新增 `ThrowAttempt`(9) / `ThrowHit`(10) / `ThrowClash`(11) |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | 结算前采集投技尝试；第 6b 阶段仲裁（打击打断投技 / 互投冲突 / 成功）；成功后扣血 + Knockdown + 位移钳制 + 停顿；事件发射 |
+| `core/BattleCore/Combat/DemoRoster.cs` | 双方新增 `5D`（重脚键 → StandingThrow，范围 70 / 伤害 60 / 倒地 12 / 起身 8 / 平移 20 / 停顿 6） |
+| `core/BattleCore/BattleCoreInfo.cs` / `State/BattleState.cs` | CoreVersion/StateVersion 10 → 11 |
+| `tests/BattleCore.Tests/ThrowTests.cs` | **新增 20 项** |
+
+**验收**：683/683；四构建 0/0；图形 `shots/p08b_throw_hit.png` / `p08b_throw_clash.png`。
+**变异验证**：互投改成「P1 固定胜出」→ `MutualThrows_SameFrame_ClashWithoutDamage` 失败（已恢复）。
 
 ### 阶段 08A（2026-11-08）命中停顿 Hitstop 与动作有效时间（D96）
 
@@ -770,8 +785,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K52 | **击退摩擦是「地面击退通用」配置（D95）** | 只校验 `GroundKnockback` 会放过「仅防御击退 + 零摩擦」，构造期合法但真实防御结算时整帧失败 | 任何新增「会写 VelocityX 的配置」都要同步加进 `AttackDefinition` 的摩擦不变式；**不要**靠放宽 `FighterState.Validate` 来「修」这类问题 |
 | K53 | **冻结角色必须整条流水线一起跳过（D96）** | 只冻动作不冻输入会让缓冲错乱；只冻动作不跳 `AttackActive` 快照会让首个生效帧重复发事件 | 冻结分支只做「推进识别 + 复制其余字段 + 计数 −1」，任何新的逐帧逻辑都要先判断该角色本帧是否冻结 |
 | K54 | **取消窗口/UI 的「第几帧」一律用 `MoveElapsedFrames`** | 用 `Frame − MoveStartedFrame` 会在停顿期间继续走，窗口提前过期（有变异测试钉住） | 新增任何「按动作帧计算」的规则（如未来的取消链、连段递减）都从 `MoveElapsedFrames` 取时间 |
+| K55 | **投技尝试必须在结算前采集（D97）** | 结算把人打进 Hitstun 之后，「目标可投」的答案就变了，投技会凭空消失 | 采集一次、仲裁一次：不要在 `ApplyThrows` 里重新读状态判断资格；新增投技来源（飞行道具/派生）也走同一张冲突表 |
+| K56 | **投技位移是唯一「不在运动阶段」的位置写入（D97）** | 它是显式放置，因此**必须**在同一处做完 D70 边界与 D73 最小间距钳制，否则会贴墙越界或与投技者重叠 | 任何新的「一次性放置」都要照这个模板；不要用 `PositionX = …` 绕过钳制 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 08A 验收时 663/663 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 08B 验收时 683/683 测试通过，可正常启动运行。
 
 ---
 
@@ -837,6 +854,17 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           core/BattleCore/BattleCoreInfo.cs
           scripts/BattleScene.cs  scenes/Battle.tscn
           tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **本轮阶段 08B：`feat(combat): implement deterministic ground throws`**
+    （文档与代码同一提交，SHA 由 `git rev-parse HEAD` 读取，不自引用）。提交内容：
+    ```
+    新增: core/BattleCore/Combat/ThrowDefinition.cs
+          tests/BattleCore.Tests/ThrowTests.cs（含 .uid）
+    修改: core/BattleCore/Combat/{MoveDefinition,DemoRoster}.cs
+          core/BattleCore/State/{FighterState,BattleState}.cs
+          core/BattleCore/Simulation/{BattleSimulation,BattleEvent}.cs
+          core/BattleCore/BattleCoreInfo.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
   - **本轮阶段 08A：`feat(combat): add deterministic hitstop`**
@@ -968,7 +996,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
 2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D88 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、663 项测试、阶段 08 进度
+3. `docs/PROGRESS.md` — 已完成/未完成边界、683 项测试、阶段 08 进度
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Combat/HitDetection.cs` — 三框几何 + **原始攻击序号**（K38）
@@ -1023,7 +1051,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 08 进行中**：08A（Hitstop，D96）已完成并推送；08B（投技）、08C（相杀）、08D（飞行道具）随后推进。
+4e. **阶段 08 进行中**：08A（Hitstop，D96）、08B（投技，D97）已完成并推送；08C（相杀）、08D（飞行道具）随后推进。
    阶段 07 已结项（07A D89 / 07B D90-D91 / 07C D92-D93 / 最终补修 D94-D95）。
    阶段 08 安全入口（按依赖顺序，详见 `PROGRESS.md` 阶段 07 总结）：① 比赛规则（多回合/计时/选人，
    建在 `RoundState` 之上）；② Hitstop；③ 投技；④ 飞行道具；⑤ 招式数据外置；⑥ 联机回滚。
@@ -1060,7 +1088,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 663」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 683」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -1126,6 +1154,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 命中停顿（D96）：命中/防御当帧结算，后续 N 帧冻结（动作/硬直/击退/空中积分/取消窗口），
       第 N+1 帧恢复；双方同值、同帧多来源取最大；冻结帧只推进输入识别；
       `AttackActive` 快照跳过冻结帧；取消窗口用 `MoveElapsedFrames`
+- [ ] 投技（D97）：数据在 `MoveDefinition.Throws`；判定 = Active + 窗口 + 目标可投 + 面前 + 距离；
+      不看防御；空中/倒地/起身/PreJump 一律不可投；同一实例只结算一次；
+      互投冲突双方都不成立；打击优先于投技；位移经 D70/D73 钳制
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向

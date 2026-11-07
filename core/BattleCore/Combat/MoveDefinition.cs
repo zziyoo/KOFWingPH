@@ -26,6 +26,8 @@ public sealed class MoveDefinition
 /// <param name="cancels">取消规则（阶段 07B，D91）：本招式可取消到哪些招式；
 /// null/空 = 不可取消。目标必须在同一角色配置中且不是自身（由
 /// <see cref="FighterDefinition"/> 构造期校验）。</param>
+/// <param name="throws">投技定义（阶段 08B，D97）；null/空 = 本招式没有投技判定。
+/// 生效帧窗口必须落在 Active 阶段内，且同一招式内 ThrowId 不得重复。</param>
 /// <exception cref="ArgumentException">ID 为空 / 阶段帧数 &lt; 1 / 允许状态为空。</exception>
 /// <exception cref="ArgumentException">攻击数据的生效帧范围超出 ActiveFrames。</exception>
 public MoveDefinition(
@@ -36,7 +38,8 @@ public MoveDefinition(
     int recoveryFrames,
     MoveAllowedStates allowedFrom = MoveAllowedStates.GroundIdle,
     IReadOnlyList<AttackDefinition>? attacks = null,
-    IReadOnlyList<CancelDefinition>? cancels = null)
+    IReadOnlyList<CancelDefinition>? cancels = null,
+    IReadOnlyList<ThrowDefinition>? throws = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -78,6 +81,23 @@ public MoveDefinition(
 
         // 取消规则（D91）：防御复制；目标是否存在/是否自身由 FighterDefinition 校验（它知道全表）。
         Cancels = Array.AsReadOnly((cancels ?? Array.Empty<CancelDefinition>()).ToArray());
+
+        // 投技定义（D97）：生效帧窗口必须在 Active 阶段内，ThrowId 在本招式内唯一。
+        ThrowDefinition[] throwCopy = (throws ?? Array.Empty<ThrowDefinition>()).ToArray();
+        var seenThrowIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ThrowDefinition definition in throwCopy)
+        {
+            if (definition.LastActiveFrame != int.MaxValue && definition.LastActiveFrame >= activeFrames)
+                throw new ArgumentException(
+                    $"招式 {moveId} 的投技 {definition.ThrowId} 生效帧范围非法" +
+                    $"（lastActiveFrame={definition.LastActiveFrame}，ActiveFrames={activeFrames}；" +
+                    $"范围须在 0..{activeFrames - 1} 内，或用默认哨兵表示至末帧）。", nameof(throws));
+            if (!seenThrowIds.Add(definition.ThrowId))
+                throw new ArgumentException(
+                    $"招式 {moveId} 内投技 ID 重复：{definition.ThrowId}。", nameof(throws));
+        }
+
+        Throws = Array.AsReadOnly(throwCopy);
     }
 
     /// <summary>招式唯一标识（同一角色内唯一）。</summary>
@@ -103,6 +123,9 @@ public MoveDefinition(
 
     /// <summary>取消规则（阶段 07B，D91；只读，可为空列表 = 不可取消）。</summary>
     public IReadOnlyList<CancelDefinition> Cancels { get; }
+
+    /// <summary>投技定义（阶段 08B，D97；只读，可为空列表 = 本招式没有投技判定）。</summary>
+    public IReadOnlyList<ThrowDefinition> Throws { get; }
 
     /// <summary>招式总帧数（诊断用）。</summary>
     public int TotalFrames => StartupFrames + ActiveFrames + RecoveryFrames;

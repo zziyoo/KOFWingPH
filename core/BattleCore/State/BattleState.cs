@@ -54,10 +54,10 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 10 = 阶段 08A（FighterState 新增动作有效经过帧数与命中停顿剩余帧数；
+    /// 状态格式版本 11 = 阶段 08B（FighterState 新增被投实例记录 LastThrowStartFrame；
     /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界）。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 10) => new(
+    public static BattleState CreateDefault(int stateVersion = 11) => new(
         frame: 0,
         fighters: new[]
         {
