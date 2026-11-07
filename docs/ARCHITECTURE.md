@@ -385,6 +385,14 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 
 
 
+### 阶段 07A 决策（KO 裁决与回合终局）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D89** | **`RoundState`（`Phase` + `Outcome` + `WinnerFighterId`）进入权威 `BattleState`；KO 只依据<b>全部结算完成之后</b>的双方最终体力判定（`FromFinalHealth`），双方同帧归零 = `DoubleKO`（无先手）；终局后 `Step` <b>仍可推进帧号但完全冻结</b>（角色/回合/事件逐位不变）；事件 `Knockout`(胜者→败者) / `DoubleKnockout`(0→1) / `RoundEnded`(Amount = (int)RoundOutcome，Source = 胜者或 -1) 各恰好一次；重开 = 新的 `BattleState` + 新的 `BattleSession`（不复用旧快照）** | 体力归零原先只是数值，没有对局语义。判定放在结算之后是唯一能保证「不因先处理 P1 而跳过 P2 同帧有效命中」的位置（D80 延伸）：双方各自解析、统一应用，再看最终体力。**选择「允许 Step 但冻结」而不是「禁止 Step」**：`BattleSession` 的 `Frame − 初始帧 == TotalSteps` 不变量与 Godot 的 `Advance` 调用都不需要特判，终局不会让游戏进入 `IsFaulted`，也不会重复产生 KO 事件；代价是终局后帧号仍在前进（明示语义）。`RoundState` 的三字段互相约束（InProgress ⇔ None ⇔ 无胜者；P1Win/P2Win ⇔ 胜者 0/1；DoubleKO ⇔ 无胜者），构造期 `Validate` 拒绝非法枚举与不自洽组合，`Finish` 只允许一次。`StateVersion`/`CoreVersion` 6 → 7，仅作格式边界标记（尚无序列化）。**EventId 的唯一性只在同一对局时间线内成立**——重开新对局会从帧 0 重新计数，不承诺跨场次全局唯一。 |
+
+
+
 ### 离线原型限定（重要）
 
 **当前丢帧策略与帧同步保证只适用于当前离线原型。**

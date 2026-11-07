@@ -41,8 +41,19 @@ namespace NewKOF.BattleCore.Simulation;
 /// （D69 明确语义，测试固定）。双方候选先各自算完再做双人间距/朝向处理，
 /// 计算顺序不产生 P1 先手优势（有镜像对称测试固定）。</para>
 ///
-/// <para>明确不做（留给后续阶段）：碰撞判定、攻击/受击、动画、取消规则、回合裁决。
-/// 不读取 Godot，不使用浮点，不采样设备输入。</para>
+/// <para><b>阶段 07A 起的固定流水线（顺序即语义，改动必须同步 ARCHITECTURE）：</b></para>
+/// <list type="number">
+/// <item>帧号与回合状态校验；<b>终局则冻结</b>（帧号 +1，角色/回合/事件逐位不变，D89）；</item>
+/// <item>逐角色：指令识别（D46/D55）→ 状态机（含取消判定，D91）→ 运动（地面步行/击退/空中积分）；</item>
+/// <item>场地边界钳制（D70）→ 双人最小间距统一求解（D73）；</item>
+/// <item>攻击生效快照（结算前，D87）→ 接触检测（D76）→ 双方并行解析结算（D80/D81）；</item>
+/// <item>统一应用伤害/硬直/击退/击飞与动作中断（D78/D90）→ 连段更新（D91）→ 朝向更新（D72）；</item>
+/// <item><b>KO 裁决</b>：只依据全部结算后的最终体力（D89，双 KO = DoubleKO）；</item>
+/// <item>收集战斗事件（D82/D89）→ 构造不可变 <see cref="BattleState"/>；</item>
+/// <item><c>BattleSession</c> 完整提交后才向观察者投递事件（D83）。</item>
+/// </list>
+///
+/// <para>不读取 Godot，不使用浮点，不采样设备输入；表现层只读。</para>
 /// </summary>
 public sealed class BattleSimulation
 {
@@ -112,6 +123,16 @@ public sealed class BattleSimulation
         }
 
         int frameAfter = state.Frame + 1;
+
+        // ── 终局冻结（D89）：帧号照常前进，角色、回合状态与事件逐位不变。
+        //    选择「允许 Step 但冻结」而非「禁止 Step」：BattleSession 的
+        //    「Frame − 初始帧 == TotalSteps」不变量与 Godot 的正常 Advance 调用都不需要特判，
+        //    终局不会让游戏进入异常/故障状态，也不会重复产生 KO 事件。
+        if (state.Round.IsFinished)
+        {
+            var frozen = new BattleState(frameAfter, state.Fighters, state.StateVersion, state.Round);
+            return new BattleStepResult(state.Frame, frameAfter, input, frozen);
+        }
 
         // ── 第 1-2 阶段：逐角色「识别 → 状态机 → 运动」（双方独立，互不读取对方）──
         var candidates = new FighterCandidate[state.Fighters.Count];
@@ -251,10 +272,15 @@ public sealed class BattleSimulation
         var outcomes = new CombatSettlement?[2];
         ApplyCombatSettlement(nextFighters, contacts, candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
 
-        // ── 第 7 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
-        IReadOnlyList<BattleEvent> events = CollectEvents(state.Frame, nextFighters, candidates, outcomes, attackActive);
+        // ── 第 7 阶段：KO 裁决（D89）——只依据<b>全部结算完成之后</b>的双方体力，
+        //    双方同帧归零即 DoubleKO（不存在先手优势）；已结束的回合原样保留。
+        RoundState nextRound = RoundState.FromFinalHealth(state.Round, nextFighters[0].Health, nextFighters[1].Health);
 
-        // ── 第 8 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
+        // ── 第 8 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
+        IReadOnlyList<BattleEvent> events = CollectEvents(
+            state.Frame, nextFighters, candidates, outcomes, attackActive, state.Round, nextRound);
+
+        // ── 第 9 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
         for (int i = 0; i < nextFighters.Length; i++)
         {
@@ -270,7 +296,7 @@ public sealed class BattleSimulation
             // X 相等：保持原朝向（平局不抖动，D72）。
         }
 
-        var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion);
+        var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion, nextRound);
 
         return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts, events);
     }
@@ -479,17 +505,22 @@ public sealed class BattleSimulation
     /// <summary>
     /// 收集本帧战斗事件（D82）：帧内顺序按权威阶段固定——
     /// ① MoveStarted（攻击者 ID 升序）；② AttackActive（攻击者 ID 升序，每次发动仅首个生效帧）；
-    /// ③ 逐被击者（ID 升序）：Hit → HitstunStarted 或 Blocked → BlockstunStarted。
+    /// ③ 逐被击者（ID 升序）：Hit → HitstunStarted 或 Blocked → BlockstunStarted；
+    /// ④ 回合终局（D89）：Knockout 或 DoubleKnockout → RoundEnded（只在本帧刚结束时产生）。
     /// EventId = Frame × 16 + 帧内序号（帧号或帧内事件数超上限时显式失败）。
     /// </summary>
     /// <param name="attackActive">结算前快照（见 <see cref="CollectAttackActive"/>）；
     /// AttackActive 的招式身份只从这里取，绝不回读结算后的状态。</param>
+    /// <param name="previousRound">帧开始的回合状态（判断「本帧刚结束」）。</param>
+    /// <param name="nextRound">结算后的回合状态（事件负载的唯一来源）。</param>
     private static IReadOnlyList<BattleEvent> CollectEvents(
         int frame,
         FighterState[] fighters,
         FighterCandidate[] candidates,
         CombatSettlement?[] outcomes,
-        AttackActiveSnapshot[] attackActive)
+        AttackActiveSnapshot[] attackActive,
+        RoundState previousRound,
+        RoundState nextRound)
     {
         List<BattleEvent>? events = null;
         int seq = 0;
@@ -544,6 +575,22 @@ public sealed class BattleSimulation
                 Add(BattleEventType.Hit, attacker, defender, settled.MoveId, settled.Damage);
                 Add(BattleEventType.HitstunStarted, attacker, defender, settled.MoveId, settled.StunFrames);
             }
+        }
+
+        // ④ 回合终局（D89）：只在「本帧刚结束」时产生一次——
+        //    单方 KO：Knockout(胜者→败者) + RoundEnded；双 KO：DoubleKnockout(0→1) + RoundEnded。
+        //    RoundEnded.Amount = (int)RoundOutcome，是消费方判断胜负的唯一依据。
+        if (!previousRound.IsFinished && nextRound.IsFinished)
+        {
+            if (nextRound.IsDoubleKO)
+                Add(BattleEventType.DoubleKnockout, 0, 1, null, 0);
+            else
+            {
+                int winner = nextRound.WinnerFighterId!.Value;
+                Add(BattleEventType.Knockout, winner, 1 - winner, null, 0);
+            }
+
+            Add(BattleEventType.RoundEnded, nextRound.WinnerFighterId ?? -1, -1, null, (int)nextRound.Outcome);
         }
 
         return events is null

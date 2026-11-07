@@ -20,7 +20,15 @@ public sealed record BattleState
     /// <summary>状态版本号，用于未来快照格式兼容判断。</summary>
     public int StateVersion { get; }
 
-    public BattleState(int frame, IReadOnlyList<FighterState> fighters, int stateVersion)
+    /// <summary>
+    /// 权威回合状态（阶段 07A，D89）。不可变；进行中为 <see cref="RoundState.InProgress"/>。
+    /// 终局后本状态不再变化（战斗冻结），胜负只能由最终体力判定一次。
+    /// </summary>
+    public RoundState Round { get; }
+
+    /// <param name="round">回合状态；null 表示进行中（旧构造路径语义不变）。</param>
+    public BattleState(int frame, IReadOnlyList<FighterState> fighters, int stateVersion,
+        RoundState? round = null)
     {
         if (frame < 0)
             throw new ArgumentOutOfRangeException(nameof(frame), frame, "逻辑帧号不能为负。");
@@ -31,6 +39,8 @@ public sealed record BattleState
         Frame = frame;
         Fighters = Array.AsReadOnly(fighters.ToArray());
         StateVersion = stateVersion;
+        Round = round ?? RoundState.InProgress;
+        Round.Validate();
 
         foreach (FighterState fighter in Fighters)
             fighter.Validate();
@@ -44,10 +54,10 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 6 = 阶段 06C（FighterState 新增攻击发动帧与被击实例记录，
-    /// 接入重复命中抑制与事件流；项目尚无序列化快照，无迁移负担，版本号标记格式边界）。
+    /// 状态格式版本 7 = 阶段 07A（BattleState 新增 RoundState，接入 KO/回合终局；
+    /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界）。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 6) => new(
+    public static BattleState CreateDefault(int stateVersion = 7) => new(
         frame: 0,
         fighters: new[]
         {

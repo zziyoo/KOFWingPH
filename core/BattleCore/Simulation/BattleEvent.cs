@@ -24,6 +24,26 @@ public enum BattleEventType
 
     /// <summary>防御硬直开始：Amount = 硬直帧数。</summary>
     BlockstunStarted = 5,
+
+    /// <summary>
+    /// 单方 KO（阶段 07A，D89）：Source = 胜者 ID，Target = 被击倒者 ID，Amount = 0。
+    /// 每个回合至多一次，与 <see cref="RoundEnded"/> 同帧产生。
+    /// </summary>
+    Knockout = 6,
+
+    /// <summary>
+    /// 双方同帧归零（阶段 07A，D89）：Source = 0，Target = 1（双方均被击倒），Amount = 0。
+    /// 与 <see cref="Knockout"/> 互斥——双 KO 不会产生 Knockout 事件。
+    /// </summary>
+    DoubleKnockout = 7,
+
+    /// <summary>
+    /// 回合结束（阶段 07A，D89）：Amount = <see cref="State.RoundOutcome"/> 的整数值
+    /// （1 = P1Win、2 = P2Win、3 = DoubleKO），是判断胜负的唯一事件依据。
+    /// Source = 胜者 ID（DoubleKO 时为 -1，无单一胜者），Target = -1。
+    /// 每个回合恰好一次，只在结束时的那一帧出现。
+    /// </summary>
+    RoundEnded = 8,
 }
 
 /// <summary>
@@ -36,7 +56,7 @@ public enum BattleEventType
 ///
 /// <para><b>帧内排序（D82）</b>：按权威阶段固定——① MoveStarted（攻击者 ID 升序）；
 /// ② AttackActive（攻击者 ID 升序）；③ 逐被击者（ID 升序）：Hit → HitstunStarted
-/// 或 Blocked → BlockstunStarted。</para>
+/// 或 Blocked → BlockstunStarted；④ 回合终局（D89）：Knockout / DoubleKnockout → RoundEnded。</para>
 ///
 /// <para><b>与状态提交的关系（D83）</b>：事件由 <c>BattleSimulation.Step</c> 的权威结算
 /// 产生、随 <see cref="BattleStepResult"/> 返回；<c>BattleSession</c> 在该帧<b>完整提交后</b>

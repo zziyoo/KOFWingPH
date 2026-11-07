@@ -14,8 +14,8 @@ namespace NewKOF.BattleCore;
 /// </summary>
 public static class BattleCoreInfo
 {
-    /// <summary>核心内核版本。规则/数据格式变化时递增（阶段 06C：攻击实例去重 + 事件流 → 6）。</summary>
-    public const int CoreVersion = 6;
+    /// <summary>核心内核版本。规则/数据格式变化时递增（阶段 07A：回合状态与 KO 裁决 → 7）。</summary>
+    public const int CoreVersion = 7;
 
     /// <summary>固定逻辑帧率（Hz）。权威模拟只按逻辑帧推进，与渲染帧率无关。</summary>
     public const int LogicFrameRate = 60;

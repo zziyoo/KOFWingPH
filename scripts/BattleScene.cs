@@ -41,7 +41,7 @@ public partial class BattleScene : Node2D
     private BattleSession _session = null!;
 
     /// <summary>逻辑帧输入缓冲（内核层）。边沿闩锁与帧号连续性都在这里保证。</summary>
-    private readonly InputBuffer _inputBuffer = new();
+    private InputBuffer _inputBuffer = new();
 
     /// <summary>键盘映射（表现层）。本类是唯一接触 Godot 输入 API 的地方。</summary>
     private KeyboardInputMap _inputMap = null!;
@@ -49,6 +49,9 @@ public partial class BattleScene : Node2D
     private Node2D? _fighter1Node;
     private Node2D? _fighter2Node;
     private Label? _hudLabel;
+
+    /// <summary>终局横幅（P1 WIN / P2 WIN / DOUBLE KO），内容只来自权威 RoundState。</summary>
+    private Label? _resultLabel;
 
     /// <summary>F1 切换的暂停状态（仅阻止时间驱动推进，不影响显式单步）。</summary>
     private bool _paused;
@@ -79,22 +82,65 @@ public partial class BattleScene : Node2D
         _fighter1Node = GetNodeOrNull<Node2D>("Fighter1");
         _fighter2Node = GetNodeOrNull<Node2D>("Fighter2");
         _hudLabel = GetNodeOrNull<Label>("Hud/HudLabel");
+        _resultLabel = GetNodeOrNull<Label>("Result");
 
-        // 阶段 04：识别与状态机都在内核（D55/D58），表现层只传配置、只读状态。
+        _debugBoxes = new DebugBoxDrawer();
+        AddChild(_debugBoxes);
+
+        StartNewRound();
+    }
+
+    /// <summary>
+    /// 开新回合（阶段 07A，D89）：重建会话、输入缓冲与调试绘制绑定——
+    /// 旧输入历史/硬直/攻击实例/事件显示全部清除，权威状态回到 <see cref="BattleState.CreateDefault"/>。
+    /// 表现层只负责「请求重开」，胜负与状态仍由内核判定。
+    /// </summary>
+    private void StartNewRound()
+    {
         _session = new BattleSession(
-            initialState: BattleState.CreateDefault(),
+            initialState: CreateInitialState(),
             scheduler: new FixedStepScheduler(MaxStepsPerAdvance),
             simulation: new BattleSimulation(_roster),
             eventsCommitted: (input, state, events) => _lastEvents = events);
 
+        // 新输入缓冲：清空按住/边沿/历史，避免上一局的按键被新回合首帧消费。
+        _inputBuffer = new InputBuffer();
         _inputMap = new KeyboardInputMap(_inputBuffer);
+        _lastEvents = Array.Empty<BattleEvent>();
+        _paused = false;
 
-        // 判定框调试层：最后 AddChild → 渲染在所有子节点之上（不受不透明背景遮挡）。
-        _debugBoxes = new DebugBoxDrawer();
         _debugBoxes.Bind(_session, _roster);
-        AddChild(_debugBoxes);
-
         SyncViewFromState();
+    }
+
+    /// <summary>
+    /// 初始权威状态。调试验收参数 <c>--hp=&lt;n&gt;</c> 可覆盖双方体力
+    /// （仅命令行传入时生效；正常启动为满血 1000，零副作用），用于在图形运行中快速触发 KO。
+    /// </summary>
+    private static BattleState CreateInitialState()
+    {
+        BattleState state = BattleState.CreateDefault();
+        int health = InitialHealthFromArgs();
+        if (health == state.Fighter(0).MaxHealth)
+            return state;
+
+        return new BattleState(state.Frame, new[]
+        {
+            state.Fighter(0) with { Health = health },
+            state.Fighter(1) with { Health = health },
+        }, state.StateVersion);
+    }
+
+    private static int InitialHealthFromArgs()
+    {
+        foreach (string arg in OS.GetCmdlineUserArgs())
+        {
+            if (arg.StartsWith("--hp=", StringComparison.Ordinal)
+                && int.TryParse(arg["--hp=".Length..], out int hp) && hp is > 0 and <= 1000)
+                return hp;
+        }
+
+        return 1000;
     }
 
     /// <summary>
@@ -125,6 +171,12 @@ public partial class BattleScene : Node2D
             _showDebugBoxes = !_showDebugBoxes;
             _debugBoxes.Enabled = _showDebugBoxes;
             _debugBoxes.Refresh();
+            return;
+        }
+
+        if (@event is InputEventKey f5 && !f5.Echo && f5.Pressed && f5.Keycode == Key.F5)
+        {
+            StartNewRound();
             return;
         }
 
@@ -204,11 +256,29 @@ public partial class BattleScene : Node2D
                 $"P1 Move: {DescribeMove(p1)}\n" +
                 $"P2 State: {DescribeState(p2)}\n" +
                 $"P2 Move: {DescribeMove(p2)}\n" +
+                $"Round: {DescribeRound(state.Round)}\n" +
                 $"Event: {DescribeLastEvent(_lastEvents)}";
+        }
+
+        if (_resultLabel is not null)
+        {
+            // 横幅内容只来自权威 RoundState（表现层不判定胜负）。
+            _resultLabel.Text = state.Round.Outcome switch
+            {
+                RoundOutcome.P1Win => "P1 WIN",
+                RoundOutcome.P2Win => "P2 WIN",
+                RoundOutcome.DoubleKO => "DOUBLE KO",
+                _ => string.Empty,
+            };
+            _resultLabel.Visible = state.Round.IsFinished;
         }
 
         _debugBoxes.Refresh(); // 判定框调试绘制随权威状态刷新。
     }
+
+    /// <summary>回合状态文本：进行中显示 InProgress，终局附结果与重开提示。</summary>
+    private static string DescribeRound(RoundState round) =>
+        round.IsFinished ? $"{round}  [F5 重开]" : round.ToString();
 
     /// <summary>把最近一帧的权威事件渲染成 HUD 文本（只读消费，按 EventId 语义展示）。</summary>
     private static string DescribeLastEvent(IReadOnlyList<BattleEvent> events)

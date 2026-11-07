@@ -1,8 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 06 最终收尾：AttackActive 负载完整性 + 攻击框只读封装，D87–D88——
-> 阶段 06 最终交接完成）
+> 最后更新：2026-11-07（阶段 07A：KO 裁决与回合终局，D89——阶段 07 进行中）
 
 ---
 
@@ -62,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 566，已跳过: 0，总计: 566`
+期望：`失败: 0，通过: 583，已跳过: 0，总计: 583`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -119,6 +118,22 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 07A（2026-11-07）KO 裁决与基础回合终局（D89）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/State/RoundState.cs` | **新增**：`RoundPhase` / `RoundOutcome` / `RoundState`（Phase+Outcome+Winner，`Validate` 三字段自洽、`FromFinalHealth` 唯一判定入口、`Finish` 只允许一次） |
+| `core/BattleCore/State/BattleState.cs` | 新增 `Round`（构造参数可选，默认 InProgress）；`StateVersion` 默认 6 → 7 |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | **终局冻结分支**（帧号前进、角色/回合/事件不变）；结算后 `RoundState.FromFinalHealth`；事件增加 KO/RoundEnded；流水线文档更新 |
+| `core/BattleCore/Simulation/BattleEvent.cs` | 新增 `Knockout`(6) / `DoubleKnockout`(7) / `RoundEnded`(8) 及语义文档 |
+| `core/BattleCore/BattleCoreInfo.cs` | `CoreVersion` 6 → 7 |
+| `scripts/BattleScene.cs` | 终局横幅 `Result`（P1 WIN / P2 WIN / DOUBLE KO，只读 `RoundState`）、HUD `Round:` 行、F5 重开（重建会话+输入缓冲）、`--hp=` 调试验收参数 |
+| `scenes/Battle.tscn` | 新增 `Result` 横幅 Label；HUD 模板加 `Round:` 行 |
+| `tests/BattleCore.Tests/RoundResolutionTests.cs` | **新增 17 项** |
+
+**验收**：583/583；四构建 0/0；图形运行三张终局横幅（P1 WIN / P2 WIN / DOUBLE KO）。
+**注意**：终局后 `Step` 仍推进帧号（冻结语义），不要据此认为回合可继续；重开必须新建 `BattleSession`。
 
 ### 阶段 06 最终收尾（2026-11-07）AttackActive 负载完整性 / 攻击框只读封装（D87–D88）
 
@@ -660,7 +675,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K41 | **`AttackActive` 的 MoveId 来自结算前快照（D87）** | 上一轮只把「是否生效」提前，负载仍读结算后状态；同帧互中双方被打断 → 两个事件 `MoveId = null`（实测） | 任何「本帧发生过」的事件负载都要在结算前采样（`AttackActiveSnapshot`）；`CollectEvents.Add` 已加不变式：AttackActive 的 MoveId 为空直接抛异常。不要用「延迟 Hitstun」或「保留已中断 MoveId」绕过 |
 | K42 | **`GetActiveHitboxesWithIndex` 返回真正的只读集合（D88）** | 此前非空分支直接返回 `List<ActiveHitbox>`，`result is List<ActiveHitbox> l → l.Clear()` 能清空「只读」视图 | 公开集合一律 `AsReadOnly()`/`Array.AsReadOnly`（D61 先例）；空结果共享 `Array.Empty`。新增集合型返回值时先写「强转 + `IList` 写操作」测试 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 06 最终收尾验收时 566/566 测试通过，可正常启动运行。
+| K43 | **终局后 `Step` 仍推进帧号但完全冻结（D89）** | 若误以为「终局可以继续打」，会看到角色永远不动；若改成禁止 Step，`Frame − 初始帧 == TotalSteps` 与 Godot `Advance` 都需要特判 | 冻结是显式选择：零事件、零接触、角色/回合逐位不变。重开必须新建 `BattleState.CreateDefault()` + 新 `BattleSession`（Godot F5 已实现），**不要**复用旧快照或手工清字段 |
+| K44 | **`RoundState` 三字段互相约束** | InProgress ⇔ None ⇔ 无胜者；P1Win/P2Win ⇔ 胜者 0/1；DoubleKO ⇔ 无胜者。构造期 `Validate` 拒绝不自洽组合 | 不要为「加一个字段」绕过 `Validate`；胜负只能由 `FromFinalHealth`（最终体力）判定，不要在事件层二次推断 |
+
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 07A 验收时 583/583 测试通过，可正常启动运行。
 
 ---
 
@@ -728,8 +746,19 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **本轮阶段 06 最终收尾：`fix(combat): preserve active move identity and readonly hitboxes`**
+  - **本轮阶段 07A：`feat(combat): add deterministic KO and round resolution`**
     （文档与代码同一提交，SHA 由 `git rev-parse HEAD` 读取，不自引用）。提交内容：
+    ```
+    新增: core/BattleCore/State/RoundState.cs
+          tests/BattleCore.Tests/RoundResolutionTests.cs（含 .uid）
+    修改: core/BattleCore/State/BattleState.cs
+          core/BattleCore/Simulation/{BattleSimulation,BattleEvent}.cs
+          core/BattleCore/BattleCoreInfo.cs
+          scripts/BattleScene.cs  scenes/Battle.tscn
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **本轮阶段 06 最终收尾：`fix(combat): preserve active move identity and readonly hitboxes`**
+    （`f3f12e2`，已推送）。提交内容：
     ```
     修改: core/BattleCore/Simulation/BattleSimulation.cs
           core/BattleCore/Combat/HitDetection.cs
@@ -797,7 +826,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
 2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D88 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、566 项测试、阶段 07 建议顺序
+3. `docs/PROGRESS.md` — 已完成/未完成边界、583 项测试、阶段 07 建议顺序
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Combat/HitDetection.cs` — 三框几何 + **原始攻击序号**（K38）
@@ -852,12 +881,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 06 已结项（D76–D86）**。阶段 07 推荐顺序（**本轮未开工，不要顺手做**）：
-   ① KO / 体力归零裁决（先定 KO 检测在 Step 的哪个阶段、归零当帧是否仍结算对方攻击——
-   与 D80 同时性相关）；② 连段与取消（先定可取消窗口与目标动作的数据形状，不要在
-   `FighterStateMachine` 加特例）；③ 击飞 / 空中受击（当前空中被击显式跳过，属完整状态簇，
-   需连同落地-起身一起设计）；④ 招式数据外置（与前三项解耦，可并行）；⑤ 回滚/录像
-   （`StateVersion` 已到 6，序列化格式仍未定）。
+4e. **阶段 07 进行中**：07A（KO/回合终局，D89）已完成并推送；07B（连段/取消）、07C（击退/击飞/倒地起身）
+   随后推进。阶段 07 完成后才开始阶段 08 的功能（正式精灵/动画、飞行道具、投技、Hitstop、比赛规则、
+   联机回滚等，见 `PROGRESS.md` 末尾的阶段 07 结项说明）。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
 6. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
    与 `NewKOF.csproj` 的 `Compile Include`。
@@ -890,7 +916,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 566」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 583」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -940,6 +966,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 收尾契约（D87–D88）：`AttackActive` 的 MoveId 来自结算前快照（同帧互中被打断仍非空；
       `Add` 对空 MoveId 抛异常）；`GetActiveHitboxesWithIndex` 非空结果不可强转 List/数组，
       `IList<T>` 与非泛型 `IList` 写操作抛 `NotSupportedException`
+- [ ] 回合契约（D89）：`BattleState.Round` 三字段自洽（`Validate`）；KO 只依据**结算后**最终体力，
+      双方同帧归零 = DoubleKO；终局 `Step` 冻结（帧号+1、角色/回合/事件不变）；KO 事件每回合各一次
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向
