@@ -244,8 +244,9 @@ public sealed class BattleSimulation
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
 
         // AttackActive 必须取<b>结算前</b>视图（下方结算会原地改写 nextFighters）：
-        // 本帧确实生效过的攻击不能因为同帧被打断而丢事件。
-        bool[] attackActive = CollectAttackActive(nextFighters, _roster);
+        // 本帧确实生效过的攻击不能因为同帧被打断而丢事件——连<b>招式身份</b>一起取，
+        // 因为结算会把被中断者的 MoveId 清空。
+        AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster);
 
         var outcomes = new CombatSettlement?[2];
         ApplyCombatSettlement(nextFighters, contacts, candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
@@ -424,18 +425,29 @@ public sealed class BattleSimulation
     };
 
     /// <summary>
-    /// 计算本帧「攻击实例首个生效帧」标记（D82 的 AttackActive 语义来源）。
+    /// 结算前的<b>攻击生效快照</b>（D87）：本帧是否进入生效窗 + 该次发动的招式身份。
+    ///
+    /// <para>招式身份必须在结算前取——命中结算会把被中断者的 <c>MoveId</c> 清空，
+    /// 事后读 <see cref="FighterState.MoveId"/> 会得到 null（同帧互中时两个事件全丢负载）。
+    /// 快照是纯值数组，不共享任何可变状态，也不写回权威快照。</para>
+    /// </summary>
+    /// <param name="IsActive">本帧是否是该攻击实例的首个生效帧。</param>
+    /// <param name="MoveId">该次发动的招式 ID（IsActive 时保证非空）。</param>
+    private readonly record struct AttackActiveSnapshot(bool IsActive, string? MoveId);
+
+    /// <summary>
+    /// 计算本帧「攻击实例首个生效帧」快照（D82 的 AttackActive 语义来源）。
     ///
     /// <para>必须在<b>结算之前</b>用结算前状态调用：本帧生效的攻击即使在同帧命中结算中
-    /// 被打断（进入 Hitstun），其生效事实已经发生，事件不得丢失。</para>
+    /// 被打断（进入 Hitstun），其生效事实与招式身份都已经发生，事件不得丢失。</para>
     ///
     /// <para>语义 = <b>该次发动的首个生效帧</b>：本帧有至少一个攻击定义进入生效窗口
     /// （<c>elapsed == min(FirstActiveFrame)</c>），且下一次发动（新 MoveStarted）会重新计数。
     /// 一个攻击实例至多产生一条 AttackActive——多攻击定义、错开窗口也只发一次。</para>
     /// </summary>
-    private static bool[] CollectAttackActive(FighterState[] fighters, FightRoster roster)
+    private static AttackActiveSnapshot[] CollectAttackActive(FighterState[] fighters, FightRoster roster)
     {
-        var flags = new bool[fighters.Length];
+        var snapshots = new AttackActiveSnapshot[fighters.Length];
 
         for (int i = 0; i < fighters.Length; i++)
         {
@@ -457,10 +469,11 @@ public sealed class BattleSimulation
                     firstActive = first;
             }
 
-            flags[i] = elapsed == firstActive;
+            if (elapsed == firstActive)
+                snapshots[i] = new AttackActiveSnapshot(IsActive: true, fighter.MoveId);
         }
 
-        return flags;
+        return snapshots;
     }
 
     /// <summary>
@@ -469,13 +482,14 @@ public sealed class BattleSimulation
     /// ③ 逐被击者（ID 升序）：Hit → HitstunStarted 或 Blocked → BlockstunStarted。
     /// EventId = Frame × 16 + 帧内序号（帧号或帧内事件数超上限时显式失败）。
     /// </summary>
-    /// <param name="attackActive">结算前视图算出的 AttackActive 标记（见 <see cref="CollectAttackActive"/>）。</param>
+    /// <param name="attackActive">结算前快照（见 <see cref="CollectAttackActive"/>）；
+    /// AttackActive 的招式身份只从这里取，绝不回读结算后的状态。</param>
     private static IReadOnlyList<BattleEvent> CollectEvents(
         int frame,
         FighterState[] fighters,
         FighterCandidate[] candidates,
         CombatSettlement?[] outcomes,
-        bool[] attackActive)
+        AttackActiveSnapshot[] attackActive)
     {
         List<BattleEvent>? events = null;
         int seq = 0;
@@ -489,6 +503,11 @@ public sealed class BattleSimulation
             if (seq >= BattleEvent.MaxEventsPerFrame)
                 throw new InvalidOperationException(
                     $"帧 {frame} 的事件数超过每帧上限 {BattleEvent.MaxEventsPerFrame}（EventId 空间不足）。");
+            // 生效事件必须可追溯招式：标记为生效却没有身份，说明快照取错了（D87 不变式）。
+            if (type == BattleEventType.AttackActive && string.IsNullOrEmpty(moveId))
+                throw new InvalidOperationException(
+                    $"帧 {frame}：AttackActive 缺少招式身份（结算前快照为空）。" +
+                    "生效事件不允许用 null MoveId 表示。");
             events ??= new List<BattleEvent>(8);
             events.Add(new BattleEvent(frame, frame * BattleEvent.MaxEventsPerFrame + seq, type, source, target, moveId, amount));
             seq++;
@@ -501,11 +520,11 @@ public sealed class BattleSimulation
                 Add(BattleEventType.MoveStarted, i, i, candidates[i].MoveId, 0);
         }
 
-        // ② AttackActive（每次发动的首个生效帧；标记来自结算前视图，同帧被打断也不丢）。
+        // ② AttackActive（每次发动的首个生效帧；标记与招式身份都来自结算前快照）。
         for (int i = 0; i < fighters.Length; i++)
         {
-            if (attackActive[i])
-                Add(BattleEventType.AttackActive, i, i, fighters[i].MoveId, 0);
+            if (attackActive[i].IsActive)
+                Add(BattleEventType.AttackActive, i, i, attackActive[i].MoveId, 0);
         }
 
         // ③ 逐被击者：命中/防御 + 硬直开始。

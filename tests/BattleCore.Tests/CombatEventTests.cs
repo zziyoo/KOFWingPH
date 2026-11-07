@@ -164,6 +164,7 @@ public class CombatEventTests
         Assert.Equal(3, frame3.Length);
         Assert.Equal(BattleEventType.AttackActive, frame3[0].Type);
         Assert.Equal(3 * 16, frame3[0].EventId);
+        Assert.Equal(DemoRoster.StandLightPunch, frame3[0].MoveId);
         Assert.Equal(BattleEventType.Hit, frame3[1].Type);
         Assert.Equal(3 * 16 + 1, frame3[1].EventId);
         Assert.Equal(30, frame3[1].Amount);
@@ -499,7 +500,13 @@ public class CombatEventTests
 
         Assert.DoesNotContain(result.Events, e => e.Type == BattleEventType.Hit);
         Assert.Equal(1000, result.State.Fighter(1).Health);
-        Assert.Equal(0, Assert.Single(result.Events, e => e.Type == BattleEventType.Blocked).Amount);
+
+        BattleEvent blocked = Assert.Single(result.Events, e => e.Type == BattleEventType.Blocked);
+        Assert.Equal(0, blocked.Amount);
+        Assert.Equal(PokeMove, blocked.MoveId);
+        BattleEvent blockstun = Assert.Single(result.Events, e => e.Type == BattleEventType.BlockstunStarted);
+        Assert.Equal(8, blockstun.Amount);
+        Assert.Equal(PokeMove, blockstun.MoveId);
     }
 
     [Fact]
@@ -616,6 +623,212 @@ public class CombatEventTests
         var ex = Assert.Throws<InvalidOperationException>(() =>
             sim.Step(overflowFrame, new FrameInput(overflowFrame.Frame, InputBits.LightPunch, InputBits.None)));
         Assert.Contains("EventId", ex.Message);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段 06 最终收尾 P1：AttackActive 必须携带结算前的招式身份
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 双方<b>不同招式</b>的单招配置（防止「招式名相同」掩盖 MoveId 丢失）：
+    /// P1 = PokeA（5A/轻拳，Active [0,0]），P2 = PokeB（5B/重拳，Active [0,1]）。
+    /// 两者几何相同，均覆盖间距 60 的目标。
+    /// </summary>
+    private static BattleSimulation DuelMoveSim()
+    {
+        MovementDefinition movement = MovementDefinition.CreateDefault();
+
+        FighterDefinition Build(string id, string moveId, string commandId, InputBits button, int lastActive) => new(
+            id,
+            new[] { new CommandDefinition(commandId, Array.Empty<CommandDirection>(), button, priority: 5) },
+            new[]
+            {
+                new MoveDefinition(moveId, commandId, startupFrames: 1, activeFrames: 3, recoveryFrames: 4,
+                    attacks: new[]
+                    {
+                        new AttackDefinition(
+                            FixedPoint.FromInt(45), FixedPoint.FromInt(60),
+                            FixedPoint.FromInt(30), FixedPoint.FromInt(30),
+                            firstActiveFrame: 0, lastActiveFrame: lastActive,
+                            AttackHeight.Mid, damage: 30, hitstunFrames: 12, blockstunFrames: 8),
+                    }),
+            },
+            movement);
+
+        return new BattleSimulation(new FightRoster(
+            Build("Kai", "PokeA", "5A", InputBits.LightPunch, lastActive: 0),
+            Build("Rei", "PokeB", "5B", InputBits.HeavyPunch, lastActive: 1)));
+    }
+
+    /// <summary>构造「已在 Active 指定 elapsed 帧」的角色（Step 内先 tick，故 +1）。</summary>
+    private static FighterState ActiveFighter(string moveId, int id, int x, Facing facing, int elapsed) =>
+        FighterState.Create(id, 1000, x, facing) with
+        {
+            LogicState = FighterLogicState.Active,
+            MoveId = moveId,
+            PhaseRemainingFrames = 4 - elapsed, // ActiveFrames 3 → tick 后 elapsed 命中
+            MoveStartedFrame = 0,
+        };
+
+    [Fact]
+    public void MutualHits_AttackActive_KeepTheirOwnMoveIds()
+    {
+        // 真实时间线：帧 0 双方各按各自的键 → 帧 1 同为 Active 首帧互中、同时被打断。
+        // 结算后双方 MoveId 均为 null，因此事件必须来自「结算前快照」而不是当前状态。
+        var sim = DuelMoveSim();
+        BattleState state = Duel(
+            FighterState.Create(0, 1000, -60, Facing.Right),
+            FighterState.Create(1, 1000, 0, Facing.Left));
+
+        BattleState started = sim.Step(state,
+            new FrameInput(0, InputBits.LightPunch, InputBits.HeavyPunch)).State;
+        Assert.Equal(FighterLogicState.Startup, started.Fighter(0).LogicState);
+        Assert.Equal(FighterLogicState.Startup, started.Fighter(1).LogicState);
+
+        BattleStepResult result = sim.Step(started, FrameInput.Empty(1));
+
+        // 双方确实被中断：状态 MoveId 已是 null——这正是事件不能读它的原因。
+        Assert.All(result.State.Fighters, f =>
+        {
+            Assert.Equal(FighterLogicState.Hitstun, f.LogicState);
+            Assert.Null(f.MoveId);
+        });
+        Assert.Equal(970, result.State.Fighter(0).Health);
+        Assert.Equal(970, result.State.Fighter(1).Health);
+
+        BattleEvent[] active = result.Events
+            .Where(e => e.Type == BattleEventType.AttackActive)
+            .ToArray();
+
+        Assert.Equal(2, active.Length);
+        Assert.All(active, e =>
+        {
+            Assert.NotNull(e.MoveId);           // 生效事件绝不允许 null 招式
+            Assert.Equal(0, e.Amount);
+            Assert.Equal(e.SourceFighterId, e.TargetFighterId);
+        });
+        Assert.Equal("PokeA", active[0].MoveId);
+        Assert.Equal("PokeB", active[1].MoveId);
+        Assert.Equal(new[] { 0, 1 }, active.Select(e => e.SourceFighterId).ToArray());
+
+        // EventId 仍是 Frame × 16 + 帧内序号，且不重复。
+        Assert.Equal(new[] { 1 * 16 + 0, 1 * 16 + 1 }, active.Select(e => e.EventId).ToArray());
+        Assert.Equal(result.Events.Count, result.Events.Select(e => e.EventId).Distinct().Count());
+
+        // Hit / HitstunStarted 负载同样按攻击者各自的招式，顺序不变。
+        BattleEvent[] hits = result.Events.Where(e => e.Type == BattleEventType.Hit).ToArray();
+        Assert.Equal(2, hits.Length);
+        Assert.Equal("PokeA", hits.Single(e => e.TargetFighterId == 1).MoveId);
+        Assert.Equal("PokeB", hits.Single(e => e.TargetFighterId == 0).MoveId);
+        Assert.All(hits, e => Assert.Equal(30, e.Amount));
+
+        BattleEvent[] stuns = result.Events.Where(e => e.Type == BattleEventType.HitstunStarted).ToArray();
+        Assert.Equal(2, stuns.Length);
+        Assert.Equal("PokeB", stuns.Single(e => e.TargetFighterId == 0).MoveId);
+        Assert.Equal("PokeA", stuns.Single(e => e.TargetFighterId == 1).MoveId);
+
+        // 帧内顺序：AttackActive（两人）→ Hit/HitstunStarted。
+        var list = result.Events.ToList();
+        Assert.True(list.FindLastIndex(e => e.Type == BattleEventType.AttackActive)
+            < list.FindIndex(e => e.Type == BattleEventType.Hit));
+
+        // 被中断的实例下一帧不复活：无新 AttackActive、无新命中。
+        BattleStepResult next = sim.Step(result.State, FrameInput.Empty(2));
+        Assert.DoesNotContain(next.Events, e => e.Type == BattleEventType.AttackActive);
+        Assert.DoesNotContain(next.Events, e => e.Type == BattleEventType.Hit);
+        Assert.Equal(970, next.State.Fighter(0).Health);
+        Assert.Equal(970, next.State.Fighter(1).Health);
+    }
+
+    [Fact]
+    public void InterruptedAttacker_AttackActiveKeepsMoveId_WhenOnlyOneEmits()
+    {
+        // 只有一个角色在本帧进入生效窗（P1 elapsed 0），P2 处于 elapsed 1（不产生 AttackActive），
+        // 但两人的攻击框都有效 → P1 仍被打断。事件必须保留 P1 的招式身份。
+        var sim = DuelMoveSim();
+        BattleState state = new BattleState(0, new[]
+        {
+            ActiveFighter("PokeA", 0, -60, Facing.Right, elapsed: 0),
+            ActiveFighter("PokeB", 1, 0, Facing.Left, elapsed: 1),
+        }, BattleState.CreateDefault().StateVersion);
+
+        BattleStepResult result = sim.Step(state, FrameInput.Empty(0));
+
+        Assert.Equal(FighterLogicState.Hitstun, result.State.Fighter(0).LogicState);
+        Assert.Null(result.State.Fighter(0).MoveId);
+
+        BattleEvent active = Assert.Single(result.Events, e => e.Type == BattleEventType.AttackActive);
+        Assert.Equal(0, active.SourceFighterId);
+        Assert.Equal("PokeA", active.MoveId);
+        Assert.Equal("PokeB", Assert.Single(result.Events, e => e.Type == BattleEventType.Hit
+            && e.TargetFighterId == 0).MoveId);
+    }
+
+    [Fact]
+    public void UninterruptedAttack_AttackActiveKeepsMoveId_AndMoveContinues()
+    {
+        // 目标拉远 → 不命中、不中断：事件仍带招式身份，且角色继续 Active。
+        var sim = DuelMoveSim();
+        BattleState state = new BattleState(0, new[]
+        {
+            ActiveFighter("PokeA", 0, -60, Facing.Right, elapsed: 0),
+            FighterState.Create(1, 1000, 400, Facing.Left),
+        }, BattleState.CreateDefault().StateVersion);
+
+        BattleStepResult result = sim.Step(state, FrameInput.Empty(0));
+
+        BattleEvent active = Assert.Single(result.Events, e => e.Type == BattleEventType.AttackActive);
+        Assert.Equal("PokeA", active.MoveId);
+        Assert.Equal(FighterLogicState.Active, result.State.Fighter(0).LogicState);
+        Assert.Equal("PokeA", result.State.Fighter(0).MoveId);
+        Assert.Empty(result.Contacts);
+    }
+
+    [Fact]
+    public void SecondActiveFrame_DoesNotEmitAttackActive_Again()
+    {
+        // 同一实例的第 2 个 Active 帧不再发 AttackActive（每实例一次），仍可命中。
+        var sim = DuelMoveSim();
+        BattleState state = new BattleState(0, new[]
+        {
+            ActiveFighter("PokeA", 0, -60, Facing.Right, elapsed: 1),
+            FighterState.Create(1, 1000, 0, Facing.Left),
+        }, BattleState.CreateDefault().StateVersion);
+
+        BattleStepResult result = sim.Step(state, FrameInput.Empty(0));
+
+        Assert.DoesNotContain(result.Events, e => e.Type == BattleEventType.AttackActive);
+        // PokeA 的生效窗只有 elapsed 0 → 本帧无接触。
+        Assert.Empty(result.Contacts);
+    }
+
+    [Fact]
+    public void Replay_AttackActivePayloads_AreBitIdentical()
+    {
+        // 同一快照 + 同一输入重放：事件（含 MoveId/EventId）逐位一致。
+        static (List<BattleEvent> events, BattleState state) Run()
+        {
+            var sim = DuelMoveSim();
+            BattleState state = Duel(
+                FighterState.Create(0, 1000, -60, Facing.Right),
+                FighterState.Create(1, 1000, 0, Facing.Left));
+            var events = new List<BattleEvent>();
+
+            BattleStepResult r0 = sim.Step(state,
+                new FrameInput(0, InputBits.LightPunch, InputBits.HeavyPunch));
+            events.AddRange(r0.Events);
+            BattleStepResult r1 = sim.Step(r0.State, FrameInput.Empty(1));
+            events.AddRange(r1.Events);
+            return (events, r1.State);
+        }
+
+        var (eventsA, stateA) = Run();
+        var (eventsB, stateB) = Run();
+
+        Assert.Equal(eventsA, eventsB);
+        Assert.Equal(stateA.Fighter(0), stateB.Fighter(0));
+        Assert.Equal(stateA.Fighter(1), stateB.Fighter(1));
+        Assert.Equal(2, eventsA.Count(e => e.Type == BattleEventType.AttackActive));
     }
 
     /// <summary>测试专用输入源：指定帧的 Commit 抛异常（复用 03A 的失败注入模式）。</summary>

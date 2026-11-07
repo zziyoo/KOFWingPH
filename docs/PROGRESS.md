@@ -1415,6 +1415,60 @@ Faulted/Recover）；10000 帧混合战斗长跑确定性 + EventId 唯一 1 项
 
 ---
 
+## 阶段 06 最终收尾（2026-11-07）—— AttackActive 负载完整性 / 攻击框只读封装（D87–D88）
+
+**背景**：阶段 06 逐文件复查又发现两处局部问题（均由上一轮补修引入/遗留），
+本轮只修这两项，不新增阶段 07 功能。
+
+### 复现（修复前实测）
+
+| # | 复现 | 修复前实测 | 期望 |
+|---|---|---|---|
+| P1-a | 双方**不同招式**（PokeA / PokeB）同帧 Active 首帧互中，两个 `AttackActive` 的 `MoveId` | **null / null** | PokeA / PokeB |
+| P1-b | 只有 P1 产生 AttackActive、但 P1 同帧被 P2 的攻击打断（P2 处于 elapsed 1） | **null** | PokeA |
+| P2-a | `GetActiveHitboxesWithIndex` 非空结果的类型 | **可强转为 `List<ActiveHitbox>`**（`Clear()` 成功） | 强转失败 + 写操作抛 `NotSupportedException` |
+
+P1 根因：上一轮把「是否生效」提到结算前，但**事件负载仍读结算后的 `fighters[i].MoveId`**；
+同帧互中双方都在结算中被清空 `MoveId`，于是生效事件带着 null 招式。
+P2 根因：非空分支 `return boxes`（`List<ActiveHitbox>`）只靠返回类型「看起来只读」。
+
+### 修复（D87–D88）
+
+1. **D87**：`CollectAttackActive` 返回 `AttackActiveSnapshot(bool IsActive, string? MoveId)[]`，
+   招式身份与生效标记**一起**在结算前取得；`CollectEvents` 只读快照。
+   `Add()` 增加不变式：`AttackActive` 的 MoveId 为空 → 显式抛异常（不允许用 null 表示生效事件）。
+   不依赖结算后状态、不修改原快照、不共享可变状态；帧数、每实例一次、EventId 公式、
+   同帧并行结算规则均不变。
+2. **D88**：非空结果改为 `boxes.AsReadOnly()`；空结果仍共享 `Array.Empty<ActiveHitbox>()`。
+   `ActiveHitbox` 结构、索引语义、顺序、AABB 几何、`GetActiveHitboxes` 几何视图全部不动。
+
+### 测试与构建（本轮实测）
+
+新增 **8 项**（558 → **566**），既有 558 项全部保留：
+
+- `CombatEventTests` 5 项：双方不同招式互中 → 两个 AttackActive 各带自己的 MoveId（并校验
+  Hit / HitstunStarted 负载、EventId = 帧×16+序号、帧内顺序、被中断实例下一帧不复活）；
+  只有一个角色生效且被打断时仍带 MoveId；未被中断时仍带 MoveId 且招式继续；
+  第 2 个 Active 帧不重复产生 AttackActive；同快照同输入重放事件逐位一致。
+- `HitDetectionTests` 3 项：非空结果不可强转 List/数组、`IList<T>` 与非泛型 `IList` 写操作
+  全部抛 `NotSupportedException`、尝试前后 Count 与元素逐位一致；空结果共享同一实例；
+  多框顺序与原始 `AttackIndex` 保持（并与 `GetActiveHitboxes` 几何视图逐位一致）。
+- 另补 3 处既有测试的**负载断言**：`Events_FramesTypesAndIds_AreExact` 的 AttackActive MoveId、
+  `BlockedAttack_ProducesNoHitEvent` 的 Blocked/BlockstunStarted MoveId、
+  `StaggeredWindows_*` 的 AttackActive MoveId。
+
+| 项 | 结果 |
+|---|---|
+| `dotnet test`（Debug / Release） | **566/566 通过**（0 失败 0 跳过） |
+| 四构建（BattleCore / Godot × Debug / Release） | 均 **0 警告 / 0 错误** |
+| Godot 无头导入 | `[ DONE ]`，无错误 |
+| Godot 图形运行 | `shots/p06final_hit_verify.png`（逻辑 119：红框与 P2 Hurtbox 相交、`HP 970/1000`、`Hitstun(12)`、`Event ... (id=1890)`）——**与上一轮截图 md5 逐位相同**，说明渲染与判定未因只读包装改变；`shots/` 被 `.gitignore` 忽略 |
+| 阶段 05/06 回归 | 全量 566 项含墙角 580/640、地面防穿越、空中越身、起跳/落地帧语义、5A 时序、多攻击框索引、Hit.Amount 实扣语义——全部通过 |
+
+**阶段 06 最终交接完成（D76–D88）。**
+
+---
+
 ## 下一阶段计划（阶段 06 已结项；本节的入口列表保留作历史参考）
 
 > **本节的「阶段 06 入口」已于 2026-11-07 全部完成（D76–D83）。** 阶段 07 推荐顺序见上一节末尾。
@@ -1439,7 +1493,7 @@ Faulted/Recover）；10000 帧混合战斗长跑确定性 + EventId 唯一 1 项
 **注意**：若要「后输入优先」SOCD，必须先扩展 `FrameInput` 记录事件顺序（D27 仍有效）。
 
 > 阶段 05 已连同 05B 结项。接手后先看 `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test`
-> 确认 **558** 项通过再继续。
+> 确认 **566** 项通过再继续。
 
 **每完成一个子任务，立即更新本文件与 `AGENT_HANDOFF.md`。**
 

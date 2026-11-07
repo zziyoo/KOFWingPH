@@ -1,8 +1,8 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 06 专项补修：多攻击框序号 / 实扣伤害 / 事件契约复核，D84–D86——
-> 阶段 06 独立交接验收通过）
+> 最后更新：2026-11-07（阶段 06 最终收尾：AttackActive 负载完整性 + 攻击框只读封装，D87–D88——
+> 阶段 06 最终交接完成）
 
 ---
 
@@ -62,7 +62,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 558，已跳过: 0，总计: 558`
+期望：`失败: 0，通过: 566，已跳过: 0，总计: 566`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -119,6 +119,22 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 06 最终收尾（2026-11-07）AttackActive 负载完整性 / 攻击框只读封装（D87–D88）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Simulation/BattleSimulation.cs` | **D87**：`CollectAttackActive` 返回 `AttackActiveSnapshot(bool IsActive, string? MoveId)[]`（结算前快照，含招式身份）；`CollectEvents` 改读快照而非 `fighters[i].MoveId`；`Add()` 增加不变式「AttackActive 必须有非空 MoveId」 |
+| `core/BattleCore/Combat/HitDetection.cs` | **D88**：`GetActiveHitboxesWithIndex` 非空结果改 `boxes.AsReadOnly()`（此前直接返回 `List`，可强转后 `Clear()`）；空结果仍共享 `Array.Empty` |
+| `tests/BattleCore.Tests/CombatEventTests.cs` | **新增 5 项**（双方不同招式互中保留各自 MoveId、单方生效被打断仍保留、未被打断仍保留、第 2 个 Active 帧不重复、重放逐位一致）+ 2 处既有测试补负载断言（AttackActive / Blocked / BlockstunStarted 的 MoveId） |
+| `tests/BattleCore.Tests/HitDetectionTests.cs` | **新增 3 项**（非空结果只读：强转/泛型与非泛型写操作全部拒绝且内容逐位不变；空结果共享实例；多框顺序 + 原始 AttackIndex + 与几何视图一致） |
+| `tests/BattleCore.Tests/MultiAttackContactTests.cs` | 错开窗口用例补 AttackActive MoveId 断言 |
+
+**复现**：双方不同招式同帧互中时两个 AttackActive 的 MoveId 均为 **null**（修复前）；
+`GetActiveHitboxesWithIndex` 非空结果可强转 `List<ActiveHitbox>` 并 `Clear()` 成功（修复前）。
+**验收**：566/566（Debug/Release）；四构建 0/0；无头导入 `[ DONE ]`；图形截图
+`shots/p06final_hit_verify.png` 与上一轮 **md5 逐位相同**（逻辑 119 / HP 970 / Hitstun(12) / id=1890）。
+既有 558 项无一删除或削弱。
 
 ### 阶段 06 专项补修（2026-11-07）多攻击框序号 / 实扣伤害 / 事件契约（D84–D86）
 
@@ -641,7 +657,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K39 | **`Hit.Amount` / `CombatSettlement.Damage` = 实扣伤害（D85）** | 曾报配置伤害（体力 10 受 30 报 30、受 `int.MaxValue` 报 21 亿） | 事件值只能来自结算结果 `Health前 − Health后`；不要为了显示「原始伤害」另开计算路径——需要时新增字段并同步文档/测试。0 伤害仍是有效命中（进 Hitstun，Amount 0） |
 | K40 | **`AttackActive` 取结算前视图，且每个攻击实例只发一次（D86）** | 事件收集若放在 `ApplyCombatSettlement` 之后，同帧互中被打断者的事件会全部丢失（复现 0 个）；`ApplyCombatSettlement` 会**原地改写**传入的 `FighterState[]` | 新增任何「结算前事实」类事件都要在结算前采样；`MaxFrameForEventIds = 134217727`（60Hz ≈ 25.9 天），超出显式抛异常不回绕 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 06 专项补修验收时 558/558 测试通过，可正常启动运行。
+| K41 | **`AttackActive` 的 MoveId 来自结算前快照（D87）** | 上一轮只把「是否生效」提前，负载仍读结算后状态；同帧互中双方被打断 → 两个事件 `MoveId = null`（实测） | 任何「本帧发生过」的事件负载都要在结算前采样（`AttackActiveSnapshot`）；`CollectEvents.Add` 已加不变式：AttackActive 的 MoveId 为空直接抛异常。不要用「延迟 Hitstun」或「保留已中断 MoveId」绕过 |
+| K42 | **`GetActiveHitboxesWithIndex` 返回真正的只读集合（D88）** | 此前非空分支直接返回 `List<ActiveHitbox>`，`result is List<ActiveHitbox> l → l.Clear()` 能清空「只读」视图 | 公开集合一律 `AsReadOnly()`/`Array.AsReadOnly`（D61 先例）；空结果共享 `Array.Empty`。新增集合型返回值时先写「强转 + `IList` 写操作」测试 |
+
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 06 最终收尾验收时 566/566 测试通过，可正常启动运行。
 
 ---
 
@@ -709,8 +728,16 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **本轮阶段 06 专项补修：`fix(combat): correct attack contact mapping and event damage`**
+  - **本轮阶段 06 最终收尾：`fix(combat): preserve active move identity and readonly hitboxes`**
     （文档与代码同一提交，SHA 由 `git rev-parse HEAD` 读取，不自引用）。提交内容：
+    ```
+    修改: core/BattleCore/Simulation/BattleSimulation.cs
+          core/BattleCore/Combat/HitDetection.cs
+          tests/BattleCore.Tests/{CombatEventTests,HitDetectionTests,MultiAttackContactTests}.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **本轮阶段 06 专项补修：`fix(combat): correct attack contact mapping and event damage`**
+    （`2955918`，已推送）。提交内容：
     ```
     新增: tests/BattleCore.Tests/MultiAttackContactTests.cs（含 .uid）
     修改: core/BattleCore/Combat/HitDetection.cs
@@ -769,8 +796,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 **按顺序阅读：**
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
-2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D86 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、558 项测试、阶段 07 建议顺序
+2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D88 决策）与第 5 节（未决定问题）
+3. `docs/PROGRESS.md` — 已完成/未完成边界、566 项测试、阶段 07 建议顺序
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Combat/HitDetection.cs` — 三框几何 + **原始攻击序号**（K38）
@@ -863,7 +890,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 558」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 566」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -910,11 +937,14 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
       `GetActiveHitboxesWithIndex`，同帧多框取最小序号）；`Hit.Amount` = 实扣伤害
       （`Health前 − Health后`，不是配置伤害）；`AttackActive` 取**结算前**视图且每实例一次；
       `MaxFrameForEventIds` 越界显式失败
+- [ ] 收尾契约（D87–D88）：`AttackActive` 的 MoveId 来自结算前快照（同帧互中被打断仍非空；
+      `Add` 对空 MoveId 抛异常）；`GetActiveHitboxesWithIndex` 非空结果不可强转 List/数组，
+      `IList<T>` 与非泛型 `IList` 写操作抛 `NotSupportedException`
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向
 - [ ] `Observe` 帧号严格逐帧连续（首次任意非负），非法帧先抛后不改内部状态
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D86）与代码实现一致
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D88）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

@@ -1,4 +1,5 @@
 using NewKOF.BattleCore.Combat;
+using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.Simulation;
@@ -294,5 +295,86 @@ public class HitDetectionTests
 
         Assert.Equal(580, state.Fighter(0).PositionX.ToIntTruncated());
         Assert.Equal(640, state.Fighter(1).PositionX.ToIntTruncated());
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段 06 最终收尾 P2：GetActiveHitboxesWithIndex 的只读封装（D61 约定）
+    // ─────────────────────────────────────────────────────────────
+
+    private static FighterState ActiveKai() =>
+        WithState(Standing(0, Facing.Right), FighterLogicState.Active, DemoRoster.StandLightPunch, 2);
+
+    [Fact]
+    public void ActiveHitboxesWithIndex_NonEmpty_IsReadOnly()
+    {
+        IReadOnlyList<ActiveHitbox> boxes = FighterBoxes.GetActiveHitboxesWithIndex(ActiveKai(), Kai);
+
+        // 快照：后续所有尝试都不得改变长度或内容。
+        ActiveHitbox[] before = boxes.ToArray();
+        Assert.Single(before);
+
+        // 不能强转成可写 List，也不能强转成数组。
+        Assert.Null(boxes as List<ActiveHitbox>);
+        Assert.Null(boxes as ActiveHitbox[]);
+
+        // 泛型与非泛型写操作都必须被拒绝。
+        Assert.True(((IList<ActiveHitbox>)boxes).IsReadOnly);
+        Assert.Throws<NotSupportedException>(() => { ((IList<ActiveHitbox>)boxes).Clear(); });
+        Assert.Throws<NotSupportedException>(() => { ((IList<ActiveHitbox>)boxes)[0] = default; });
+        Assert.Throws<NotSupportedException>(() => { ((IList<ActiveHitbox>)boxes).Add(default); });
+        Assert.Throws<NotSupportedException>(() => { ((System.Collections.IList)boxes).Clear(); });
+        Assert.Throws<NotSupportedException>(() => { ((System.Collections.IList)boxes)[0] = default; });
+        Assert.Throws<NotSupportedException>(() => { ((System.Collections.IList)boxes).Add(null); });
+
+        // 逐位一致（长度与每个元素）。
+        Assert.Equal(before.Length, boxes.Count);
+        for (int i = 0; i < before.Length; i++)
+            Assert.Equal(before[i], boxes[i]);
+    }
+
+    [Fact]
+    public void ActiveHitboxesWithIndex_Empty_SharesSingleInstance()
+    {
+        IReadOnlyList<ActiveHitbox> first = FighterBoxes.GetActiveHitboxesWithIndex(
+            Standing(0, Facing.Right), Kai);
+        IReadOnlyList<ActiveHitbox> second = FighterBoxes.GetActiveHitboxesWithIndex(
+            Standing(0, Facing.Right), Kai);
+
+        Assert.Empty(first);
+        Assert.Same(first, second);           // 空结果共享同一实例（无每次分配）
+        Assert.Null(first as List<ActiveHitbox>);
+    }
+
+    [Fact]
+    public void ActiveHitboxesWithIndex_MultipleBoxes_KeepOrderAndOriginalIndex()
+    {
+        // 同一招两个攻击定义都在 elapsed 0 生效：顺序固定为配置顺序，序号是原始下标。
+        var move = new MoveDefinition("Twin", "5A", startupFrames: 1, activeFrames: 3, recoveryFrames: 4,
+            attacks: new[]
+            {
+                new AttackDefinition(FixedPoint.FromInt(30), FixedPoint.FromInt(40),
+                    FixedPoint.FromInt(10), FixedPoint.FromInt(10)),
+                new AttackDefinition(FixedPoint.FromInt(70), FixedPoint.FromInt(60),
+                    FixedPoint.FromInt(10), FixedPoint.FromInt(10)),
+            });
+        var definition = new FighterDefinition("Twin Fighter",
+            new[] { new CommandDefinition("5A", Array.Empty<CommandDirection>(), InputBits.LightPunch, priority: 5) },
+            new[] { move });
+
+        FighterState fighter = WithState(Standing(0, Facing.Right), FighterLogicState.Active,
+            "Twin", remaining: 3); // 直接查询无 tick：elapsed = ActiveFrames(3) − 3 = 0
+
+        IReadOnlyList<ActiveHitbox> boxes = FighterBoxes.GetActiveHitboxesWithIndex(fighter, definition);
+
+        Assert.Equal(2, boxes.Count);
+        Assert.Equal(new[] { 0, 1 }, boxes.Select(b => b.AttackIndex).ToArray());
+        Assert.Equal(FixedPoint.FromInt(20), boxes[0].Box.MinX);
+        Assert.Equal(FixedPoint.FromInt(40), boxes[0].Box.MaxX);
+        Assert.Equal(FixedPoint.FromInt(60), boxes[1].Box.MinX);
+        Assert.Equal(FixedPoint.FromInt(80), boxes[1].Box.MaxX);
+
+        // 几何视图与索引视图逐位一致（Godot 调试框走这里）。
+        IReadOnlyList<FixedRect> geometry = FighterBoxes.GetActiveHitboxes(fighter, definition);
+        Assert.Equal(boxes.Select(b => b.Box).ToArray(), geometry.ToArray());
     }
 }

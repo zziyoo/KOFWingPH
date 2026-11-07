@@ -376,6 +376,15 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 
 
 
+### 阶段 06 最终收尾决策（AttackActive 负载完整性 / 攻击框只读封装）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D87** | **`AttackActive` 的招式身份来自<b>结算前快照</b>：`CollectAttackActive` 返回 `AttackActiveSnapshot(bool IsActive, string? MoveId)` 数组（纯值、不共享可变状态），事件组装只读该快照；`CollectEvents` 对 `AttackActive` 增加不变式——<b>生效事件必须携带非空 MoveId，否则显式抛异常</b>** | 复现出的真实缺陷：上一轮把「是否生效」提前到结算前，但事件负载仍读结算后的 `fighters[i].MoveId`。同帧互中时双方都在结算中被打断（`MoveId = null`），两个 AttackActive 变成 `MoveId = null`——事件无法追溯到招式，与「该帧实际进入生效的招式」语义矛盾（自带不同招式名复现：两事件均 null）。规格：**结算前快照描述事实，结算后状态描述结果**，两者不得混用；不通过延迟 Hitstun 或保留已中断 MoveId 掩盖。帧数、每实例一次、EventId 公式、同帧并行结算规则全部不变。 |
+| **D88** | **`FighterBoxes.GetActiveHitboxesWithIndex` 对非空结果返回 `List<T>.AsReadOnly()`（空结果仍共享 `Array.Empty`）——不可强转 List/数组，`IList<T>` 与非泛型 `IList` 写操作抛 `NotSupportedException`** | 复现出的真实缺陷：返回类型是 `IReadOnlyList`，但非空时底层仍是 `List<ActiveHitbox>`，`result is List<ActiveHitbox> list → list.Clear()` 可清空调用方拿到的「只读」视图（实测强转成功）。违反 D61 已确立的公开只读集合约定（同 `RecognitionState`/`Events`/`Contacts` 先例）。只处理集合所有权：`ActiveHitbox` 仍是 readonly record struct，索引语义/顺序/AABB 几何/旧 `GetActiveHitboxes` 几何视图均不变；只读包装一次构造，不在索引访问时复制。 |
+
+
+
 ### 离线原型限定（重要）
 
 **当前丢帧策略与帧同步保证只适用于当前离线原型。**

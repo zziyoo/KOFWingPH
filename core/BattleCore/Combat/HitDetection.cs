@@ -132,7 +132,10 @@ public static class FighterBoxes
                 FixedRect.FromCenter(centerX, centerY, attack.HalfWidth, attack.HalfHeight), i));
         }
 
-        return boxes ?? (IReadOnlyList<ActiveHitbox>)Array.Empty<ActiveHitbox>();
+        // 只读包装（D61 约定）：空结果共享同一实例；非空结果不可强转为 List/数组，写操作抛异常。
+        return boxes is null
+            ? (IReadOnlyList<ActiveHitbox>)Array.Empty<ActiveHitbox>()
+            : boxes.AsReadOnly();
     }
 }
 

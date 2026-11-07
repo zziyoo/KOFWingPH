@@ -213,7 +213,8 @@ public class MultiAttackContactTests
         // elapsed 1 虽然又有攻击框进入生效窗口，但同一实例已发过。
         BattleStepResult first = NewSim().Step(ActiveAt(elapsed: 0, p2X: 400), FrameInput.Empty(0));
         Assert.Empty(first.Contacts);
-        Assert.Single(first.Events, e => e.Type == BattleEventType.AttackActive);
+        BattleEvent active = Assert.Single(first.Events, e => e.Type == BattleEventType.AttackActive);
+        Assert.Equal(Dual, active.MoveId); // 结算前快照的招式身份（D87）
 
         BattleStepResult second = NewSim().Step(ActiveAt(elapsed: 1, p2X: 400), FrameInput.Empty(0));
         Assert.Empty(second.Contacts);
