@@ -1,5 +1,6 @@
 using System.Text;
 using Godot;
+using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Simulation;
@@ -23,9 +24,11 @@ namespace NewKOF;
 /// 阶段 03A：输入链路已接通。键位见 <see cref="KeyboardInputMap"/>，
 /// F1 切换暂停（仅阻止时间驱动推进），HUD 显示最近一个已消费逻辑帧的双人输入。
 ///
-/// 阶段 03B-1：指令识别已接入。识别器在 <c>BattleCore</c> 内，由会话的
-/// 「帧已提交」回调驱动；HUD 只显示 <see cref="CommandRecognizer.LastMatch"/>，
-/// 不参与任何识别判定，也不引入角色动作或伤害。
+/// 阶段 03B-1：指令识别已接入 <c>BattleCore</c>；HUD 显示识别结果。
+///
+/// 阶段 04：识别移入权威转换（<c>BattleSimulation.Step</c>），识别状态与动作状态
+/// 都随权威快照携带。HUD 改为<b>只读权威状态</b>（<c>FighterState.LogicState/MoveId</c>
+/// 与识别缓冲），本类不再持有独立的识别器、不做任何状态机或招式计时。
 ///
 /// 阶段 02 修改原因（阶段 01 缺陷）：
 /// 旧实现用 <c>(int)(delta*1e6)</c> 截断 + 整数 16666us 间隔，
@@ -34,17 +37,11 @@ namespace NewKOF;
 /// </summary>
 public partial class BattleScene : Node2D
 {
-    /// <summary>战斗会话：调度器 + 模拟 + 权威状态，全部在内核层。</summary>
+    /// <summary>战斗会话：调度器 + 模拟（Kai 对 Rei 演示配置）+ 权威状态，全部在内核层。</summary>
     private BattleSession _session = null!;
 
     /// <summary>逻辑帧输入缓冲（内核层）。边沿闩锁与帧号连续性都在这里保证。</summary>
     private readonly InputBuffer _inputBuffer = new();
-
-    /// <summary>
-    /// 指令识别器（内核层）。每提交一帧由会话回调喂入；
-    /// 本类只读取识别结果用于显示，不做任何识别判定。
-    /// </summary>
-    private readonly CommandRecognizer _commandRecognizer = new(CommandCatalog.CreateDefault());
 
     /// <summary>键盘映射（表现层）。本类是唯一接触 Godot 输入 API 的地方。</summary>
     private KeyboardInputMap _inputMap = null!;
@@ -71,13 +68,11 @@ public partial class BattleScene : Node2D
         _fighter2Node = GetNodeOrNull<Node2D>("Fighter2");
         _hudLabel = GetNodeOrNull<Label>("Hud/HudLabel");
 
+        // 阶段 04：识别与状态机都在内核（D55/D58），表现层只传配置、只读状态。
         _session = new BattleSession(
             initialState: BattleState.CreateDefault(),
             scheduler: new FixedStepScheduler(MaxStepsPerAdvance),
-            // 每帧完整提交后（状态/输入/记账都已落定）再做只读识别，
-            // 不改变调度与输入提交契约。
-            frameCommitted: (input, state) =>
-                _commandRecognizer.Observe(input, state.Fighter(0).Facing, state.Fighter(1).Facing));
+            simulation: new BattleSimulation(DemoRoster.CreateKaiVsRei()));
 
         _inputMap = new KeyboardInputMap(_inputBuffer);
 
@@ -163,13 +158,25 @@ public partial class BattleScene : Node2D
                 $"Logic Frame: {state.Frame}{pauseTag}\n" +
                 $"P1: {Describe(last.Player1)}\n" +
                 $"P2: {Describe(last.Player2)}\n" +
-                $"P1 Command: {DescribeCommand(_commandRecognizer.LastMatch(0))}\n" +
-                $"P2 Command: {DescribeCommand(_commandRecognizer.LastMatch(1))}";
+                $"P1 Command: {DescribeCommand(LatestCommand(state, 0))}\n" +
+                $"P2 Command: {DescribeCommand(LatestCommand(state, 1))}\n" +
+                $"P1 State: {state.Fighter(0).LogicState}\n" +
+                $"P1 Move: {DescribeMove(state.Fighter(0))}\n" +
+                $"P2 State: {state.Fighter(1).LogicState}\n" +
+                $"P2 Move: {DescribeMove(state.Fighter(1))}";
         }
     }
 
+    /// <summary>从权威识别快照取最近一次识别结果（阶段 04：识别在内核，Godot 只读）。</summary>
+    private static CommandMatch? LatestCommand(BattleState state, int player) =>
+        state.Fighter(player).RecognitionState.Last;
+
     /// <summary>把识别结果渲染成 HUD 文本；从未识别到时显示 "-"。</summary>
     private static string DescribeCommand(CommandMatch? match) => match?.CommandId ?? "-";
+
+    /// <summary>把动作状态渲染成 HUD 文本；待机显示 "-"，动作中显示「招式 / 阶段 剩余帧」。</summary>
+    private static string DescribeMove(FighterState fighter) =>
+        fighter.IsInMove ? $"{fighter.MoveId} / {fighter.LogicState} {fighter.PhaseRemainingFrames}" : "-";
 
     /// <summary>把输入位渲染成紧凑的调试文本；无输入显示 "-"。</summary>
     private static string Describe(InputBits bits)

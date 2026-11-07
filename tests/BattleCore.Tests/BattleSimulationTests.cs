@@ -1,3 +1,4 @@
+using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Simulation;
 using NewKOF.BattleCore.State;
@@ -53,8 +54,16 @@ public class BattleSimulationTests
 
         Assert.Equal(0, state.Frame);                       // 原状态帧号未变
         Assert.NotSame(state, result.State);                // 返回新实例
-        Assert.Equal(p1Before, result.State.Fighter(0));
-        Assert.Equal(p2Before, result.State.Fighter(1));
+        // 输入状态的角色数据（含识别快照）未被修改——反修改契约的主体。
+        Assert.Equal(p1Before, state.Fighter(0));
+        Assert.Equal(p2Before, state.Fighter(1));
+        // 阶段 04 起（D55），识别状态随权威状态逐帧推进：结果侧的 FighterState
+        // 不再与帧开始时值相等（识别历史合法前进），但身份/生命/坐标/朝向必须原样携带。
+        Assert.Equal(p1Before.Id, result.State.Fighter(0).Id);
+        Assert.Equal(p1Before.Health, result.State.Fighter(0).Health);
+        Assert.Equal(p1Before.PositionX, result.State.Fighter(0).PositionX);
+        Assert.Equal(p1Before.Facing, result.State.Fighter(0).Facing);
+        Assert.Equal(FighterLogicState.Standing, result.State.Fighter(0).LogicState);
     }
 
     [Fact]

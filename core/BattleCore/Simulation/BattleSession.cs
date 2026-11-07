@@ -47,7 +47,7 @@ namespace NewKOF.BattleCore.Simulation;
 /// </summary>
 public sealed class BattleSession
 {
-    private readonly BattleSimulation _simulation = new();
+    private readonly BattleSimulation _simulation;
     private readonly int _initialFrame;
     private readonly Action<FrameInput, BattleState>? _frameCommitted;
 
@@ -74,16 +74,20 @@ public sealed class BattleSession
     /// <param name="frameCommitted">
     /// 可选提交观察者：每个逻辑帧<b>完整提交之后</b>（状态、输入历史、记账均已落定）调用一次。
     /// 入参为该帧输入与该帧<b>开始之前</b>的权威状态（<c>stateBefore</c>），
-    /// 其中 <c>Facing</c> 是「本帧输入被消费时的朝向」——供指令识别等只读派生层使用。
+    /// 其中 <c>Facing</c> 是「本帧输入被消费时的朝向」——供只读派生层使用。
     /// <b>不得抛异常</b>；若抛出，异常照常向上传播（已提交的帧与记账保持一致，不会回滚）。
+    /// 阶段 04 起指令识别已移入权威转换（D55），本观察者仅供显示等只读用途。
     /// </param>
+    /// <param name="simulation">战斗模拟（含角色配置）；null 表示空配置默认模拟。</param>
     public BattleSession(
         BattleState? initialState = null,
         FixedStepScheduler? scheduler = null,
-        Action<FrameInput, BattleState>? frameCommitted = null)
+        Action<FrameInput, BattleState>? frameCommitted = null,
+        BattleSimulation? simulation = null)
     {
         CurrentState = initialState ?? BattleState.CreateDefault();
         Scheduler = scheduler ?? new FixedStepScheduler();
+        _simulation = simulation ?? new BattleSimulation();
         _initialFrame = CurrentState.Frame;
         _frameCommitted = frameCommitted;
     }

@@ -870,12 +870,14 @@ public class CommandRecognitionTests
     }
 
     [Fact]
-    public void CommandDefinition_RejectsEmptySequence()
+    public void CommandDefinition_RejectsEmptySequenceWithoutButton()
     {
+        // D56 细化：空方向序列仅在声明攻击键时合法（裸按键指令）；
+        // 无按键的空序列无法触发，仍然拒绝。
         Assert.Throws<ArgumentException>(() => new CommandDefinition(
             "EMPTY",
             Array.Empty<CommandDirection>(),
-            BtnA));
+            InputBits.None));
     }
 
     [Fact]

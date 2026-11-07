@@ -75,8 +75,12 @@ public sealed class CommandDefinition
         ArgumentNullException.ThrowIfNull(directionSequence);
 
         CommandDirection[] sequence = directionSequence.ToArray();
-        if (sequence.Length == 0)
-            throw new ArgumentException("方向序列不能为空。", nameof(directionSequence));
+
+        // 空序列 = 裸按键指令（D56）：无方向要求，仅按键边沿帧触发——
+        // 必须带攻击键，否则无法触发。非空序列维持 03B 的相邻不同约束。
+        if (sequence.Length == 0 && requiredButtons == InputBits.None)
+            throw new ArgumentException(
+                "方向序列不能为空；不带方向的裸按键指令必须声明攻击键。", nameof(directionSequence));
 
         // 每个元素必须是合法枚举值；相邻元素不得相同（识别器按「方向变化」
         // 压缩历史，相同相邻方向在定义里是冗余/错误，直接拒绝）。

@@ -1,3 +1,6 @@
+using NewKOF.BattleCore.Combat;
+using NewKOF.BattleCore.Commands;
+
 namespace NewKOF.BattleCore.State;
 
 /// <summary>角色朝向。阶段 01 固定，不做自动转身。</summary>
@@ -8,8 +11,22 @@ public enum Facing
 }
 
 /// <summary>
-/// 单名角色的初始/当前数据。
-/// 阶段 01 刻意只包含“身份 + 初始数据”，不包含招式、状态机、碰撞或受击信息。
+/// 单名角色的当前数据。
+///
+/// <para>阶段 04（D57）起，在原有「身份 + 初始数据」之上正式扩展<b>动作状态</b>与
+/// <b>识别状态</b>——两者都是权威状态的一部分，随快照携带、可重放：</para>
+/// <list type="bullet">
+/// <item><see cref="LogicState"/> / <see cref="MoveId"/> / <see cref="PhaseRemainingFrames"/>：
+///       角色动作状态机（见 <c>FighterStateMachine</c>），全部在整数逻辑帧上推进。</item>
+/// <item><see cref="Recognition"/>：该角色输入的指令识别快照
+///       （<see cref="RecognitionState"/>，不可变，含方向历史/蓄力挂起/结果缓冲/消费标记）。</item>
+/// </list>
+///
+/// <para>仍然不包含：速度、重力、加速度、移动规则（阶段 05 决定）、碰撞、受击。</para>
+///
+/// <para><b>不可变快照契约不退化</b>：本类型仍是 readonly record struct；新字段全部指向
+/// 不可变对象或标量，旧快照不会被新一帧修改。<see cref="RecognitionState"/> 重写了
+/// 结构化相等，因此跨实例的确定性比较仍然成立。</para>
 /// </summary>
 public readonly record struct FighterState(
     int Id,
@@ -17,10 +34,23 @@ public readonly record struct FighterState(
     int Health,
     int PositionX,
     int PositionY,
-    Facing Facing)
+    Facing Facing,
+    FighterLogicState LogicState = FighterLogicState.Standing,
+    string? MoveId = null,
+    int PhaseRemainingFrames = 0,
+    RecognitionState? Recognition = null)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
+
+    /// <summary>该角色的指令识别快照；null（旧构造路径）视为未观察的初始状态。</summary>
+    public RecognitionState RecognitionState => Recognition ?? RecognitionState.Empty;
+
+    /// <summary>是否处于招式阶段（Startup/Active/Recovery）。</summary>
+    public bool IsInMove =>
+        LogicState is FighterLogicState.Startup
+            or FighterLogicState.Active
+            or FighterLogicState.Recovery;
 
     /// <summary>校验基础不变式。用于尽早暴露非法初态，而不是让错误无声传播。</summary>
     public void Validate()
@@ -31,5 +61,31 @@ public readonly record struct FighterState(
             throw new InvalidOperationException($"角色 {Id} 的 MaxHealth 必须为正：{MaxHealth}。");
         if (Health < 0 || Health > MaxHealth)
             throw new InvalidOperationException($"角色 {Id} 的 Health 越界：{Health}/{MaxHealth}。");
+
+        // 动作状态不变式（D57）：阶段剩余帧数不允许为负；动作期间必须带 MoveId 且
+        // 剩余 ≥ 1（阶段切换在归零的同一帧完成，不产生 0 帧的中间状态）；
+        // 待机状态必须无 MoveId 且剩余为 0。
+        if (PhaseRemainingFrames < 0)
+            throw new InvalidOperationException(
+                $"角色 {Id} 的阶段剩余帧数不能为负：{PhaseRemainingFrames}。");
+
+        if (IsInMove)
+        {
+            if (string.IsNullOrEmpty(MoveId))
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于 {LogicState} 但没有 MoveId。");
+            if (PhaseRemainingFrames < 1)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于 {LogicState} 但阶段剩余帧数为 {PhaseRemainingFrames}（必须 ≥ 1）。");
+        }
+        else
+        {
+            if (MoveId is not null)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于待机状态 {LogicState} 但携带招式 {MoveId}。");
+            if (PhaseRemainingFrames != 0)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于待机状态 {LogicState} 但阶段剩余帧数为 {PhaseRemainingFrames}（必须为 0）。");
+        }
     }
 }

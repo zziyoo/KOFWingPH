@@ -1,6 +1,6 @@
-# PROGRESS.md — NewKOF 开发进度
+﻿# PROGRESS.md — NewKOF 开发进度
 
-> 最后更新：2026-11-07（阶段 03B-2 最终补修：长蓄力 / 释放窗口 / 双重超时边界）
+> 最后更新：2026-11-07（阶段 04 角色状态机与招式系统）
 
 ---
 
@@ -363,14 +363,14 @@ cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
 
-**最近一次实际运行结果（2026-11-07，03B 蓄力边界补修后实测）**
+**最近一次实际运行结果（2026-11-07，阶段 04 后实测）**
 ```
-已通过! - 失败: 0，通过: 267，已跳过: 0，总计: 267，持续时间: 220 ms - BattleCore.Tests.dll (net8.0)
+已通过! - 失败: 0，通过: 326，已跳过: 0，总计: 326，持续时间: 664 ms - BattleCore.Tests.dll (net8.0)
 ```
 
 | 测试文件 | 用例数（`--list-tests` 实测） | 内容 |
 |---|---|---|
-| `BattleSimulationTests.cs` | 8 | 阶段 01 基础 Step 契约 |
+| `BattleSimulationTests.cs` | 8 | 阶段 01 基础 Step 契约（反修改断言按 D55 语义更新：识别快照随权威状态推进） |
 | `FixedStepSchedulerTests.cs` | 24 | 调度器：多帧率一致性（Theory 展开）、补帧、暂停、非法输入 |
 | `DeterminismTests.cs` | 16 | 确定性、长跑、快照隔离、旧状态重放 |
 | `GodotIntegrationContractTests.cs` | 6 | Godot 层依赖的内核契约 |
@@ -381,11 +381,15 @@ dotnet test
 | `DirectionResolverTests.cs` | 10 | **03A**：SOCD 与相对朝向 |
 | `InputPipelineTests.cs` | 7 | **03A**：输入与逻辑帧绑定、暂停、多帧批次 |
 | `InputIntegrityTests.cs` | 34 | **03A 补修 + 03B-1 最终补修**：只读历史、两阶段提交、失败恢复、容量、Commit 失败、观察者异常安全、**失败封闭（Faulted）** |
-| `CommandRecognitionTests.cs` | 41 | **03B-1 + 最终补修**：四条基础指令、容差/超时、冲突、换边、SOCD、帧率一致性、缓冲、**跨末方向帧幽灵指令** |
+| `CommandRecognitionTests.cs` | 41 | **03B-1 + 最终补修**：四条基础指令、容差/超时、冲突、换边、SOCD、帧率一致性、缓冲、**跨末方向帧幽灵指令**（空序列校验按 D56 细化：空 + 无按键仍拒绝） |
 | `ChargeCommandTests.cs` | 44 | **03B-2 + 最终补修**：蓄力成功/失败/超时、**超长蓄力 61/120/600/3600**、**释放窗口 0/1/2/3/4/20 帧边界**、斜方向、SOCD（不蓄力/视为释放）、换边、不同键、P1/P2 独立、**防重复消费/独立重蓄**、负帧校验、内存上界 |
 | `ChargeStaleTailTests.cs` | 10 | **03B 边界补修（D54）**：释放前旧 Forward 不得借用（最小复现）、不足不补、迟按不复活、同帧完成、窗口 1/2/3/4 边界（含旧条目历史）、P1/P2 独立、换边新朝向尾段归属 |
+| `FighterDefinitionTests.cs` | 19 | **04（D59/D56）**：招式/角色配置校验（重复 ID、未知指令、非法帧数、空 ID）、防御复制、同指令不同招式、裸按键校验（带键合法/无键拒绝/蓄力拒绝） |
+| `FighterStateMachineTests.cs` | 13 | **04（D58）**：默认站立、蹲下切换（含 SOCD 上优先）、阶段推进与 1 帧边界、动作期间不产生非法跳转、损坏状态（无 MoveId/未知招式）抛出、待机消费进 Startup、动作期间不消费、收招同帧消费 |
+| `MoveConsumptionTests.cs` | 15 | **04（D60/D56）**：一次消费/第二次失败、过期不可消费、保留到有效期、无映射跳过不阻断、FIFO 选择顺序、同指令不同招式（Kai/Rei）、朝左识别、蹲姿门控、裸按键（长待机触发/按住不重复/让位高优先级）、Last≠可发动、纯函数不改入参、Step 分批一致 |
+| `Phase04IntegrationTests.cs` | 12 | **04（B6/B8）**：完整招式时间线逐帧断言（4/3/8）、独立二次发动、动作期间重复输入、蹲下不覆盖动作、P1/P2 独立角色表、确定性、旧快照重放、批次一致、Advance/StepExact + 暂停 + 帧同步、观察者故障封闭、快照含动作状态 |
 | `DoubleMotionCommandTests.cs` | 11 | **03B-2 + 最终补修**：双重指令成功/缺段/超时、**真正 40/41 帧跨度超时边界（连续方向序列）**、与单段竞争、新手势识别、无按键不触发 |
-| **合计** | **267** | 与 `dotnet test` 的「总计: 267」一致 |
+| **合计** | **326** | 与 `dotnet test` 的「总计: 326」一致 |
 
 > 说明：上表是 **xUnit 用例数**（`Theory` 的每个 `InlineData` 计一条），不是方法数。
 > 早先版本按方法数填写，与「总计」对不上，已按 `--list-tests` 实测校正。
@@ -906,28 +910,105 @@ SOCD 释放、重蓄重置、防重复、P1/P2 独立、换边、按键容差不
 
 ---
 
-## 下一阶段计划：阶段 04（按角色指令表 / 消费接口 / 招式系统接入）
+## 阶段 04 成果（角色状态机与招式系统，2026-11-07）
 
-**进入前必须先读** `ARCHITECTURE.md` 第 4 节（D37–D53：输入与指令规则）与第 5 节。
+### 边界
 
-03B-2 已连同最终补修正式结项（蓄力 D49/D51/D52/D53、双重 D50）。
-后续仍只处理输入与整数逻辑帧：
+解决「角色当前处于什么状态、状态能否切换、招式指令如何请求执行、动作如何按逻辑帧推进」。
+**不做**：移动/跳跃轨迹、碰撞推挤、攻击判定、伤害受击、动画、取消技、回合胜负
+（Airborne/Hitstun 等状态只在文档预留，不以空实现冒充）。
 
-1. **指令表按角色拆分**：目前 `CommandCatalog` 是全局默认表；角色专属招式应改为
-   外部数据（C# 配置或后续 JSON），识别器本身仍不认识具体招式。
-2. **输入缓冲的消费接口**：本阶段只输出识别结果；招式系统接入时再定义
-   `TryConsume` 语义（谁能取走、取走后是否立即失效、过期不可消费、失败消费不破坏其他结果）。
-3. **蓄力放宽配置（可选）**：斜方向是否计入蓄力——当前默认严格纯方向；
-   释放窗口已独立配置（D52）。
+### 核心架构（D55–D60）
+
+1. **识别进入权威状态（D55）**：识别逻辑提取为不可变的 `RecognitionState`
+   （方向历史 / 按键边沿 / 蓄力挂起 / 结果缓冲 / 消费标记，全部随快照携带），
+   `Advance` 为纯函数——同初态同输入必得同结果，旧快照 + 后续输入可完整重放。
+   `BattleSimulation.Step` 内按角色推进识别 → 消费 → 状态机（**零帧延迟**，同帧生效）；
+   `CommandRecognizer` 保留为双玩家门面（267 项既有测试全部不动地通过）。
+   会话观察者与 Faulted 封闭不变（仅供显示）。
+2. **动作状态机（D58）**：`FighterLogicState` = Standing / Crouching / Startup / Active / Recovery；
+   集中纯函数 `FighterStateMachine.Tick`：阶段剩余 −1 → 归零按招式数据切换
+   （Recovery 完成同帧可待机更新与消费）→ 仅待机时切换站立/蹲下（B9，动作不被蹲下覆盖）
+   → 消费（D60）。转换边唯一，损坏状态立即抛出。
+3. **数据驱动招式（D59）**：`MoveDefinition`（MoveId / CommandId / 三阶段帧数 /
+   允许发动状态）+ `FighterDefinition`（角色专属指令表与招式表）+ `FightRoster`；
+   构造期校验（重复 ID、未知指令、非法帧数）+ 防御复制。识别器不认识角色与招式。
+4. **消费契约（D60）**：每条识别结果最多消费一次（`WithResultConsumed` 显式失败）；
+   过期不能消费；不属于当前角色的指令不误消费；失败不破坏其他结果；
+   不能行动时保留到有效期结束、恢复可行动同帧可消费；选择顺序 = 缓冲顺序（FIFO）；
+   `LastMatch` 仅显示，绝不据其发动。
+5. **裸按键指令（D56）**：空方向序列 + 攻击键——实测发现 `[Neutral]` 序列无法表达
+   「站立不动按 A」（中立条目进入帧太旧），补充裸按键形态：仅当帧未消费边沿触发，
+   不依赖方向历史。空序列 + 无按键仍拒绝。
+
+### `FighterState` 扩展（D57）
+
+新增 `LogicState` / `MoveId` / `PhaseRemainingFrames` / `Recognition`（识别快照）。
+不变式：动作期间必须带 MoveId 且剩余 ≥ 1；待机必须无 MoveId 且剩余 0。
+`StateVersion` 1 → 2（格式边界标记；项目无序列化快照，无迁移负担）。
+仍不引入速度/重力/移动规则。
+
+### 演示配置（测试与 Godot 共用）
+
+| 角色 | 指令 → 招式 | 阶段帧数 |
+|---|---|---|
+| Kai | 236A → FireballPrototype | 4 / 3 / 8 |
+| Kai | 623A → DragonPunchPrototype | 3 / 5 / 10 |
+| Kai | 5A（裸按键）→ StandLightPunch | 3 / 2 / 6（仅站立） |
+| Rei | 236A → BackDraft（**同指令不同招式**） | 5 / 2 / 7 |
+| Rei | 214B → SweepPrototype | 3 / 4 / 9 |
+
+### 测试与构建（阶段 04 实测）
+
+新增 59 项（267 → **326**）：配置校验 19、状态机 13、消费契约 15、集成 12。
+既有 267 项全部保持通过；唯一断言更新是
+`BattleSimulationTests.Step_DoesNotMutateInputState` 的结果侧角色相等——
+按 D55 语义识别快照随权威状态合法推进，反修改契约改为断言输入状态本体不可变。
+
+| 项 | 结果 |
+|---|---|
+| `dotnet build core/BattleCore` | 0 警告 / 0 错误 |
+| `dotnet build NewKOF.csproj` | 0 警告 / 0 错误 |
+| 全量测试 | **326/326 通过** |
+| Godot 无头导入 | `[ DONE ]` |
+| Godot 图形运行 | 双方默认 `Standing`（`shots/p04_standing.png`）；P1 按住下 → `Crouching` 且 P2 独立 `Standing`（`shots/p04_crouch.png`）；5A → `StandLightPunch / Startup 2`（`shots/p04_5a_startup.png`）→ `Recovery 6`（`shots/p04_5a_recovery.png`）→ 按住 A 全程只发动一次、回到 `Standing`（`shots/p04_5a_done.png`）；236A → `FireballPrototype / Startup 3` 且 `P1 Command: 236A`（`shots/p04_236a_startup.png`） |
+
+HUD 九行只读权威状态（Logic Frame / 双人输入 / 双人 Command / 双人 State / 双人 Move），
+表现层不再持有识别器、不做任何状态机或计时。
+
+### 遗留限制（非阻塞）
+
+- 序列指令的「方向新进入」约束仍然生效：按住方向较久后按攻击键，不会触发以该方向
+  结尾的序列指令（如长按 ↓ 再按 A 不触发「↓+A」型指令）——裸按键指令（D56）不受影响；
+  若需「按住方向 + 按键」语义，应扩展容差锚点（记录为后续可选项）。
+- 动作只有阶段时间轴：无攻击判定、无伤害、无动画、无取消（按边界留给后续阶段）。
+- 快照/重放为内存语义；序列化格式与 `StateVersion` 升级机制仍未设计（K8）。
+
+---
+
+## 下一阶段计划：阶段 05（运动系统 / 判定与结算前置）
+
+**进入前必须先读** `ARCHITECTURE.md` 第 4 节（D37–D60：输入、指令、状态机与配置规则）与第 5 节。
+
+阶段 04 已正式结项（识别进内核 D55、裸按键 D56、动作状态字段 D57、状态机 D58、
+角色配置 D59、消费契约 D60）。后续阶段的自然入口：
+
+1. **定点数与运动**（阶段 05 的前置决策）：位置/速度格式（Q16.16 vs Q8.8）、
+   取整发生点——必须先定（ARCHITECTURE 第 5 节问题 2），再接 `FighterState.PositionX` 的
+   真实移动与 `LogicState` 的移动/跳跃扩展（Airborne 状态转换）。
+2. **攻击判定前置**：Startup/Active/Recovery 时间轴已就绪；判定框（AABB vs OBB）、
+   命中/伤害结算与事件流（`(frame, eventId)` 契约）是阶段 06 的入口。
+3. **招式数据外置**：`MoveDefinition` 目前是 C# 配置；角色专属数据量大后可外置 JSON
+   （识别器与状态机不感知数据来源）。
 
 **明确不需要**：
-- 不需要提前开发运动系统；
-- 不需要为 03B 修改 `FighterState`；
-- 不需要先确定运动定点数格式。
+- 不需要为阶段 05 修改识别器核心（`RecognitionState` 已稳定）；
+- 不需要提前设计连段/取消规则（依赖判定与结算先行）。
 
 **注意**：若要「后输入优先」SOCD，必须先扩展 `FrameInput` 记录事件顺序（D27 仍有效）。
 
-> 阶段 03B-2 已结项。接手后先看 `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test`
-> 确认 **257** 项通过再继续。
+> 阶段 04 已结项。接手后先看 `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test`
+> 确认 **326** 项通过再继续。
 
 **每完成一个子任务，立即更新本文件与 `AGENT_HANDOFF.md`。**
+

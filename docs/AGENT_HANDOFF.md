@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（03B 蓄力边界补修 D54）
+> 最后更新：2026-11-07（阶段 04 角色状态机与招式系统 —— 结项）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 267，已跳过: 0，总计: 267`
+期望：`失败: 0，通过: 326，已跳过: 0，总计: 326`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,32 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 04（2026-11-07）角色状态机与招式系统 —— 结项
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Commands/RecognitionState.cs` | **新增（D55）**：不可变的单玩家识别快照（方向历史/按键边沿/蓄力挂起/结果缓冲/消费标记）+ 纯函数 `Advance`——识别规则与 03B 完全一致（含 D54 下界），数据结构改为写时复制；结构化相等支撑跨实例确定性比较 |
+| `core/BattleCore/Commands/CommandRecognizer.cs` | 重写为 `RecognitionState` 的双玩家门面（公共 API 不变，267 项既有测试不动地通过） |
+| `core/BattleCore/Commands/CommandDefinition.cs` | **D56**：空方向序列 + 攻击键 = 裸按键指令（仅边沿当帧触发）；空 + 无按键仍拒绝 |
+| `core/BattleCore/Combat/FighterLogicState.cs` | **新增（D58）**：Standing/Crouching/Startup/Active/Recovery 枚举 + `MoveAllowedStates` |
+| `core/BattleCore/Combat/MoveDefinition.cs` | **新增（D59）**：招式定义（MoveId/CommandId/三阶段帧数/允许发动状态），阶段帧数 ≥ 1 校验 |
+| `core/BattleCore/Combat/FighterDefinition.cs` | **新增（D59）**：角色专属指令表 + 招式表，构造期校验（重复 ID/未知指令）+ 防御复制 |
+| `core/BattleCore/Combat/FightRoster.cs` | **新增（D59）**：双方角色配置（`CreateEmpty` 保持 01–03 默认行为） |
+| `core/BattleCore/Combat/DemoRoster.cs` | **新增**：演示角色 Kai/Rei（同 236A 指令 → 不同招式不同帧数；Kai 有裸按键 5A） |
+| `core/BattleCore/Combat/FighterStateMachine.cs` | **新增（D58/D60）**：集中纯函数 `Tick`：阶段推进 → 待机更新（B9）→ 消费（FIFO、每结果一次、失败保留） |
+| `core/BattleCore/State/FighterState.cs` | **D57**：新增 LogicState/MoveId/PhaseRemainingFrames/Recognition；Validate 强制不变式 |
+| `core/BattleCore/State/BattleState.cs` | `CreateDefault` 版本默认 2（D57） |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | **D55/D58**：Step 内完成「识别 → 消费 → 状态机推进」（零帧延迟）；接受 `FightRoster` |
+| `core/BattleCore/Simulation/BattleSession.cs` | 新增可选 `simulation` 参数（观察者与 Faulted 机制不变） |
+| `core/BattleCore/BattleCoreInfo.cs` | CoreVersion 1 → 2 |
+| `scripts/BattleScene.cs` | 移除表现层识别器；HUD 九行只读权威状态（State/Move 行新增）；会话改传演示配置 |
+| `scenes/Battle.tscn` | HUD 面板扩到 330×264 容纳九行 |
+| `tests/BattleCore.Tests/…` | 新增 4 个测试文件 59 项（配置 19/状态机 13/消费 15/集成 12）；`BattleSimulationTests` 反修改断言按 D55 语义更新；`CommandRecognitionTests` 空序列校验按 D56 细化 |
+
+**验收**：326/326；双工程 0 警告 0 错误；无头导入 `[ DONE ]`；图形运行六张截图
+（Standing / Crouching+独立 / 5A Startup→Recovery→按住不重复回 Standing / 236A→FireballPrototype），
+HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 ### 03B 蓄力边界最终补修（2026-11-07）释放后旧方向借用（D54）
 
@@ -446,8 +472,11 @@ cd /d C:\Users\32360\Desktop\NewKOF
 | K24 | **蓄力匹配不检查 `MaxSequenceFrames`**（D51） | 蓄力指令的超时语义 = 释放窗口（默认 3 帧）+ 按键容差；定义里的 60 帧跨度值对蓄力无效 | 设计如此：保持时长与序列跨度是两个概念；若要限制蓄力指令整体时长，应另加显式配置而不是复用跨度 |
 | K25 | **释放窗口只容忍中立与尾段方向**（D52） | 蓄力释放后输入任何无关方向（含斜方向）立即失效，不能在窗口内「绕路」 | 设计如此（明确规则）；若要放宽需在 `CommandDefinition` 加显式配置 |
 | K26 | **`CaptureHelper --maxfps=` 只影响调试验收运行** | 锁定渲染帧率使注入时序可复现；正常启动不传参则零改动 | 仅与 `--shot=` 同用时生效（`_Ready` 里解析，无 `--shot=` 时节点直接禁用） |
+| K27 | **序列指令要求「末方向新进入」** | 按住某方向较久后按攻击键，不会触发以该方向结尾的序列指令（按键容差从末方向**进入帧**起算）——如长按 ↓ 再按 A 不触发「↓+A」型指令 | D39 的既有语义在长按场景的自然结果；「无方向要求」的基础动作用裸按键指令（D56）表达。若要「按住方向 + 按键」，应扩展容差锚点（显式设计，勿放宽默认） |
+| K28 | **识别状态与动作状态随快照推进** | `FighterState` 每帧都产生新实例（识别历史合法前进）；跨实例比较依赖 `RecognitionState` 的结构化相等 | D55 设计如此；不要把识别状态移出权威快照（会破坏重放契约 B6.3/6.8） |
+| K29 | **`StateVersion` 已升到 2 / CoreVersion 2** | 阶段 04 改变了 FighterState 格式（动作状态 + 识别快照） | 项目无序列化快照，无迁移负担；未来引入序列化时以版本号分支（K8 仍有效） |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 03B-2 最终补修验收时 257/257 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 04 验收时 326/326 测试通过，可正常启动运行。
 
 ---
 
@@ -467,18 +496,24 @@ cd /d C:\Users\32360\Desktop\NewKOF
   - **03B-2：`feat(input): implement charge and advanced commands`（`c098f40`），已推送。**
   - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本节记录的是写文档时的状态，
     不要当作实时 HEAD。
-  - **本轮 03B-2 最终补修：`fix(input): finalize charge timing and command timeout`**
+  - **本轮 03B-2 最终补修：`fix(input): finalize charge timing and command timeout`（`0843dd6`），已推送。**
+  - **03B 边界补修：`fix(input): prevent stale direction reuse after charge release`（`5434c5b`），已推送。**
+  - **本轮阶段 04：`feat(combat): implement phase 04 fighter state machine`**
     （创建后用 `git rev-parse HEAD` 读取 SHA）。提交内容：
     ```
-    修改: core/BattleCore/Commands/CommandDefinition.cs
-          core/BattleCore/Commands/CommandRecognizer.cs
-          core/BattleCore/Commands/CommandCatalog.cs
-          scripts/CaptureHelper.cs
-          tests/BattleCore.Tests/ChargeCommandTests.cs
-          tests/BattleCore.Tests/DoubleMotionCommandTests.cs
+    新增: core/BattleCore/Commands/RecognitionState.cs
+          core/BattleCore/Combat/{FighterLogicState,MoveDefinition,FighterDefinition,
+                                  FightRoster,DemoRoster,FighterStateMachine}.cs
+          tests/BattleCore.Tests/{FighterDefinitionTests,FighterStateMachineTests,
+                                  MoveConsumptionTests,Phase04IntegrationTests}.cs
+    修改: core/BattleCore/Commands/{CommandDefinition,CommandRecognizer}.cs
+          core/BattleCore/State/{BattleState,FighterState}.cs
+          core/BattleCore/Simulation/{BattleSimulation,BattleSession}.cs
+          core/BattleCore/BattleCoreInfo.cs
+          scripts/BattleScene.cs  scenes/Battle.tscn
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **工作区：干净**（03B-2 最终补修已提交并推送后）。
+  - **工作区：干净**（阶段 04 提交并推送后）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -529,7 +564,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 **按顺序阅读：**
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
-2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D53 决策）与第 5 节（未决定问题）
+2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D60 决策）与第 5 节（未决定问题）
 3. `docs/PROGRESS.md` — 已完成/未完成边界、191 项测试、下一阶段计划
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
@@ -574,9 +609,14 @@ cd /d C:\Users\32360\Desktop\NewKOF
    双重/超必杀指令（236236A/214214B/623623A，D50）。**只处理输入与整数逻辑帧**。
 4b. ~~阶段 03B-2 最终补修~~ **已完成并推送**（长蓄力解耦 D51、释放窗口 D52、
    一次性消费 D53、双重超时边界测试）。**03B-2 正式结项**。
-4c. **阶段 04 入口**：按角色拆分指令表（`CommandCatalog` 目前是全局默认表）、
-   招式系统消费接口（`TryConsume` 语义）。**仍未做**：蓄力「斜方向计入」的放宽配置
-   （当前严格纯方向，释放窗口已独立配置）。
+4c. ~~阶段 04 入口：按角色指令表 / 消费接口~~ **已完成并推送**：识别进内核（D55）、
+   裸按键指令（D56）、FighterState 扩展（D57）、状态机（D58）、角色配置（D59）、
+   消费契约（D60）。**阶段 04 正式结项**。仍未做：序列指令的「按住方向 + 按键」容差锚点（K27）、
+   招式判定/伤害/动画、运动系统。
+4d. **阶段 05 入口**：先定定点数格式（ARCHITECTURE 第 5 节问题 2），再接移动/跳跃
+   （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
+   **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
+   必须保持不可变快照契约（D57）。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
 6. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
    与 `NewKOF.csproj` 的 `Compile Include`。
@@ -621,13 +661,16 @@ cd /d C:\Users\32360\Desktop\NewKOF
 - [ ] 方向历史按「变化」压缩，每个条目用**当帧朝向**解析；换边不得重算历史条目
 - [ ] 蓄力匹配读「释放挂起」槽位而不是历史首条目（D51）：长蓄力条目被裁剪仍能识别，
       `MaxSequenceFrames` 不约束蓄力；挂起槽位 = 每指令一个，内存恒定
-- [ ] 释放窗口语义（D52）：中立/尾段容忍、无关方向立即失效、不足不补、按回蓄力方向重新计数
+- [ ] 释放窗口语义（D52/D54）：中立/尾段容忍、无关方向立即失效、不足不补、按回蓄力方向重新计数、
+      尾段必须属于本次释放之后（下界）
 - [ ] 产生过候选的蓄力指令挂起立即作废（D53）：同一蓄力不得二次触发
+- [ ] 识别状态为不可变 `RecognitionState` 并随 `FighterState` 进快照（D55）：
+      `Advance` 纯函数、结构化相等、Step 内零帧延迟完成识别→消费→推进
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向
 - [ ] `Observe` 帧号严格逐帧连续（首次任意非负），非法帧先抛后不改内部状态
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D53）与代码实现一致
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D60）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

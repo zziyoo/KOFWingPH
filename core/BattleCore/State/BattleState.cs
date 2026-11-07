@@ -42,8 +42,12 @@ public sealed record BattleState
             ? Fighters[index]
             : throw new ArgumentOutOfRangeException(nameof(index), index, "阶段 01 仅支持 1v1（索引 0/1）。");
 
-    /// <summary>创建阶段 01 的默认对局状态：两名满血角色面对面站立。</summary>
-    public static BattleState CreateDefault(int stateVersion = 1) => new(
+    /// <summary>
+    /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
+    /// 状态格式版本 2 = 阶段 04（FighterState 增加动作状态与识别快照字段；
+    /// 项目尚无序列化快照，无迁移负担，版本号标记格式边界）。
+    /// </summary>
+    public static BattleState CreateDefault(int stateVersion = 2) => new(
         frame: 0,
         fighters: new[]
         {
