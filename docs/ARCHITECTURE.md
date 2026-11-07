@@ -109,7 +109,7 @@ NewKOF (表现层)  ─────────┘
 
 **阶段 02 补修后的关键分工**：时间调度逻辑**已全部移出 Godot 层**，位于
 `core/BattleCore/Simulation/FixedStepScheduler.cs`。`BattleScene._Process`
-只调用 `_session.Advance(delta, inputProvider: null)`。
+只调用 `_session.Advance(delta, inputSource: <输入缓冲>)`。
 
 **记账职责链（阶段 02 补修 + 阶段 03A 补修）**：
 
@@ -118,14 +118,25 @@ BattleScene._Process(delta)
    └─> BattleSession.Advance(delta, inputSource: buffer)
          ├─> Scheduler.Advance(delta)              // 只消耗时间预算，返回可推进帧数
          ├─> 循环: buffer.Prepare(frame)           // 只计算输入，不改历史/不清边沿
-         │         → BattleSimulation.Step(state, input)
-         │         → buffer.Commit(input)          // 模拟成功后才写历史、消费边沿
-         │         → Scheduler.CommitStep()
+         │         → BattleSimulation.Step(...)    // 算出候选状态，暂不赋值
+         │         → buffer.Commit(input)          // 成功后才写历史、消费边沿
+         │         → CurrentState = nextState      // 提交成功后才落权威状态
+         │         → Scheduler.CommitStep()        // 最后记账
          └─> 异常时: Scheduler.RecordDroppedSteps(剩余预算) + throw
 ```
 
+**提交顺序的异常语义（阶段 03A 最终补修）**：
+
+- 候选状态在 `Commit` 成功之前**不赋值**，因此 `Step()` 失败或 `Commit()` 失败都
+  不会让 `CurrentState` 或 `TotalSteps` 前进，`Frame - 初始帧号 == TotalSteps` 不被破坏。
+- `Commit()` 失败时该帧不写输入历史、不清按下边沿，重试同一帧得到同一输入。
+- `IInputSource.Commit()` 的契约是**「失败必须无副作用」**。`InputBuffer` 通过
+  「先完成所有校验，再写历史/清边沿」满足它；第三方实现必须自行保证。
+  `BattleSession` 只保证自己的状态与计数不被污染，**不假装**能回滚第三方输入源的内部改动。
+- 普通 `Func<int,FrameInput>` 输入源无法回滚，契约要求「同一帧号返回同一输入（幂等）」。
+
 **输入提交不变量**：`History` 为空（尚未提交）或 `History[^1].Frame == CurrentState.Frame - 1`，
-用 `InputBuffer.IsAlignedWith(frame)` 断言。模拟失败的那一帧**不会**出现在历史里。
+用 `InputBuffer.IsAlignedWith(frame)` 断言。模拟或提交失败的那一帧**不会**出现在历史里。
 
 **核心帧同步不变量**（可用 `BattleSession.IsFrameSyncIntact` 断言）：
 
@@ -216,6 +227,7 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 |---|---|---|
 | **D34** | **`History` 用 `ReadOnlyCollection<T>` 包装底层 `List`；默认只保留最近 600 帧（`IsHistoryTruncated` 标记淘汰）** | `IReadOnlyList<T>` 只是接口：实测外部可强转回 `List<FrameInput>` 并 `Add/Clear` 改写内部状态。改为构造时创建**单实例**只读包装（不产生每次访问的拷贝）：强转 `List` 返回 null，`IList<T>.Add` 抛 `NotSupportedException`。容量上限把「指令识别短期历史（10 秒窗口）」与「完整录像」分开，后者需要独立系统。对齐判断改用 `IsAlignedWith(frame)`（最后一帧 == frame-1），**不用** `History.Count == Frame`——有容量上限后该等式不再成立。 |
 | **D35** | **输入两阶段提交：`IInputSource.Prepare` → `Step()` → `Commit()`** | 旧 `Take()` 立即写历史并清边沿，`Step()` 失败后留下幻影帧，重试同一帧还会因帧号不连续而抛异常（已用复现测试证实）。现在：准备阶段不写历史/不清边沿；模拟成功后才提交输入，再记账。失败帧不写入历史、不消费边沿，重试得到同一输入。`Take()` 收为 `internal`，防止表现层把它当作 `Func<int,FrameInput>` 传给会话。 |
+| **D36** | **候选状态最后落盘：`nextState` 在 `Commit` 成功前不赋给 `CurrentState`** | 旧顺序「`CurrentState = Step(...)` → `Commit` → `CommitStep`」在 `Commit` 抛异常时会让状态前进而计数不动，直接破坏帧同步不变量（已用 `CommitFailSource` 复现：帧号 1 vs 期望 0）。现改为 `nextState = Step(...)`（局部变量）→ `Commit` → `CurrentState = nextState` → `CommitStep`。`Advance` 与 `StepExact` 共用该顺序。 |
 
 
 

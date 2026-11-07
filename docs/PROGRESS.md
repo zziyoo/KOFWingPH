@@ -1,6 +1,6 @@
 # PROGRESS.md — NewKOF 开发进度
 
-> 最后更新：2026-11-07（阶段 03A 专项补修完成并推送 `f145275`）
+> 最后更新：2026-11-07（阶段 03A 结项：最终补修完成，已提交并推送）
 
 ---
 
@@ -10,7 +10,9 @@
 **阶段 02：固定逻辑帧与模拟调度验收 — ✅ 已完成**
 **阶段 02 补修：战斗状态与调度器帧同步 — ✅ 已完成（已提交 `850c4db`）**
 **阶段 03A：基础输入链路 — ✅ 已完成（已提交 `0be9919` 并推送）**
-**阶段 03A 专项补修：输入一致性与调试工具 — ✅ 已完成（已提交 `f145275` 并推送，141 项测试通过）**
+**阶段 03A 专项补修：输入一致性与调试工具 — ✅ 已完成（已提交 `f145275` 并推送）**
+**阶段 03A 最终补修：输入与战斗状态原子提交 — ✅ 已完成（已提交 `0bd0c6d` 并推送）**
+**阶段 03A — ✅ 正式结项**
 
 ---
 
@@ -77,6 +79,75 @@ F1 切换暂停（只阻止时间驱动推进，不影响显式单步）。
   `_Input → KeyboardInputMap → InputBuffer` 路径；OS 级按键注入被安全策略拦截，未使用。
 - 暂停截图在 200 个渲染帧后仍停在逻辑帧 21，证明暂停确实阻止了时间驱动推进。
 - 启动首帧丢弃 1~4 帧（渲染尖峰），告警只输出一次。
+
+---
+
+## 阶段 03A 最终补修（2026-11-07）——输入与战斗状态原子提交
+
+### 缺陷（P1）
+
+`BattleSession.Advance()` / `StepExact()` 的顺序是
+`CurrentState = Step(...)` → `Commit()` → `CommitStep()`。
+若 `Commit()` 抛异常，**战斗状态已推进、调度器未记账**，`Frame - 初始帧号 == TotalSteps` 被破坏。
+
+### 复现（修复前实测）
+
+新增 `CommitFailSource`（`Step` 成功、`Commit` 按帧号抛异常，自身无写入）：
+
+| 用例 | 修复前实测 | 期望 |
+|---|---|---|
+| `Advance_CommitThrows_DoesNotAdvanceStateOrAccount` | 帧号 **1** | 0 |
+| `StepExact_CommitThrows_DoesNotAdvanceStateOrAccount` | 帧号 **1** | 0 |
+| `MultiFrameBatch_CommitFailureAtSecondFrame_KeepsOnlyCommittedFrames` | 帧号 **2** | 1 |
+| `CommitFailure_ThenRetry_CommitsEdgeExactlyOnce` | 帧号 **1** | 0 |
+
+（4 项在旧实现上失败，修复后全部通过。）
+
+### 最终提交顺序（D36）
+
+```
+nextState = BattleSimulation.Step(CurrentState, input).State   // 候选状态，不赋值
+inputSource?.Commit(input)                                     // 成功后才写历史/清边沿
+CurrentState = nextState                                       // 落权威状态
+Scheduler.CommitStep()                                         // 最后记账
+```
+
+`Advance` 与 `StepExact` **共用同一顺序**。
+
+- `Step()` 失败 → 状态、计数、历史、边沿全部不变；预算记为丢弃。
+- `Commit()` 失败 → 同上；`nextState` 被丢弃，重试同一帧得到同一输入。
+- 批中失败 → 前序帧完整保留（状态 + 计数 + 历史三者一致）。
+
+### `InputBuffer.Commit()` 的原子性
+
+校验（帧号连续性、提交输入 == 当前采样）**全部在写入之前**完成，
+失败时 `History`、`pending`、`CoalescedPressCount` 均不变。
+第三方 `IInputSource` 必须自行满足「失败无副作用」；`BattleSession` 只保证自身状态与计数
+不被污染，不为第三方内部状态背书（已写入 `ARCHITECTURE.md` 与 `IInputSource` 文档）。
+
+### 验收（实际执行）
+
+| 项 | 结果 |
+|---|---|
+| BattleCore 独立构建 | 0 错误 |
+| 根工程编译 | 0 警告 0 错误 |
+| 全部单元测试 | **147/147 通过**（141 + 新增 6） |
+| 阶段 02 调度器相关回归 | 79/79 通过（调度器 / 帧同步 / 记账 / 数值 / 确定性） |
+| Godot 无头导入 | `[ DONE ]` |
+| Godot 图形运行 | 双人输入 + F1 暂停均正常；见下 |
+
+**图形运行证据** `shots/final_03a.png`：
+
+```
+[CaptureHelper] 渲染帧 20 注入 D/J/Left/Kp1 按下（当时逻辑帧 19）
+[CaptureHelper] 渲染帧 80 注入 F1 按下（当时逻辑帧 45）
+[CaptureHelper] 截图已保存（渲染帧 150，逻辑帧 45）
+HUD：Logic Frame: 45 [PAUSED · F1] / P1: R A / P2: L A
+```
+
+渲染帧从 80 推到 150，逻辑帧仍停在 45 → 暂停有效、无幽灵帧；两名玩家输入同时被记录。
+
+**阶段 03A 正式结项。**
 
 ---
 
@@ -288,9 +359,9 @@ cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
 
-**最近一次实际运行结果（2026-11-07，阶段 03A 专项补修后实测）**
+**最近一次实际运行结果（2026-11-07，阶段 03A 最终补修后实测）**
 ```
-已通过! - 失败: 0，通过: 141，已跳过: 0，总计: 141，持续时间: 184 ms - BattleCore.Tests.dll (net8.0)
+已通过! - 失败: 0，通过: 147，已跳过: 0，总计: 147，持续时间: 215 ms - BattleCore.Tests.dll (net8.0)
 ```
 
 | 测试文件 | 用例数（`--list-tests` 实测） | 内容 |
@@ -305,8 +376,8 @@ dotnet test
 | `InputBufferTests.cs` | 13 | **03A**：电平/边沿/双人独立/历史连续性 |
 | `DirectionResolverTests.cs` | 10 | **03A**：SOCD 与相对朝向 |
 | `InputPipelineTests.cs` | 7 | **03A**：输入与逻辑帧绑定、暂停、多帧批次 |
-| `InputIntegrityTests.cs` | 18 | **03A 补修**：只读历史、两阶段提交、失败恢复、容量 |
-| **合计** | **141** | 与 `dotnet test` 的「总计: 141」一致 |
+| `InputIntegrityTests.cs` | 24 | **03A 补修**：只读历史、两阶段提交、失败恢复、容量、**Commit 失败不前进状态** |
+| **合计** | **147** | 与 `dotnet test` 的「总计: 147」一致 |
 
 > 说明：上表是 **xUnit 用例数**（`Theory` 的每个 `InlineData` 计一条），不是方法数。
 > 早先版本按方法数填写，与「总计」对不上，已按 `--list-tests` 实测校正。
@@ -434,25 +505,29 @@ dotnet test
 
 ---
 
-## 下一阶段计划（阶段 03B 建议）
+## 下一阶段计划：阶段 03B —— 拳皇式指令识别
 
-**进入前必须先读** `ARCHITECTURE.md` 第 4 节（D26–D33 输入规则）与第 5 节。
+**进入前必须先读** `ARCHITECTURE.md` 第 4 节（D26–D36 输入规则）与第 5 节。
 
-阶段 02 解决「何时推进逻辑帧」，阶段 03A 解决「输入如何绑定逻辑帧」，
-阶段 03B 起解决「推进时发生什么」：
+阶段 03A 已把「输入逐帧绑定到逻辑帧」做扎实。阶段 03B **只做指令识别**，
+仍然只处理输入与整数逻辑帧：
 
-1. **决策落定**：定点数格式（Q16.16 / Q8.8）、碰撞几何（AABB/OBB）、
-   帧内阶段划分（至少 P0/P4/P8）。写入 `ARCHITECTURE.md` 第 4 节。
-2. **运动系统**：`FighterState` 增加速度字段，实现 `MovementSystem.Integrate`
-   （走/跳/重力 + 地面边界），保持整数/定点；方向用 `DirectionResolver` 的
-   `RelativeInput`（**不要**在运动系统里再解析原始 `InputBits`）。
-3. **碰撞与推挤**：AABB pushbox 推挤，先只做身位不重叠。
-4. **指令识别**（独立阶段，不要与运动混做）：↓↘→、→↓↘、蓄力、缓冲取消。
-   若需要「后输入优先」SOCD，必须先扩展 `FrameInput` 记录事件顺序。
-5. **测试扩展**：每项新规则补确定性测试；建立「黄金帧序列」回归测试。
-6. **不要**在本阶段引入攻击/伤害（那是后续阶段）。
+1. **方向指令**：↓↘→、→↓↘、←↙↓↘→ 等的窗口与序列匹配（基于 `InputBuffer.History` 的逐帧电平）。
+2. **蓄力指令**：←（保持 N 帧）→ 的计数窗口。
+3. **输入缓冲**：预输入窗口、取消窗口（只在输入层排队，不涉及招式/状态机）。
+4. **换边识别**：`Facing` 变化时如何重置方向序列（依赖 `DirectionResolver` 的绝对/相对分层）。
+5. **指令优先级**：同一帧命中多条指令时的裁定顺序。
+6. **测试**：指令识别必须是纯函数 + 逐帧日志输入驱动，保持确定性可重放。
 
-> 阶段 03A 已提交并推送（`0be9919`）。接手后先看
-> `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test` 确认 123 项通过再继续。
+**明确不需要（本轮任务已确认）**：
+- 不需要提前开发运动系统；
+- 不需要为 03B 修改 `FighterState`；
+- 不需要先确定运动定点数格式（那是运动阶段的前置，不是指令识别的前置）。
+- 不实现攻击、碰撞、伤害、状态机。
+
+**注意**：若 03B 需要「后输入优先」SOCD，必须先扩展 `FrameInput` 记录事件顺序。
+
+> 阶段 03A 已结项。接手后先看 `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test`
+> 确认 **147** 项通过再继续。
 
 **每完成一个子任务，立即更新本文件与 `AGENT_HANDOFF.md`。**
