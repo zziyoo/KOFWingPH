@@ -55,7 +55,9 @@ public readonly record struct FighterState(
     FixedPoint VelocityY = default,
     JumpKind JumpKind = Combat.JumpKind.None,
     bool UpHeldLastFrame = false,
-    int StunRemainingFrames = 0)
+    int StunRemainingFrames = 0,
+    int MoveStartedFrame = -1,
+    int LastHitAttackStartFrame = -1)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -169,6 +171,21 @@ public readonly record struct FighterState(
             {
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于 {LogicState} 但携带硬直剩余帧数 {StunRemainingFrames}（必须为 0）。");
+            }
+
+            // 攻击实例身份（阶段 06C，D81）：动作期间必须携带发动帧（≥ 0），
+            // 非动作状态必须为 -1——「发动帧 + 攻击者 ID」构成攻击实例唯一标识，
+            // 供重复命中抑制与事件流使用。被击记录无不变式（单调记录，随快照携带）。
+            if (IsInMove)
+            {
+                if (MoveStartedFrame < 0)
+                    throw new InvalidOperationException(
+                        $"角色 {Id} 处于 {LogicState} 但缺少攻击发动帧（MoveStartedFrame={MoveStartedFrame}）。");
+            }
+            else if (MoveStartedFrame != -1)
+            {
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于非动作状态 {LogicState} 但携带攻击发动帧 {MoveStartedFrame}（必须为 -1）。");
             }
         }
     }

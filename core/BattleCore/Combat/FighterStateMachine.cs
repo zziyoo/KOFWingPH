@@ -21,7 +21,8 @@ public readonly record struct FighterActionTick(
     RecognitionState Recognition,
     CommandMatch? ConsumedMatch,
     JumpLaunch? Launch = null,
-    int StunRemainingFrames = 0);
+    int StunRemainingFrames = 0,
+    int MoveStartedFrame = -1);
 
 /// <summary>
 /// 角色<b>动作状态机</b>（阶段 04/05B）：集中、显式、纯函数的状态转换。
@@ -72,6 +73,8 @@ public static class FighterStateMachine
     /// 默认 false——首次观察时「按住上」即视为新按下）。</param>
     /// <param name="stunRemainingFrames">帧开始时的硬直剩余帧数（Hitstun/Blockstun 状态使用，
     /// 其他状态为 0；阶段 06B，D78）。</param>
+    /// <param name="moveStartedFrame">帧开始时的攻击发动帧（动作实例身份，阶段 06C，D81；
+    /// 非动作状态为 -1。动作阶段间携带，消费同帧赋值为当帧号）。</param>
     public static FighterActionTick Tick(
         FighterLogicState state,
         string? moveId,
@@ -81,7 +84,8 @@ public static class FighterStateMachine
         FighterDefinition definition,
         int frame,
         bool upHeldLastFrame = false,
-        int stunRemainingFrames = 0)
+        int stunRemainingFrames = 0,
+        int moveStartedFrame = -1)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -107,16 +111,19 @@ public static class FighterStateMachine
 
             int remaining = phaseRemainingFrames - 1;
             if (remaining > 0)
-                return new FighterActionTick(state, moveId, remaining, recognition, ConsumedMatch: null);
+                return new FighterActionTick(state, moveId, remaining, recognition, ConsumedMatch: null,
+                    MoveStartedFrame: moveStartedFrame);
 
             switch (state)
             {
                 case FighterLogicState.Startup:
                     return new FighterActionTick(FighterLogicState.Active, moveId,
-                        move.ActiveFrames, recognition, ConsumedMatch: null);
+                        move.ActiveFrames, recognition, ConsumedMatch: null,
+                        MoveStartedFrame: moveStartedFrame);
                 case FighterLogicState.Active:
                     return new FighterActionTick(FighterLogicState.Recovery, moveId,
-                        move.RecoveryFrames, recognition, ConsumedMatch: null);
+                        move.RecoveryFrames, recognition, ConsumedMatch: null,
+                        MoveStartedFrame: moveStartedFrame);
                 case FighterLogicState.Recovery:
                     // 收招完成 → 回到待机；同帧继续走待机更新、起跳与消费（B5）。
                     break;
@@ -196,13 +203,14 @@ public static class FighterStateMachine
             if ((move.AllowedFrom & required) == 0)
                 continue; // 当前待机状态不允许发动 → 保留，恢复可行动后再消费（B5）。
 
-            // 消费一次（不可变替换），进入 Startup。
+            // 消费一次（不可变替换），进入 Startup；攻击实例身份 = 当帧发动帧（D81）。
             return new FighterActionTick(
                 FighterLogicState.Startup,
                 move.MoveId,
                 move.StartupFrames,
                 recognition.WithResultConsumed(match.RecognizedFrame),
-                match);
+                match,
+                MoveStartedFrame: frame);
         }
 
         return new FighterActionTick(idle, MoveId: null, 0, recognition, ConsumedMatch: null);

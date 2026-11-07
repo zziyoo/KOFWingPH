@@ -44,10 +44,10 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 5 = 阶段 06B（FighterState 新增硬直剩余帧数字段与 Hitstun/Blockstun
-    /// 状态，接入命中/伤害/防御结算；项目尚无序列化快照，无迁移负担，版本号标记格式边界）。
+    /// 状态格式版本 6 = 阶段 06C（FighterState 新增攻击发动帧与被击实例记录，
+    /// 接入重复命中抑制与事件流；项目尚无序列化快照，无迁移负担，版本号标记格式边界）。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 5) => new(
+    public static BattleState CreateDefault(int stateVersion = 6) => new(
         frame: 0,
         fighters: new[]
         {

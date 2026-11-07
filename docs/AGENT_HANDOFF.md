@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 06B：命中/伤害/防御/硬直，D77–D80）
+> 最后更新：2026-11-07（阶段 06C：攻击实例去重 + 确定性事件流，D81–D83——阶段 06 结项）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 528，已跳过: 0，总计: 528`
+期望：`失败: 0，通过: 540，已跳过: 0，总计: 540`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,26 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 06C（2026-11-07）攻击实例去重、确定性事件流（D81–D83）—— 阶段 06 结项
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/State/FighterState.cs` | **D81**：新增 `MoveStartedFrame`（动作实例身份，消费同帧赋值）+ `LastHitAttackStartFrame`（被击者已结算记录）；Validate：动作中 ≥ 0、非动作 −1 |
+| `core/BattleCore/Combat/FighterStateMachine.cs` | 消费同帧赋发动帧；动作阶段间携带；`FighterActionTick.MoveStartedFrame` |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | **D81 去重**：结算前比对「攻击者发动帧 vs 被击者记录」，同实例跳过（被防御也算已结算）；命中/防御写入记录、中断清空发动帧。**D82 事件**：`CollectEvents`（MoveStarted → AttackActive → 逐被击者 Hit/Blocked + 硬直开始，EventId = Frame×16+序号，上限 16 显式失败） |
+| `core/BattleCore/Simulation/BattleEvent.cs` | **新增**：`BattleEventType` + `BattleEvent`（不可变值类型） |
+| `core/BattleCore/Simulation/BattleStepResult.cs` | 新增 `Events`（只读包装） |
+| `core/BattleCore/Simulation/BattleSession.cs` | **D83**：新增 `eventsCommitted` 观察者（frameCommitted 后、同一 try/catch，Faulted 语义一致）；Advance/StepExact 捕获 Step 结果投递事件 |
+| `core/BattleCore/Combat/HitDetection.cs` | Contacts 只读包装（D61 先例） |
+| `core/BattleCore/State/BattleState.cs` / `BattleCoreInfo.cs` | StateVersion/CoreVersion 5 → 6 |
+| `scripts/BattleScene.cs` + `Battle.tscn` | HUD 事件行（最近一帧事件：类型/双方/招式/数值/EventId） |
+| `tests/BattleCore.Tests/CombatEventTests.cs` | **新增 12 项**（去重 4、事件 4、会话 3、长跑 1） |
+
+**验收**：540/540；四构建 0/0；无头导入 `[ DONE ]`；图形运行命中帧事件行
+（`Event: HitstunStarted P1→P2 StandLightPunch 12 (id=1730)`，EventId 公式一致）、
+单次命中（970）、防御不掉血（1000 + Blockstun）。
+**注意**：多帧攻击的重复结算由 D81 去重消除——06B 时代的「Blockstun 穿透」与「多帧双扣」已不复存在。
 
 ### 阶段 06B（2026-11-07）命中、伤害、防御与硬直（D77–D80）
 
@@ -650,16 +670,23 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/{GroundMovementTests,FighterStateValidationTests,FighterStateMachineTests}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **本轮阶段 05 专项补修：`fix(movement): resolve corner push and ground crossing edge cases`**
+  - **阶段 05 专项补修：`fix(movement): resolve corner push and ground crossing edge cases`（`252758c`），已推送。**
+  - **阶段 06A：`feat(combat): implement deterministic AABB hit detection`（`4ab34fc`），已推送。**
+  - **阶段 06B：`feat(combat): implement hit damage guard and stun`（`90cf0c9`），已推送。**
+  - **本轮阶段 06C：`feat(combat): add deterministic combat events and hit deduplication`**
     （创建后用 `git rev-parse HEAD` 读取 SHA）。提交内容：
     ```
-    修改: core/BattleCore/Simulation/{BattleSimulation,StageDefinition}.cs
-          core/BattleCore/State/FighterState.cs
-          tests/BattleCore.Tests/{StageBoundaryTests,JumpTests}.cs
-    新增: tests/BattleCore.Tests/GroundCrossingTests.cs（含 .uid）
-    修改: docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    新增: core/BattleCore/Simulation/BattleEvent.cs
+          tests/BattleCore.Tests/CombatEventTests.cs（含 .uid）
+    修改: core/BattleCore/State/{FighterState,BattleState}.cs
+          core/BattleCore/Combat/{FighterStateMachine,HitDetection}.cs
+          core/BattleCore/Simulation/{BattleSimulation,BattleStepResult,BattleSession}.cs
+          core/BattleCore/BattleCoreInfo.cs
+          scripts/BattleScene.cs  scenes/Battle.tscn
+          tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **工作区：干净**（阶段 05 专项补修提交并推送后）。
+  - **工作区：干净**（阶段 06C 提交并推送后）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -794,7 +821,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 485」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 540」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -830,6 +857,13 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
       **帧开始双方都在地面时禁止单帧交换左右（防高速穿越）**，越身/落地帧以候选顺序为准；
       朝向帧末更新、仅地面待机、等距保持；输入始终按帧开始朝向解析（D46 不变）
 - [ ] `StageDefinition` 只接受 GroundY=0（D74）；`JumpKind` 在 Validate 完整枚举校验（D75）
+- [ ] 攻击判定（D76）：`FixedRect` 正面积重叠（边接触不算）；Hitbox 仅 Active 配置帧范围生效；
+      镜像只按权威 Facing；不检测自己；Godot 调试框只在顶层节点绘制（父节点 _Draw 会被背景遮挡）
+- [ ] 结算（D77–D80）：高度表 GuardCovers 唯一事实来源；防御 = 站/蹲待机 + 按住后（帧开始朝向）；
+      命中 max(0, HP−Damage) + Hitstun；双方结果并行解析统一应用（无先手）；空中被击跳过
+- [ ] 去重与事件（D81–D83）：同实例（攻击者+发动帧）对同一目标只结算一次（被防御也算）；
+      EventId = Frame×16+帧内序号；事件由 Step 产生、Session 提交后才投递（失败帧零事件）；
+      eventsCommitted 异常进入 Faulted；Recover 不重发（消费者按 EventId 去重）
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向

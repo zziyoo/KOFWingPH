@@ -85,6 +85,8 @@ public sealed class BattleSimulation
         public bool BackHeld;
         public int Health;
         public int StunRemainingFrames;
+        public int MoveStartedFrame;
+        public bool MoveStartedThisFrame;
 
         /// <summary>是否处于地面可转向状态（站立/蹲下；动作与空中朝向冻结，D72）。</summary>
         public readonly bool CanTurn =>
@@ -134,7 +136,8 @@ public sealed class BattleSimulation
                 definition,
                 state.Frame,
                 fighter.UpHeldLastFrame,
-                fighter.StunRemainingFrames);
+                fighter.StunRemainingFrames,
+                fighter.MoveStartedFrame);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -194,6 +197,8 @@ public sealed class BattleSimulation
                 BackHeld = resolved.Back,
                 Health = fighter.Health,
                 StunRemainingFrames = tick.StunRemainingFrames,
+                MoveStartedFrame = tick.MoveStartedFrame,
+                MoveStartedThisFrame = tick.ConsumedMatch is not null,
             };
         }
 
@@ -229,15 +234,21 @@ public sealed class BattleSimulation
                 UpHeldLastFrame = candidates[i].UpHeld,
                 Health = candidates[i].Health,
                 StunRemainingFrames = candidates[i].StunRemainingFrames,
+                MoveStartedFrame = candidates[i].MoveStartedFrame,
             };
         }
 
-        // ── 第 6 阶段：命中结算（D78/D79/D80）——接触检测 + 双方同时判定（互不先手）。
+        // ── 第 6 阶段：命中结算（D78/D79/D80/D81）——接触检测 + 双方同时判定（互不先手）
+        //    + 攻击实例去重（同一发动对同一目标只结算一次，被防御亦算已结算）。
         IReadOnlyList<AttackContact> contacts = HitDetection.Detect(
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
-        ApplyCombatSettlement(nextFighters, contacts, candidates[0].BackHeld, candidates[1].BackHeld);
+        var outcomes = new CombatSettlement?[2];
+        ApplyCombatSettlement(nextFighters, contacts, candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
 
-        // ── 第 7 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
+        // ── 第 7 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
+        IReadOnlyList<BattleEvent> events = CollectEvents(state.Frame, nextFighters, candidates, outcomes, _roster);
+
+        // ── 第 8 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
         for (int i = 0; i < nextFighters.Length; i++)
         {
@@ -255,7 +266,7 @@ public sealed class BattleSimulation
 
         var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion);
 
-        return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts);
+        return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts, events);
     }
 
     /// <summary>
@@ -280,14 +291,14 @@ public sealed class BattleSimulation
         FighterState[] fighters,
         IReadOnlyList<AttackContact> contacts,
         bool backHeldP1,
-        bool backHeldP2)
+        bool backHeldP2,
+        CombatSettlement?[] outcomes)
     {
         if (contacts.Count == 0)
             return;
 
         // 同时性：先解析双方结果（此时数组仍是结算前状态），再统一应用。
         // （CombatSettlement 含 string 引用，不可 stackalloc；接触帧才到达此处，2 元素分配可忽略。）
-        var outcomes = new CombatSettlement?[2];
         for (int defender = 0; defender < fighters.Length; defender++)
             outcomes[defender] = ResolveSettlement(
                 defender, fighters, contacts,
@@ -308,6 +319,11 @@ public sealed class BattleSimulation
                     MoveId = null,
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
+                    // 被防御亦视为该攻击实例已结算（D81）：记录发动帧，抑制后续帧重复结算。
+                    LastHitAttackStartFrame = settled.AttackStartFrame,
+                    // 被击者自身的动作被打断：攻击实例身份一并清除（防御者通常无动作，
+                    // 但同帧互中时防御不成立，此处理覆盖所有路径）。
+                    MoveStartedFrame = -1,
                 };
             }
             else
@@ -323,6 +339,8 @@ public sealed class BattleSimulation
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
                     Health = healthAfter,
+                    LastHitAttackStartFrame = settled.AttackStartFrame,
+                    MoveStartedFrame = -1, // 招式中断（D78）：实例身份随 MoveId 一并清除。
                 };
             }
         }
@@ -364,6 +382,14 @@ public sealed class BattleSimulation
 
         AttackDefinition attack = move.Attacks[contact.AttackIndex];
 
+        // 攻击实例去重（D81）：同一「攻击者 + 发动帧」实例对同一目标只结算一次
+        // （被防御也算已结算）。新一次独立发动（新的发动帧）可再次命中；
+        // 被中断的攻击不再产生攻击框，也不会复活。
+        FighterState attackerState = fighters[1 - defender];
+        if (attackerState.MoveStartedFrame < 0 ||
+            attackerState.MoveStartedFrame == defenderState.LastHitAttackStartFrame)
+            return null;
+
         // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
         bool guarding = defenderState.LogicState switch
         {
@@ -373,8 +399,10 @@ public sealed class BattleSimulation
         } && GuardCovers(attack.Height, defenderState.LogicState);
 
         return guarding
-            ? new CombatSettlement(Blocked: true, Damage: 0, StunFrames: attack.BlockstunFrames, MoveId: contact.MoveId)
-            : new CombatSettlement(Blocked: false, Damage: attack.Damage, StunFrames: attack.HitstunFrames, MoveId: contact.MoveId);
+            ? new CombatSettlement(Blocked: true, Damage: 0, StunFrames: attack.BlockstunFrames,
+                MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame)
+            : new CombatSettlement(Blocked: false, Damage: attack.Damage, StunFrames: attack.HitstunFrames,
+                MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame);
     }
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
@@ -385,12 +413,101 @@ public sealed class BattleSimulation
         _ => true, // Mid：站防与蹲防皆可。
     };
 
+    /// <summary>
+    /// 收集本帧战斗事件（D82）：帧内顺序按权威阶段固定——
+    /// ① MoveStarted（攻击者 ID 升序）；② AttackActive（攻击者 ID 升序，每次发动仅首个生效帧）；
+    /// ③ 逐被击者（ID 升序）：Hit → HitstunStarted 或 Blocked → BlockstunStarted。
+    /// EventId = Frame × 16 + 帧内序号（超上限显式失败）。
+    /// </summary>
+    private static IReadOnlyList<BattleEvent> CollectEvents(
+        int frame,
+        FighterState[] fighters,
+        FighterCandidate[] candidates,
+        CombatSettlement?[] outcomes,
+        FightRoster roster)
+    {
+        List<BattleEvent>? events = null;
+        int seq = 0;
+
+        void Add(BattleEventType type, int source, int target, string? moveId, int amount)
+        {
+            if (seq >= BattleEvent.MaxEventsPerFrame)
+                throw new InvalidOperationException(
+                    $"帧 {frame} 的事件数超过每帧上限 {BattleEvent.MaxEventsPerFrame}（EventId 空间不足）。");
+            events ??= new List<BattleEvent>(8);
+            events.Add(new BattleEvent(frame, frame * BattleEvent.MaxEventsPerFrame + seq, type, source, target, moveId, amount));
+            seq++;
+        }
+
+        // ① MoveStarted。
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (candidates[i].MoveStartedThisFrame)
+                Add(BattleEventType.MoveStarted, i, i, candidates[i].MoveId, 0);
+        }
+
+        // ② AttackActive（每次发动的首个生效帧；被命中打断者已无攻击框）。
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            FighterState fighter = fighters[i];
+            if (fighter.LogicState != FighterLogicState.Active || fighter.MoveId is null)
+                continue;
+
+            MoveDefinition? move = roster.Fighter(i).FindMoveById(fighter.MoveId);
+            if (move is null)
+                continue;
+
+            int elapsed = move.ActiveFrames - fighter.PhaseRemainingFrames;
+            bool firstActive = false;
+            for (int a = 0; a < move.Attacks.Count; a++)
+            {
+                if (move.Attacks[a].FirstActiveFrame == elapsed)
+                {
+                    firstActive = true;
+                    break;
+                }
+            }
+
+            if (firstActive)
+                Add(BattleEventType.AttackActive, i, i, fighter.MoveId, 0);
+        }
+
+        // ③ 逐被击者：命中/防御 + 硬直开始。
+        for (int defender = 0; defender < fighters.Length; defender++)
+        {
+            if (outcomes[defender] is not CombatSettlement settled)
+                continue;
+
+            int attacker = 1 - defender;
+            if (settled.Blocked)
+            {
+                Add(BattleEventType.Blocked, attacker, defender, settled.MoveId, 0);
+                Add(BattleEventType.BlockstunStarted, attacker, defender, settled.MoveId, settled.StunFrames);
+            }
+            else
+            {
+                Add(BattleEventType.Hit, attacker, defender, settled.MoveId, settled.Damage);
+                Add(BattleEventType.HitstunStarted, attacker, defender, settled.MoveId, settled.StunFrames);
+            }
+        }
+
+        return events is null
+            ? (IReadOnlyList<BattleEvent>)Array.Empty<BattleEvent>()
+            : events.AsReadOnly();
+    }
+
     /// <summary>单次命中的结算结果（不可变）。</summary>
     /// <param name="Blocked">是否被防御（true = Blockstun 不掉血；false = 命中扣血 + Hitstun）。</param>
     /// <param name="Damage">伤害（被防御时为 0）。</param>
     /// <param name="StunFrames">硬直帧数（命中硬直或防御硬直）。</param>
     /// <param name="MoveId">攻击招式 ID。</param>
-    private readonly record struct CombatSettlement(bool Blocked, int Damage, int StunFrames, string MoveId);
+    /// <param name="AttackStartFrame">攻击实例的发动帧（D81；写入被击者的已结算记录）。</param>
+    private readonly record struct CombatSettlement(
+        bool Blocked,
+        int Damage,
+        int StunFrames,
+        string MoveId,
+        int AttackStartFrame);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。

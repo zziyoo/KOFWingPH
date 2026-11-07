@@ -50,6 +50,7 @@ public sealed class BattleSession
     private readonly BattleSimulation _simulation;
     private readonly int _initialFrame;
     private readonly Action<FrameInput, BattleState>? _frameCommitted;
+    private readonly Action<FrameInput, BattleState, IReadOnlyList<BattleEvent>>? _eventsCommitted;
 
     /// <summary>逻辑帧调度器。</summary>
     public FixedStepScheduler Scheduler { get; }
@@ -79,17 +80,28 @@ public sealed class BattleSession
     /// 阶段 04 起指令识别已移入权威转换（D55），本观察者仅供显示等只读用途。
     /// </param>
     /// <param name="simulation">战斗模拟（含角色配置）；null 表示空配置默认模拟。</param>
+    /// <param name="eventsCommitted">
+    /// 可选战斗事件观察者（阶段 06C，D83）：在 <paramref name="frameCommitted"/> 之后调用，
+    /// 入参为该帧输入、帧开始状态与该帧的<b>权威事件列表</b>（只读）。
+    /// <b>事件在帧完整提交后才发布</b>——Step 失败或输入提交失败时本观察者不会被调用，
+    /// 不存在「已发布但未提交」的事件。与 frameCommitted 相同的异常语义：
+    /// 抛出异常照常传播并进入 <see cref="IsFaulted"/> 故障封闭；
+    /// <b>Recover 不会重发已提交的事件</b>——消费者按 EventId（Frame × 16 + 帧内序号）
+    /// 去重，本阶段为进程内语义，不承诺跨进程 exactly-once 交付。
+    /// </param>
     public BattleSession(
         BattleState? initialState = null,
         FixedStepScheduler? scheduler = null,
         Action<FrameInput, BattleState>? frameCommitted = null,
-        BattleSimulation? simulation = null)
+        BattleSimulation? simulation = null,
+        Action<FrameInput, BattleState, IReadOnlyList<BattleEvent>>? eventsCommitted = null)
     {
         CurrentState = initialState ?? BattleState.CreateDefault();
         Scheduler = scheduler ?? new FixedStepScheduler();
         _simulation = simulation ?? new BattleSimulation();
         _initialFrame = CurrentState.Frame;
         _frameCommitted = frameCommitted;
+        _eventsCommitted = eventsCommitted;
     }
 
     /// <summary>
@@ -157,7 +169,8 @@ public sealed class BattleSession
 
                 // 先算出候选状态但**不赋值**：Step() 或 Commit() 抛异常时，
                 // 权威状态必须原地不动，否则会破坏 Frame - 初始帧号 == TotalSteps。
-                BattleState nextState = _simulation.Step(CurrentState, input).State;
+                BattleStepResult stepResult = _simulation.Step(CurrentState, input);
+                BattleState nextState = stepResult.State;
 
                 // 模拟成功后才提交输入（写历史 + 消费边沿）。
                 // Commit 失败时 nextState 被丢弃，状态与计数都不前进。
@@ -176,6 +189,8 @@ public sealed class BattleSession
                 try
                 {
                     _frameCommitted?.Invoke(input, stateBefore);
+                    if (_eventsCommitted is not null)
+                        _eventsCommitted.Invoke(input, stateBefore, stepResult.Events);
                 }
                 catch
                 {
@@ -245,9 +260,9 @@ public sealed class BattleSession
             }
 
             // 与 Advance 共用同一提交顺序：候选状态 → 提交输入 → 落状态 → 记账。
-            BattleState nextState = _simulation.Step(CurrentState, input).State;
+            BattleStepResult stepResult = _simulation.Step(CurrentState, input);
             inputSource?.Commit(input);
-            CurrentState = nextState;
+            CurrentState = stepResult.State;
             Scheduler.CommitStep();
 
             // 与 Advance 相同：完整提交后才通知观察者，传帧开始状态。
@@ -255,6 +270,8 @@ public sealed class BattleSession
             try
             {
                 _frameCommitted?.Invoke(input, stateBefore);
+                if (_eventsCommitted is not null)
+                    _eventsCommitted.Invoke(input, stateBefore, stepResult.Events);
             }
             catch
             {

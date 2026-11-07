@@ -229,12 +229,14 @@ public class HitDetectionTests
             LogicState = FighterLogicState.Active,
             MoveId = DemoRoster.StandLightPunch,
             PhaseRemainingFrames = 2,
+            MoveStartedFrame = 0,
         };
         FighterState reiAttacking = FighterState.Create(1, 1000, 60, Facing.Left) with
         {
             LogicState = FighterLogicState.Active,
             MoveId = DemoRoster.BackDraft,
             PhaseRemainingFrames = 2,
+            MoveStartedFrame = 0,
         };
 
         var simA = new BattleSimulation(DemoRoster.CreateKaiVsRei());

@@ -79,6 +79,7 @@ public class CombatSettlementTests
             LogicState = FighterLogicState.Active,
             MoveId = moveId,
             PhaseRemainingFrames = 3, // ActiveFrames：下一帧 elapsed = 1 → 命中帧
+            MoveStartedFrame = 0,     // 攻击实例身份（D81）：发动帧
         };
 
     /// <summary>构造「后」输入位（按该角色朝向：朝右 → Left 键；朝左 → Right 键）。</summary>
@@ -127,6 +128,7 @@ public class CombatSettlementTests
                 LogicState = FighterLogicState.Startup,
                 MoveId = "Mid",
                 PhaseRemainingFrames = 1,
+                MoveStartedFrame = 0,
             },
         }, BattleState.CreateDefault().StateVersion);
 
@@ -330,6 +332,7 @@ public class CombatSettlementTests
                 LogicState = FighterLogicState.Startup,
                 MoveId = "Mid",
                 PhaseRemainingFrames = 1,
+                MoveStartedFrame = 0,
             },
         }, BattleState.CreateDefault().StateVersion);
 

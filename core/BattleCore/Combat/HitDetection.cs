@@ -140,7 +140,10 @@ public static class HitDetection
         Collect(fighter0, fighter1, definition0, 0, ref contacts);
         Collect(fighter1, fighter0, definition1, 1, ref contacts);
 
-        return contacts ?? (IReadOnlyList<AttackContact>)EmptyContacts;
+        // 只读包装（D34/D61 同一先例）：快照附属数据不得暴露可变 List。
+        return contacts is null
+            ? (IReadOnlyList<AttackContact>)EmptyContacts
+            : contacts.AsReadOnly();
     }
 
     private static void Collect(

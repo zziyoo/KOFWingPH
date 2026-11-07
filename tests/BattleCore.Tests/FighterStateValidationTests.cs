@@ -28,7 +28,9 @@ public class FighterStateValidationTests
     private static FighterState FighterWith(FighterLogicState state, string? moveId, int remaining) =>
         new(Id: 0, MaxHealth: 1000, Health: 1000, PositionX: -120, PositionY: 0,
             Facing: Facing.Right, LogicState: state, MoveId: moveId,
-            PhaseRemainingFrames: remaining, Recognition: null);
+            PhaseRemainingFrames: remaining, Recognition: null,
+            MoveStartedFrame: state is FighterLogicState.Startup
+                or FighterLogicState.Active or FighterLogicState.Recovery ? 0 : -1);
 
     private static RelativeInput Neutral() =>
         new(Forward: false, Back: false, Up: false, Down: false, Attacks: InputBits.None);

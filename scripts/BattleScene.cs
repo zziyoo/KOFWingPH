@@ -68,6 +68,9 @@ public partial class BattleScene : Node2D
     /// <summary>判定框调试绘制节点（渲染在所有子节点之上）。</summary>
     private DebugBoxDrawer _debugBoxes = null!;
 
+    /// <summary>最近一帧的权威战斗事件（由 eventsCommitted 观察者投递，只读消费）。</summary>
+    private IReadOnlyList<BattleEvent> _lastEvents = Array.Empty<BattleEvent>();
+
     /// <summary>本会话的角色配置（供判定框查询；只读）。</summary>
     private readonly FightRoster _roster = DemoRoster.CreateKaiVsRei();
 
@@ -81,7 +84,8 @@ public partial class BattleScene : Node2D
         _session = new BattleSession(
             initialState: BattleState.CreateDefault(),
             scheduler: new FixedStepScheduler(MaxStepsPerAdvance),
-            simulation: new BattleSimulation(_roster));
+            simulation: new BattleSimulation(_roster),
+            eventsCommitted: (input, state, events) => _lastEvents = events);
 
         _inputMap = new KeyboardInputMap(_inputBuffer);
 
@@ -199,10 +203,26 @@ public partial class BattleScene : Node2D
                 $"P1 State: {DescribeState(p1)}\n" +
                 $"P1 Move: {DescribeMove(p1)}\n" +
                 $"P2 State: {DescribeState(p2)}\n" +
-                $"P2 Move: {DescribeMove(p2)}";
+                $"P2 Move: {DescribeMove(p2)}\n" +
+                $"Event: {DescribeLastEvent(_lastEvents)}";
         }
 
         _debugBoxes.Refresh(); // 判定框调试绘制随权威状态刷新。
+    }
+
+    /// <summary>把最近一帧的权威事件渲染成 HUD 文本（只读消费，按 EventId 语义展示）。</summary>
+    private static string DescribeLastEvent(IReadOnlyList<BattleEvent> events)
+    {
+        if (events.Count == 0)
+            return "-";
+
+        BattleEvent last = events[events.Count - 1];
+        string actors = last.SourceFighterId == last.TargetFighterId
+            ? $"P{last.SourceFighterId + 1}"
+            : $"P{last.SourceFighterId + 1}→P{last.TargetFighterId + 1}";
+        string amount = last.Amount > 0 ? $" {last.Amount}" : string.Empty;
+        string move = last.MoveId is null ? string.Empty : $" {last.MoveId}";
+        return $"{last.Type} {actors}{move}{amount} (id={last.EventId})";
     }
 
     /// <summary>状态行：硬直状态附加剩余帧数（阶段 06B）。</summary>

@@ -1304,6 +1304,48 @@ Hitstun=7）。期间状态机测试还捕获了硬直归零同帧消费缓冲�
 
 ---
 
+## 阶段 06C 成果（攻击实例去重、确定性事件流与最终集成，2026-11-07）—— 阶段 06 结项
+
+### 核心架构（D81–D83）
+
+1. **攻击实例身份（D81）**：`FighterState.MoveStartedFrame`（消费同帧赋值，随快照携带）+
+   `LastHitAttackStartFrame`（被击者已结算记录，命中/被防御都写入）——
+   同一实例对同一目标只结算一次；新发动可再命中；被中断实例不复活。
+   Validate：动作中发动帧 ≥ 0、非动作 −1。`StateVersion`/`CoreVersion` 5 → 6。
+2. **事件流（D82）**：`BattleEvent`（Frame/EventId/Type/Source/Target/MoveId/Amount）；
+   EventId = Frame×16+帧内序号（上限 16 显式失败）；类型 MoveStarted/AttackActive（仅首生效帧）/
+   Hit（含伤害）/Blocked/HitstunStarted/BlockstunStarted；帧内顺序按阶段固定；
+   `BattleStepResult.Events` 只读包装（D61 先例）。
+3. **提交后发布（D83）**：`BattleSession.eventsCommitted` 观察者在 frameCommitted 之后、
+   同一 try/catch 内投递——帧完整提交才有事件；失败帧零事件；观察者异常进入 Faulted/Recover；
+   Recover 不重发（消费者按 EventId 去重，进程内语义）。
+4. **Godot**：HUD 增加事件行（最近一帧事件：类型/双方/招式/数值/EventId）。
+
+### 测试与构建（06C 实测）
+
+新增 **12 项**（528 → **540**）：去重 4 项（多帧 Active 单次命中、被防御已结算不重置、
+新实例再命中、被中断不复活）；事件 4 项（帧/类型/EventId 精确、只读、重放一致、
+EventId 全局唯一）；会话 3 项（提交后发布 + 状态一致、提交失败零事件泄漏、观察者异常
+Faulted/Recover）；10000 帧混合战斗长跑确定性 + EventId 唯一 1 项。
+既有测试 4 处构造更新（直接构造 Active 需携带发动帧——新不变式）；期间 Validate 捕获
+并修复「命中结算未清空被中断者的发动帧」真实缺陷。
+
+| 项 | 结果 |
+|---|---|
+| `dotnet test`（Debug 与 Release） | **540/540 通过** |
+| 四构建 | 均 0 警告 / 0 错误 |
+| Godot 无头导入 | `[ DONE ]` |
+| Godot 图形运行（七场景） | ① 普通攻击命中：`shots/p06c_hit_events.png`（逻辑 109 = Active 首帧：红框相交、
+  `HP 970` 单次 30、`Hitstun(12)`、`Event: HitstunStarted P1→P2 StandLightPunch 12 (id=1730)`，
+  EventId = 108×16+2 与公式一致）；② 站立防御：`shots/p06c_guard_events.png`（`HP 1000` +
+  `Blockstun(7)`，防御后倒计时不再被第二帧打断）；③ 蹲防/高度表、④ 双方同帧互中、
+  ⑤ 多帧 Active 单次命中、⑥ 命中后再发动、⑦ 旧快照重放——由单元测试逐项覆盖
+  （`CombatSettlementTests`/`CombatEventTests`；图形键位无法确定性构造部分场景，未宣称图形覆盖） |
+
+**阶段 06 正式结项。**
+
+---
+
 ## 下一阶段计划：阶段 06（攻击判定与结算前置）
 
 **进入前必须先读** `ARCHITECTURE.md` 第 4 节（D1–D72 全部决策）与第 5 节。

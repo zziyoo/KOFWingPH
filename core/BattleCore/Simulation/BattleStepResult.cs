@@ -25,18 +25,27 @@ public sealed record BattleStepResult
     /// </summary>
     public IReadOnlyList<Combat.AttackContact> Contacts { get; }
 
+    /// <summary>
+    /// 本帧的权威战斗事件（阶段 06C，D82/D83）。只读；无事件时为共享空列表。
+    /// 由 Step 的权威结算产生、与 State 同生同灭——重放同一输入必得相同事件序列；
+    /// BattleSession 在帧完整提交后才转交观察者（D83）。
+    /// </summary>
+    public IReadOnlyList<BattleEvent> Events { get; }
+
     public BattleStepResult(
         int frameBefore,
         int frameAfter,
         Input.FrameInput input,
         State.BattleState state,
-        IReadOnlyList<Combat.AttackContact>? contacts = null)
+        IReadOnlyList<Combat.AttackContact>? contacts = null,
+        IReadOnlyList<BattleEvent>? events = null)
     {
         FrameBefore = frameBefore;
         FrameAfter = frameAfter;
         Input = input;
         State = state;
         Contacts = contacts ?? Array.Empty<Combat.AttackContact>();
+        Events = events ?? Array.Empty<BattleEvent>();
     }
 
     /// <summary>本次 Step 是否恰好推进了一个逻辑帧。</summary>

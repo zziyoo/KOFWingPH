@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — NewKOF 架构说明
 
-> 最后更新：阶段 06B（2026-11-07，含 D77–D80：攻击高度表 / 命中伤害与硬直 / 防御 / 同帧互中）
+> 最后更新：阶段 06C（2026-11-07，含 D81–D83：攻击实例去重 / 确定性事件流 / 提交后发布）
 > 本文描述**已确定**的架构与**未决定**的问题。修改代码前请先读本文件。
 
 ---
@@ -355,6 +355,14 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | **D78** | **新增 `Hitstun`/`Blockstun` 状态与 `FighterState.StunRemainingFrames`：命中 → Health = max(0, Health − Damage) + Hitstun；成功防御 → 不掉血 + Blockstun；硬直期间不能步行/起跳/发动招式/防御；剩余 −1 归零同帧回到待机更新与消费（与 Recovery 完成同语义）；动作中受击 → 招式中断（MoveId/阶段清空）；被命中者的结算覆盖其当帧 Tick 结果** | 转换边唯一：可受击状态 → Hitstun/Blockstun → 待机；不存在 Hitstun → Startup 等未定义边。结算在运动/推挤**之后**进行（基于最终候选位置），双方结果先并行解析再统一应用（D80）。Validate 不变式：Hitstun/Blockstun 必须 StunRemaining ≥ 1，其他状态必须为 0——新枚举值不能绕过 D62。体力边界由结算显式钳制 max(0, …)（Health − Damage 无溢出风险：Health ≥ 0、Damage ≤ int.MaxValue）。**空中被击显式跳过**（本阶段无空中受击/防御；几何接触仍可观测），测试固定。硬直中不能再防御 → 多帧攻击在 06B 会穿过 Blockstun 命中（**已知中期行为，06C 的攻击实例去重消除**）。 |
 | **D79** | **防御 = 帧末状态为站立/蹲下待机 + 按住「后」（按帧开始朝向解析的相对输入，D46）；防御时机在命中结算前判定，帧末自动转身不回头解释本帧输入；动作中/PreJump/硬直中不能防御** | 用结算时（运动后）的候选状态判定资格——Standing→站防、Crouching→蹲防；「按住后」来自当帧解析输入（与步行/识别同一份 `RelativeInput`），不存在第二套防御输入解释。第一版成功防御不扣血、无削防、无精准防御。 |
 | **D80** | **同帧双方互中：命中结算基于同一份结算前状态先并行解析双方结果、再统一写入——先处理的角色不会打断另一角色同帧成立的攻击；双方都命中则各自掉血并进入硬直（不实现攻击相杀）** | 消除「先扣 P1 血导致 P2 同帧攻击落空」的顺序偏差：结算函数对两名被击者各产出至多一个结果（来自确定性接触顺序的第一条），应用阶段才写状态。镜像场景测试固定（身份保持映射下逐位一致）。 |
+
+### 阶段 06C 决策（攻击实例去重与确定性事件流）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D81** | **攻击实例身份 = 「攻击者 ID + 发动帧」（`FighterState.MoveStartedFrame`，消费同帧赋值、随快照携带）；被击者携带 `LastHitAttackStartFrame`（命中与被防御都写入）——同一实例对同一目标只结算一次，新发动（新帧号）可再次命中** | 多帧 Active 的 Hitbox 连续相交会逐帧重复扣血/重复防御结算（修复前实测：5A 两帧扣 60）。去重数据全部在权威快照内 → 可重放、可确定性重建。规则：命中**或**被防御都写入记录（接触即结算）；新实例（发动帧不同）不受影响；被中断的攻击实例随 MoveId/发动帧清空而消失，不会复活；被击记录单调不清空（1v1 下攻击发动帧恒递增）。`Validate`：动作中发动帧 ≥ 0、非动作必须 −1（被击者记录无不变式）。**不通过缩短 ActiveFrames 规避**。StateVersion/CoreVersion 5 → 6。 |
+| **D82** | **确定性战斗事件（`BattleEvent`）：EventId = Frame × 16 + 帧内序号（每帧上限 16，超出显式失败）；类型 MoveStarted / AttackActive（每次发动仅首个生效帧）/ Hit（Amount = 实扣伤害，DamageApplied 并入）/ Blocked / HitstunStarted / BlockstunStarted；帧内顺序按权威阶段固定（MoveStarted → AttackActive → 逐被击者 Hit/Blocked + 硬直开始）** | 同初态同输入必得相同 EventId 与顺序（禁用 Guid/时钟/随机数/渲染帧号/对象地址）；每帧上限显式失败防静默碰撞。事件由 `BattleSimulation.Step` 的权威结算产生、随 `BattleStepResult.Events`（只读包装，D61 先例）返回——**事件不参与权威判定**，Godot 只消费。HitstunStarted/BlockstunStarted 与 Hit/Blocked 分列（标记状态转换），DamageApplied 并入 Hit.Amount（避免过度细碎）。 |
+| **D83** | **事件与状态提交一致：`BattleSession` 新增可选 `eventsCommitted` 观察者，在 `frameCommitted` 之后、同一 try/catch 内调用——帧完整提交（状态/输入/记账落定）后才投递该帧事件；Step 失败或输入提交失败该帧事件整体不存在；观察者异常进入既有 Faulted/Recover 机制；Recover 不重发已提交事件，消费者按 EventId 去重（进程内语义，不承诺跨进程 exactly-once）** | 复用 03B 的故障封闭模式（观察者异常 → MarkFaulted → 照常抛出）；两阶段输入提交的原子性自然覆盖事件（Step 没跑就没有事件）。本阶段不做可靠消息队列/持久化事件日志/联机同步。 |
 
 
 
