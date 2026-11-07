@@ -136,17 +136,27 @@ public partial class BattleScene : Node2D
     {
         BattleState state = _session.CurrentState;
 
-        // 1 逻辑单位 = 1 像素；屏幕原点对齐到视口中线，地面 Y = 560。
+        // 1 世界单位 = 1 像素；屏幕原点对齐到视口中线，地面 Y = 560。
+        // 权威坐标是 Q16.16 定点数（世界坐标，Y 轴向上、地面为 0）；
+        // 这里只做「定点 → 浮点」的显示转换，浮点结果绝不写回权威状态（D63）。
         const float originX = 640f;
         const float groundY = 560f;
 
         // 角色节点是 Node2D 容器（子节点 ColorRect 从容器原点向上 120px 绘制），
-        // 因此容器 Y 设为地面高度即可让色块底边贴合地面。
+        // 因此容器 Y 设为地面高度即可让色块底边贴合地面；
+        // 世界 Y 向上 → 屏幕 Y 向下：screenY = groundY - worldY。
+        FighterState p1 = state.Fighter(0);
+        FighterState p2 = state.Fighter(1);
+
         if (_fighter1Node is not null)
-            _fighter1Node.Position = new Vector2(originX + state.Fighter(0).PositionX, groundY);
+            _fighter1Node.Position = new Vector2(
+                originX + (float)p1.PositionX.ToDouble(),
+                groundY - (float)p1.PositionY.ToDouble());
 
         if (_fighter2Node is not null)
-            _fighter2Node.Position = new Vector2(originX + state.Fighter(1).PositionX, groundY);
+            _fighter2Node.Position = new Vector2(
+                originX + (float)p2.PositionX.ToDouble(),
+                groundY - (float)p2.PositionY.ToDouble());
 
         if (_hudLabel is not null)
         {
@@ -158,6 +168,8 @@ public partial class BattleScene : Node2D
                 $"Logic Frame: {state.Frame}{pauseTag}\n" +
                 $"P1: {Describe(last.Player1)}\n" +
                 $"P2: {Describe(last.Player2)}\n" +
+                $"P1 Pos: {DescribePosition(p1)}\n" +
+                $"P2 Pos: {DescribePosition(p2)}\n" +
                 $"P1 Command: {DescribeCommand(LatestCommand(state, 0))}\n" +
                 $"P2 Command: {DescribeCommand(LatestCommand(state, 1))}\n" +
                 $"P1 State: {state.Fighter(0).LogicState}\n" +
@@ -166,6 +178,10 @@ public partial class BattleScene : Node2D
                 $"P2 Move: {DescribeMove(state.Fighter(1))}";
         }
     }
+
+    /// <summary>把权威定点坐标渲染成 HUD 文本（世界坐标，Y 向上，地面为 0；显示用浮点）。</summary>
+    private static string DescribePosition(FighterState fighter) =>
+        $"({fighter.PositionX.ToDouble():0.##}, {fighter.PositionY.ToDouble():0.##})";
 
     /// <summary>从权威识别快照取最近一次识别结果（阶段 04：识别在内核，Godot 只读）。</summary>
     private static CommandMatch? LatestCommand(BattleState state, int player) =>

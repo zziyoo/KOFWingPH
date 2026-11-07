@@ -18,12 +18,15 @@ public sealed class FighterDefinition
     /// <param name="fighterId">角色唯一标识（如 <c>Kai</c>）。</param>
     /// <param name="commands">该角色的指令表（可为空 = 该角色没有可识别指令）。</param>
     /// <param name="moves">该角色的招式表（可为空）。</param>
+    /// <param name="movement">该角色的运动配置（阶段 05A，D64）；null 使用
+    /// <see cref="MovementDefinition.CreateDefault"/>，保证 P1/P2 可携带不同运动数据。</param>
     /// <exception cref="ArgumentException">ID 为空 / 指令 ID 重复 / 招式 ID 重复 /
     /// 招式引用了指令表中不存在的 CommandId。</exception>
     public FighterDefinition(
         string fighterId,
         IReadOnlyList<CommandDefinition> commands,
-        IReadOnlyList<MoveDefinition> moves)
+        IReadOnlyList<MoveDefinition> moves,
+        MovementDefinition? movement = null)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -61,6 +64,9 @@ public sealed class FighterDefinition
         Commands = Array.AsReadOnly(commandCopy);
         Moves = Array.AsReadOnly(moveCopy);
 
+        // 运动配置（D64）：null → 默认配置；非 null 直接持有（MovementDefinition 自身构造期不可变）。
+        Movement = movement ?? MovementDefinition.CreateDefault();
+
         // 指令 ID → 招式 的只读查找表（构造期建好，识别外不扫描）。
         var byCommand = new Dictionary<string, MoveDefinition>(StringComparer.Ordinal);
         var byId = new Dictionary<string, MoveDefinition>(StringComparer.Ordinal);
@@ -82,6 +88,9 @@ public sealed class FighterDefinition
 
     /// <summary>该角色的专属招式表（只读）。</summary>
     public IReadOnlyList<MoveDefinition> Moves { get; }
+
+    /// <summary>该角色的运动配置（阶段 05A，D64；恒非 null）。</summary>
+    public MovementDefinition Movement { get; }
 
     private readonly Dictionary<string, MoveDefinition> _moveByCommandId;
     private readonly Dictionary<string, MoveDefinition> _moveById;

@@ -95,9 +95,9 @@ public class Phase04IntegrationTests
         Assert.Null(s.Fighter(0).MoveId);
         Assert.Equal(0, s.Fighter(0).PhaseRemainingFrames);
 
-        // 全程生命值与坐标不变（本阶段不执行判定/移动）。
+        // 全程生命值与坐标不变（无输入时地面运动不产生位移）。
         Assert.Equal(1000, s.Fighter(0).Health);
-        Assert.Equal(-120, s.Fighter(0).PositionX);
+        Assert.Equal(-120, s.Fighter(0).PositionX.ToIntTruncated());
     }
 
     [Fact]

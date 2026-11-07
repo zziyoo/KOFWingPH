@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 04 最终补修：快照不可变性 D61 / 非法状态校验 D62）
+> 最后更新：2026-11-07（阶段 05A：Q16.16 定点数 / 地面运动，D63–D65）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 343，已跳过: 0，总计: 343`
+期望：`失败: 0，通过: 418，已跳过: 0，总计: 418`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,29 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 05A（2026-11-07）Q16.16 定点数与确定性地面运动（D63–D65）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Numerics/FixedPoint.cs` | **新增（D63）**：Q16.16 定点数（`long` 原始值，Scale = 65536）。加减 `checked`、乘除 `Int128` 中间结果、取整统一向零截断、溢出抛 `OverflowException`、除零抛 `DivideByZeroException`；`int` 隐式转换 = 世界单位；`ToIntTruncated` 只读整数视图；`ToDouble` 仅供显示 |
+| `core/BattleCore/Combat/MovementDefinition.cs` | **新增（D64）**：角色运动配置（前/后步行速度大小，> 0 且 ≤ 32 单位/帧校验；默认 2.0/1.5） |
+| `core/BattleCore/Combat/GroundMovement.cs` | **新增（D65）**：地面运动纯函数 `StepX`——仅站立待机移动，前后 → 世界 ±，收招同帧恢复步行 |
+| `core/BattleCore/State/FighterState.cs` | **D63**：`PositionX/PositionY` 升级为 `FixedPoint` 世界坐标；新增 `PositionXUnits/PositionYUnits` 整数视图；旧命名参数调用点语义不变 |
+| `core/BattleCore/Combat/FighterDefinition.cs` | **D64**：新增可选 `movement` 参数（null → 默认配置），`Movement` 恒非 null |
+| `core/BattleCore/Combat/DemoRoster.cs` | Kai 前 2.0/后 1.5、Rei 前 1.75/后 1.25 单位/帧（双人数据刻意不同） |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | Step 内第 3 步接入地面运动（按 tick 后状态门槛），位置写入新快照 |
+| `core/BattleCore/State/BattleState.cs` / `BattleCoreInfo.cs` | StateVersion / CoreVersion 2 → 3（格式边界标记） |
+| `scripts/BattleScene.cs` | 显示转换改为定点 → 浮点 + 世界 Y 翻转（`groundY - worldY`）；HUD 新增 P1/P2 Pos 两行（只读权威坐标） |
+| `scenes/Battle.tscn` | HUD 面板 264 → 300 高，初始文本 11 行 |
+| `tests/BattleCore.Tests/FixedPointTests.cs` | **新增 44 项**：正负转换、分数精确表示、向零截断 pinned、checked 溢出、128 位乘除、舍入边界确定性、累计无漂移、哈希/相等 |
+| `tests/BattleCore.Tests/GroundMovementTests.cs` | **新增 31 项**：前后 1/10/60 帧 pinned、镜像反对称、SOCD、蹲下/动作阻挡与恢复、暂停/丢弃预算无位移、Advance vs StepExact、中间快照续跑、3600 帧长跑、配置校验 |
+
+**验收**：418/418（343 基线全部保留）；双构建 0 警告 0 错误；无头导入 `[ DONE ]`；
+图形运行三张截图：前进 `(138, 0)`、后退 `(-313.5, 0)`（定点小数逐位命中）、
+蹲下 `(-120, 0)` 冻结。**注意（K32）**：Godot 运行时直接加载 `.godot/mono/temp/bin/Debug`
+的旧程序集——改代码后必须先 `dotnet build NewKOF.csproj`（Debug）再截图验收，
+否则会看到旧行为。
 
 ### 阶段 04 最终补修（2026-11-07）快照不可变性 / 非法状态校验（D61/D62）
 
@@ -490,6 +513,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K29 | **`StateVersion` 已升到 2 / CoreVersion 2** | 阶段 04 改变了 FighterState 格式（动作状态 + 识别快照） | 项目无序列化快照，无迁移负担；未来引入序列化时以版本号分支（K8 仍有效） |
 | K30 | **识别快照的五个公开集合是 `ReadOnlyCollection` 包装** | 强转 `List<T>`/`T[]` 得 null；`IList` 写操作抛 `NotSupportedException` | D61 设计如此（D34 同一先例）；需要改动集合请走 `Advance`/`WithResultConsumed` 纯函数，不要试图绕过包装 |
 | K31 | **非法 `FighterLogicState` 在两道门被拒** | `FighterState.Validate`（BattleState 构造期）与 `FighterStateMachine.Tick` 入口都用 `Enum.IsDefined` 拒绝未定义枚举 | D62 设计如此；新增状态枚举值时两处自动跟随枚举定义，无需维护状态清单 |
+| K32 | **Godot 运行时直接加载 `.godot/mono/temp/bin/Debug` 旧程序集** | 改代码后直接跑 `--shot` 验收会看到旧行为（实测 05A 踩坑：截图显示旧 HUD 且角色不移动） | 截图验收前先 `dotnet build NewKOF.csproj`（默认 Debug 配置即写入该目录；`-c Release` 只更新 Release 目录） |
+| K33 | **`FighterState.PositionX/PositionY` 已是 `FixedPoint`** | 直接当 int 用会编译失败；`Assert.Equal(-120, f.PositionX)` 因泛型推断失败也编译不过 | 读整数用 `PositionXUnits`（向零截断）或 `PositionX.ToIntTruncated()`；整数字面量赋值/传参可隐式转换（= 世界单位）；比较用 `FixedPoint.FromInt(...)` 或 `== -120`（运算符可隐式转换）；Godot 显示用 `ToDouble()`，**浮点绝不写回权威状态** |
 
 **无阻塞性问题。** 编译 0 警告 0 错误，阶段 04 最终补修验收时 343/343 测试通过，可正常启动运行。
 
@@ -514,15 +539,20 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
   - **本轮 03B-2 最终补修：`fix(input): finalize charge timing and command timeout`（`0843dd6`），已推送。**
   - **03B 边界补修：`fix(input): prevent stale direction reuse after charge release`（`5434c5b`），已推送。**
   - **阶段 04：`feat(combat): implement phase 04 fighter state machine`（`b622d0f`），已推送。**
-  - **本轮阶段 04 最终补修：`fix(combat): enforce immutable snapshots and valid fighter states`**
+  - **阶段 04 最终补修：`fix(combat): enforce immutable snapshots and valid fighter states`（`cc8a510`），已推送。**
+  - **本轮阶段 05A：`feat(movement): implement deterministic fixed-point ground movement`**
     （创建后用 `git rev-parse HEAD` 读取 SHA）。提交内容：
     ```
-    修改: core/BattleCore/Commands/RecognitionState.cs
-          core/BattleCore/State/FighterState.cs
-          core/BattleCore/Combat/FighterStateMachine.cs
+    新增: core/BattleCore/Numerics/FixedPoint.cs
+          core/BattleCore/Combat/{MovementDefinition,GroundMovement}.cs
+          tests/BattleCore.Tests/{FixedPointTests,GroundMovementTests}.cs
+    修改: core/BattleCore/State/{FighterState,BattleState}.cs
+          core/BattleCore/Combat/{FighterDefinition,DemoRoster}.cs
+          core/BattleCore/Simulation/BattleSimulation.cs
+          core/BattleCore/BattleCoreInfo.cs
+          scripts/BattleScene.cs  scenes/Battle.tscn
+          tests/BattleCore.Tests/{BattleSimulationTests,Phase04IntegrationTests}.cs（2 处断言改整数视图）
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
-    新增: tests/BattleCore.Tests/{SnapshotImmutabilityTests,FighterStateValidationTests}.cs
-          （含各自 .uid）
     ```
   - **工作区：干净**（阶段 04 最终补修提交并推送后）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
@@ -659,7 +689,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 343」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 418」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -681,6 +711,12 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 识别快照的五个公开集合是只读包装（D61）：强转 List/数组得 null、
       `IList` 写抛 `NotSupportedException`、旧快照不被污染、新旧状态不共享可写底层
 - [ ] 非法 `FighterLogicState` 两道门拒绝（D62）：`Validate` 与 `Tick` 都用 `Enum.IsDefined`
+- [ ] 权威位置/速度一律 `FixedPoint` Q16.16（D63）：加减 checked、乘除 Int128、取整向零截断、
+      溢出抛异常；`PositionX: -120` 经隐式转换 = -120 世界单位（不是原始值）；
+      浮点转换只出现在 Godot 显示层且不写回
+- [ ] 地面运动（D65）：仅站立待机移动；蹲下/动作三阶段原地；朝左按前 X 减小；
+      SOCD 复用 `DirectionResolver`，运动系统不实现第二套左右消解
+- [ ] 运动配置（D64）在 `MovementDefinition`（构造期校验），不在状态机散落速度常量、不在 Godot 计算
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向

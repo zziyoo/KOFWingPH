@@ -1,4 +1,5 @@
 using NewKOF.BattleCore.Commands;
+using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.Input;
 
 namespace NewKOF.BattleCore.Combat;
@@ -66,7 +67,11 @@ public static class DemoRoster
             new MoveDefinition(StandLightPunch, "5A",
                 startupFrames: 3, activeFrames: 2, recoveryFrames: 6,
                 allowedFrom: MoveAllowedStates.Standing),
-        });
+        },
+        // 运动配置（D64）：Kai 前行 2.0 / 后撤 1.5 单位每帧（120 / 90 单位每秒）。
+        movement: new MovementDefinition(
+            walkForwardSpeed: FixedPoint.FromFraction(2, 1),
+            walkBackwardSpeed: FixedPoint.FromFraction(3, 2)));
 
     /// <summary>角色乙「Rei」的配置。</summary>
     public static FighterDefinition CreateRei() => new(
@@ -91,7 +96,11 @@ public static class DemoRoster
                 startupFrames: 5, activeFrames: 2, recoveryFrames: 7),
             new MoveDefinition(SweepPrototype, "214B",
                 startupFrames: 3, activeFrames: 4, recoveryFrames: 9),
-        });
+        },
+        // 运动配置（D64）：Rei 与 Kai 刻意不同——证明 P1/P2 可携带不同运动数据。
+        movement: new MovementDefinition(
+            walkForwardSpeed: FixedPoint.FromFraction(7, 4),
+            walkBackwardSpeed: FixedPoint.FromFraction(5, 4)));
 
     /// <summary>默认演示对局：Kai（P1）对 Rei（P2）。</summary>
     public static FightRoster CreateKaiVsRei() => new(CreateKai(), CreateRei());

@@ -147,6 +147,6 @@ public class BattleSimulationTests
         fighters[0] = FighterState.Create(0, 1, -999, Facing.Left);
 
         Assert.Equal(1000, state.Fighter(0).MaxHealth);
-        Assert.Equal(-120, state.Fighter(0).PositionX);
+        Assert.Equal(-120, state.Fighter(0).PositionX.ToIntTruncated());
     }
 }

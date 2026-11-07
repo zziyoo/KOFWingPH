@@ -1,6 +1,7 @@
 using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
+using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.State;
 
 namespace NewKOF.BattleCore.Simulation;
@@ -23,7 +24,12 @@ namespace NewKOF.BattleCore.Simulation;
 /// 重试同一帧得到同一结果，不存在「消费已发生但动作未提交」的半提交（B6.10）。
 /// 识别与消费都在权威转换内同帧完成（<b>零帧延迟</b>，明确语义）。</para>
 ///
-/// <para>明确不做（留给后续阶段）：移动/跳跃轨迹、碰撞推挤、攻击判定、伤害受击、
+/// <para>阶段 05A（D63/D64/D65）起，<see cref="Step"/> 在每帧内按固定顺序推进：
+/// 「输入解析 → 指令识别 → 状态机 → 地面运动 → 全新快照」。位置为 Q16.16 定点数
+/// （<c>FighterState.PositionX/PositionY</c>，世界单位、Y 向上），地面步行只发生在
+/// 站立待机、由角色运动配置驱动；运动结果完全由初始状态、配置与逻辑输入决定。</para>
+///
+/// <para>明确不做（留给后续阶段）：跳跃/重力、场地边界与推挤、碰撞、攻击判定、伤害受击、
 /// 动画、取消规则、回合裁决。不读取 Godot，不使用浮点，不采样设备输入。</para>
 /// </summary>
 public sealed class BattleSimulation
@@ -82,13 +88,19 @@ public sealed class BattleSimulation
                 definition,
                 state.Frame);
 
-            // 3) 全新角色快照（record with：原状态不受影响）。
+            // 3) 地面运动（05A/D65）：按「本帧结束逻辑状态」与帧开始朝向推进位置。
+            //    仅站立待机响应前后输入；蹲下与动作阶段原地。定点数，无浮点。
+            FixedPoint nextX = GroundMovement.StepX(
+                tick.State, fighter.PositionX, fighter.Facing, resolved, definition.Movement);
+
+            // 4) 全新角色快照（record with：原状态不受影响）。
             nextFighters[i] = fighter with
             {
                 LogicState = tick.State,
                 MoveId = tick.MoveId,
                 PhaseRemainingFrames = tick.PhaseRemainingFrames,
                 Recognition = tick.Recognition,
+                PositionX = nextX,
             };
         }
 

@@ -1,25 +1,24 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 
-// 璁拌处鏂规硶锛圕ommitStep / RecordDroppedSteps锛夋晠鎰忎负 internal锛?
-// 鍙湁 BattleSession 鍙互鎻愪氦甯э紝澶栭儴绋嬪簭闆嗘棤娉曠粫杩囧畠鐮村潖
-// 銆孎rame - 鍒濆甯у彿 == TotalSteps銆嶄笉鍙橀噺銆傛祴璇曢渶瑕佺洿鎺ラ┍鍔ㄨ皟搴﹀櫒锛?
-// 鍥犳浠呭娴嬭瘯绋嬪簭闆嗗紑鏀俱€?
+// 记账方法（CommitStep / RecordDroppedSteps）刻意为 internal：
+// 只有 BattleSession 可以提交帧，外部程序集无法绕过它破坏
+// 「Frame - 初始帧号 == TotalSteps」不变量。测试需要直接驱动调度器，
+// 因此仅对测试程序集开放。
 [assembly: InternalsVisibleTo("BattleCore.Tests")]
 
 namespace NewKOF.BattleCore;
 
 /// <summary>
-/// 鏍稿績妯℃嫙妯″潡鐨勫厓淇℃伅銆?
-/// 璇ョ▼搴忛泦涓嶅緱寮曠敤 Godot銆佷笉寰椾緷璧栦换浣曞浘褰㈢獥鍙ｃ€佷笉寰楄鍐欐枃浠剁郴缁熴€?
+/// 核心模拟模块的元信息。
+/// 该程序集不得引用 Godot、不得依赖任何图形窗口、不得读写文件系统。
 /// </summary>
 public static class BattleCoreInfo
 {
-    /// <summary>鏍稿績鍐呮牳鐗堟湰銆傝鍒?鏁版嵁鏍煎紡鍙樺寲鏃堕€掑銆?/summary>
-    public const int CoreVersion = 2;
+    /// <summary>核心内核版本。规则/数据格式变化时递增（阶段 05A：定点坐标 + 地面运动 → 3）。</summary>
+    public const int CoreVersion = 3;
 
-    /// <summary>鍥哄畾閫昏緫甯х巼锛圚z锛夈€傛潈濞佹ā鎷熷彧鎸夐€昏緫甯ф帹杩涳紝涓庢覆鏌撳抚鐜囨棤鍏炽€?/summary>
+    /// <summary>固定逻辑帧率（Hz）。权威模拟只按逻辑帧推进，与渲染帧率无关。</summary>
     public const int LogicFrameRate = 60;
 
     public const string AssemblyName = "NewKOF.BattleCore";
 }
-

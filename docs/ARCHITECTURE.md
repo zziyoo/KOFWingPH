@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — NewKOF 架构说明
 
-> 最后更新：阶段 04 最终补修（2026-11-07，含 D61–D62：快照不可变性 / 非法状态校验）
+> 最后更新：阶段 05A（2026-11-07，含 D63–D65：Q16.16 定点数 / 运动配置 / 地面移动）
 > 本文描述**已确定**的架构与**未决定**的问题。修改代码前请先读本文件。
 
 ---
@@ -44,6 +44,8 @@ NewKOF/
 │   └── BattleCore/            # ★ 权威战斗内核（纯 C#，零 Godot 依赖）
 │       ├── BattleCore.csproj
 │       ├── BattleCoreInfo.cs
+│       ├── Numerics/
+│       │   └── FixedPoint.cs           # ★ 阶段 05A：Q16.16 定点数（唯一权威数值表示）
 │       ├── Input/FrameInput.cs
 │       ├── Input/InputBuffer.cs        # ★ 阶段 03A：渲染采样 → 逻辑帧输入（边沿闩锁 + 历史）
 │       ├── Input/DirectionResolver.cs  # ★ 阶段 03A：SOCD + 绝对方向 → 相对朝向
@@ -52,7 +54,17 @@ NewKOF/
 │       │   ├── CommandDefinition.cs    # 指令数据（序列 / 按键 / 跨度 / 容差 / 优先级 / 时效）
 │       │   ├── CommandMatch.cs         # 识别结果（完成帧 / 按键帧 / 诊断）
 │       │   ├── CommandRecognizer.cs    # 方向变化压缩 + 匹配 + 冲突裁决 + 缓冲
-│       │   └── CommandCatalog.cs       # 默认四条指令（236A / 623A / 214B / 66）
+│       │   ├── RecognitionState.cs     # ★ 阶段 04：不可变识别快照 + 纯函数 Advance（随权威状态携带）
+│       │   └── CommandCatalog.cs       # 默认指令表（236A / 623A / 214B / 66 / 蓄力 / 双重）
+│       ├── Combat/
+│       │   ├── FighterLogicState.cs    # ★ 阶段 04：角色逻辑状态枚举 + MoveAllowedStates
+│       │   ├── FighterStateMachine.cs  # ★ 阶段 04：集中纯函数状态机 Tick
+│       │   ├── MoveDefinition.cs       # ★ 阶段 04：招式定义（三阶段帧数 / 允许发动状态）
+│       │   ├── FighterDefinition.cs    # ★ 阶段 04：角色专属配置（指令表 + 招式表 + 运动数据）
+│       │   ├── FightRoster.cs          # ★ 阶段 04：双方角色配置
+│       │   ├── DemoRoster.cs           # 演示配置（Kai / Rei，测试与 Godot 共用）
+│       │   ├── MovementDefinition.cs   # ★ 阶段 05A：角色运动配置（步行速度）
+│       │   └── GroundMovement.cs       # ★ 阶段 05A：地面运动纯函数（站立步行）
 │       ├── State/FighterState.cs
 │       ├── State/BattleState.cs
 │       └── Simulation/
@@ -111,6 +123,8 @@ NewKOF (表现层)  ─────────┘
 | `DirectionResolver` | **SOCD 清理 + 绝对方向 → 相对朝向**（纯函数） | 输入录制、状态推进 |
 | `CommandRecognizer` | **逐帧输入 → 指令 ID**：方向变化压缩、按键边沿匹配、冲突裁决、结果缓冲、**蓄力释放挂起（每指令一个固定槽位）** | 招式发动/取消/硬直、移动、任何 Godot API |
 | `CommandDefinition` / `CommandCatalog` | 指令定义（纯数据）与默认指令表 | 识别流程、角色专属数值 |
+| `FixedPoint` | **Q16.16 定点数（D63）**：权威位置/速度的唯一数值表示，整数算术、向零截断、checked 溢出 | 任何浮点权威计算、显示转换写回 |
+| `MovementDefinition` / `GroundMovement` | **运动配置与地面运动（D64/D65）**：步行速度纯函数推进 | 识别、状态机、Godot 显示 |
 | `BattleStepResult` | 单次 Step 的结果描述 | 权威判定 |
 | `BattleScene` (Godot) | 把 `delta` 交给 `BattleSession`、把状态映射为画面 | 任何权威判定、**任何时间累积逻辑**、输入历史 |
 | `KeyboardInputMap` (Godot) | 键盘事件 → `InputBits`，喂给 `InputBuffer` | SOCD、指令识别、权威判定 |
@@ -170,7 +184,8 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 3. **输入外部注入**：模拟内部绝不采样键盘/手柄。同一份帧输入序列必然得到同一结果。
 4. **不使用 Godot 物理系统**：`PhysicsServer2D`、`RigidBody2D`、`Area2D` 碰撞信号**不得**参与权威结果。未来碰撞检测由 `BattleCore` 自行实现（整数/定点几何）。
 5. **固定逻辑帧率**：`BattleCoreInfo.LogicFrameRate = 60`。渲染帧率可以浮动，逻辑帧数不受影响。
-6. **无浮点权威字段**：当前所有权威数值为 `int`。后续若引入速度/坐标小数，须使用定点数并写入规则版本。
+6. **无浮点权威字段**：位置/速度等权威数值一律使用 Q16.16 定点数（D63，`long` 原始值）。
+   `double` 转换仅供 Godot 显示，结果不得写回权威状态。
 7. **调度与模拟分离**：时间累积（谁决定推进几帧）由 `FixedStepScheduler` 负责，
    战斗规则推进（推进后状态如何变化）由 `BattleSimulation` 负责。二者互不知道对方细节。
 8. **时间调度不得留在 Godot 层**：任何 `_Process` 中的累加器、补帧、取整都属于
@@ -295,6 +310,14 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | **D61** | **识别快照集合所有权：五个公开集合一律只读包装（修复深层不可变性缺陷）** | 复现出的缺陷：`Advance` 把工作 `List<T>` 直接存进 `IReadOnlyList<T>` 属性——接口只是编译期视图，实测可强转回 `List<T>` 并 `Clear()` 修改权威快照；`WithResultConsumed` 暴露裸数组（可经 `IList<T>`/`T[]` 写入）；`Empty` 共享 `Array.Empty`。识别状态随 `FighterState` 进入 `BattleState`，这是权威快照完整性问题（15 项复现测试失败）。修复：五个公开集合（Directions/Presses/Buffer/ConsumedEndFrames/ChargePendings）在构造点一律包装为单实例 `ReadOnlyCollection<T>`（与 D34 `InputBuffer.History` 同一先例）——强转 `List<T>`/`T[]` 得 null，`IList{T}`/非泛型 `IList` 写操作抛 `NotSupportedException` 且不生效。内部构造保留可变 List 高效流程，只在快照落定点包装一次；每帧状态各持独立包装（不共享可写底层），只读包装之间共享安全（`Empty` 同样包装）。哈希与相等语义不变：相等状态哈希一致、内容比较不受包装影响。 |
 | **D62** | **非法 `FighterLogicState` 两道门拒绝：`Validate` 构造期 + `Tick` 推进期，均用 `Enum.IsDefined` 集中校验** | 复现出的缺陷：`Validate` 的待机分支把一切非动作状态当待机——`(FighterLogicState)999` 携带空 MoveId 与 0 帧即可通过构造；`Tick` 的 `IsInMove(999)` 为 false，未知状态被静默「修正」成 Standing/Crouching。修复：两处入口都用 `Enum.IsDefined`（唯一事实来源 = 枚举定义本身，不会维护出两份不一致的状态清单）——Validate 无论其他字段是什么一律拒绝；Tick 推进前独立拒绝（不依赖构造代为校验）。合法状态（含收招回待机）行为不变；负剩余帧数拒绝保持。实测：损坏状态在 BattleState 构造期即被拒（第一道门），Tick 校验为第二道门。 |
 
+### 阶段 05A 决策（定点数与地面运动）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D63** | **权威数值采用 Q16.16 定点数 `FixedPoint`（`long` 原始值，Scale = 65536）；`FighterState.PositionX/PositionY` 升级为定点世界坐标（Y 向上、地面为 0），旧整数坐标语义由「int → FixedPoint 隐式转换 = 世界单位」+ `ToIntTruncated`（向零截断只读视图）保留** | Q16.16 的 65536 分辨率足够亚像素运动精度，48 位整数部分（±2^47 单位）运动场景不可能触界；全整数算术天然无 NaN/Infinity，跨平台逐位一致。规则：加减 `checked`（溢出抛 `OverflowException`，绝不静默回绕）；乘除用 `Int128` 中间结果（不丢精度）后除以 Scale；**取整统一向零截断**（与 C# 整数除法一致，正负对称可重复）；除零显式抛出；`FromFraction` 表达 1/2、7/4 等配置值。**迁移**：`PositionX: -120` 经隐式转换表示 -120 世界单位（内部 ×65536），不是原始定点值——旧默认出生点（-120/120）与 Godot 显示语义不变；Godot 用 `ToDouble()` 显示转换（世界 Y 向上 → 屏幕 Y 向下翻转），浮点结果绝不写回。`StateVersion`/`CoreVersion` 2 → 3 标记格式边界。 |
+| **D64** | **运动配置数据化：`MovementDefinition`（步行速度，纯数据）挂在 `FighterDefinition`（可选参数，null 用默认配置）** | A2：P1/P2 可携带不同运动数据（演示配置 Kai 前 2.0/后 1.5、Rei 前 1.75/后 1.25 单位/帧）；速度存**大小**（恒正），方向由朝向与输入在运动函数里决定，配置不携带符号；构造期校验 > 0 且 ≤ 每帧 32 单位（健全性上限，荒谬配置即失败）；状态机不散落速度常量，Godot 不计算权威速度。跳跃/重力字段留待 05B 按需扩展，不预留空配置。 |
+| **D65** | **地面运动纯函数 `GroundMovement.StepX`：仅站立待机响应前后输入，按「本帧结束逻辑状态」门槛 + 帧开始朝向换算，步移 = 配置速度 × 朝向符号** | A3 表：Standing 允许、Crouching/Startup/Active/Recovery 不允许（动作期间不被移动输入打断；收招归零同帧回站立即可恢复步行——与 D58 同帧语义一致）。输入已由 `DirectionResolver` 按「当帧开始朝向」（D46）解析为相对方向，运动函数只做「前/后 → 世界 ±」换算——朝左按前，世界坐标减小，与方向名无关。SOCD 左右中立由既有解析保证，运动系统不另起炉灶。步行速度不进入快照：停止即静止，无残余动量、无衰减规则。跳跃/重力/边界/推挤属 05B。 |
+
 
 
 ### 离线原型限定（重要）
@@ -341,7 +364,9 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 以下问题**必须在进入阶段 02 之前明确**，不得由实现者临时拍板：
 
 1. **后续状态模型细化**：`BattleState` 内如何组织角色数组（固定 `[2]` 还是可变列表）？引入招式/实体后是否仍保持全量不可变复制，还是改为结构共享（如不可变持久化集合）？
-2. **定点数格式**：位置/速度采用 Q16.16 还是 Q8.8？取整发生点在哪一步？（参考 22 号文档"数值约束"）
+2. ~~**定点数格式**~~ **阶段 05A 已决定（D63）**：Q16.16（`long` 原始值，Scale = 65536），
+   取整统一向零截断，乘除 `Int128` 中间结果，溢出显式抛出；1 世界单位 = 2^16 原始值，
+   Y 向上、地面为 0。**仍待决定**：快照序列化格式（定点原始值如何进出，属 K8 序列化问题）。
 3. **帧内阶段划分**：是否完整采用 22 号文档的 P0–P9？阶段 02 至少需要 P0（帧入口）、P4（运动）、P8（快照）。
 4. ~~**输入归一化策略**~~ **阶段 03A 已决定（D26–D28）**：SOCD 左右同时 → 中立、上下同时 → 上优先；录制层存绝对方向，相对朝向只在解析层应用。**仍待决定**：是否改为「后输入优先」——那需要先扩展 `FrameInput` 记录事件顺序。
 5. **碰撞几何**：采用 AABB 还是 OBB？推挤算法（对称分配 vs 墙角余量）尚未定。

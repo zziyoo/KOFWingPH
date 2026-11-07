@@ -1,5 +1,6 @@
 using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Commands;
+using NewKOF.BattleCore.Numerics;
 
 namespace NewKOF.BattleCore.State;
 
@@ -22,7 +23,13 @@ public enum Facing
 ///       （<see cref="RecognitionState"/>，不可变，含方向历史/蓄力挂起/结果缓冲/消费标记）。</item>
 /// </list>
 ///
-/// <para>仍然不包含：速度、重力、加速度、移动规则（阶段 05 决定）、碰撞、受击。</para>
+/// <para>阶段 05A（D63）起，坐标升级为 <b>Q16.16 定点数</b>（<see cref="FixedPoint"/>）：
+/// <see cref="PositionX"/> / <see cref="PositionY"/> 是唯一权威表示（世界单位，
+/// Y 轴向上、地面为 0）。旧整数坐标语义由 <see cref="PositionXUnits"/> /
+/// <see cref="PositionYUnits"/>（向零截断的只读视图）与「int → FixedPoint 隐式转换 = 世界单位」
+/// 共同保留——旧调用点 <c>PositionX: -120</c> 语义不变（-120 单位，不是原始定点值）。</para>
+///
+/// <para>仍然不包含：速度、重力、加速度、跳跃规则（阶段 05B）、碰撞、受击。</para>
 ///
 /// <para><b>不可变快照契约不退化</b>：本类型仍是 readonly record struct；新字段全部指向
 /// 不可变对象或标量，旧快照不会被新一帧修改。<see cref="RecognitionState"/> 重写了
@@ -32,8 +39,8 @@ public readonly record struct FighterState(
     int Id,
     int MaxHealth,
     int Health,
-    int PositionX,
-    int PositionY,
+    FixedPoint PositionX,
+    FixedPoint PositionY,
     Facing Facing,
     FighterLogicState LogicState = FighterLogicState.Standing,
     string? MoveId = null,
@@ -42,6 +49,12 @@ public readonly record struct FighterState(
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
+
+    /// <summary>旧整数坐标只读视图（X，向零截断）：1 单位 = 1 旧整数坐标单位。</summary>
+    public int PositionXUnits => PositionX.ToIntTruncated();
+
+    /// <summary>旧整数坐标只读视图（Y，向零截断）。</summary>
+    public int PositionYUnits => PositionY.ToIntTruncated();
 
     /// <summary>该角色的指令识别快照；null（旧构造路径）视为未观察的初始状态。</summary>
     public RecognitionState RecognitionState => Recognition ?? RecognitionState.Empty;

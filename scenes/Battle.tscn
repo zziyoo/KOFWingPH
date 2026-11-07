@@ -78,7 +78,7 @@ script = ExtResource("2_capture")
 offset_left = 24.0
 offset_top = 20.0
 offset_right = 330.0
-offset_bottom = 264.0
+offset_bottom = 300.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
 
 [node name="HudLabel" type="Label" parent="Hud"]
@@ -86,6 +86,8 @@ layout_mode = 2
 text = "Logic Frame: 0
 P1: -
 P2: -
+P1 Pos: (-120, 0)
+P2 Pos: (120, 0)
 P1 Command: -
 P2 Command: -
 P1 State: Standing
