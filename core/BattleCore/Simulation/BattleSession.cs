@@ -60,8 +60,9 @@ public sealed class BattleSession
     /// <param name="initialState">初始状态；null 表示 <see cref="BattleState.CreateDefault"/>。</param>
     /// <param name="scheduler">调度器；null 表示默认调度器。</param>
     /// <param name="frameCommitted">
-    /// 可选提交观察者：每个逻辑帧<b>完整提交之后</b>（状态、输入历史、记账均已落定）调用一次，
-    /// 入参为该帧输入与该帧的权威状态。供指令识别等<b>只读</b>派生层使用。
+    /// 可选提交观察者：每个逻辑帧<b>完整提交之后</b>（状态、输入历史、记账均已落定）调用一次。
+    /// 入参为该帧输入与该帧<b>开始之前</b>的权威状态（<c>stateBefore</c>），
+    /// 其中 <c>Facing</c> 是「本帧输入被消费时的朝向」——供指令识别等只读派生层使用。
     /// <b>不得抛异常</b>；若抛出，异常照常向上传播（已提交的帧与记账保持一致，不会回滚）。
     /// </param>
     public BattleSession(
@@ -123,6 +124,11 @@ public sealed class BattleSession
             for (int i = 0; i < budget; i++)
             {
                 int frame = CurrentState.Frame;
+
+                // 帧开始时的权威状态：含「当帧开始时的朝向」，供指令识别按正确朝向解析。
+                // 输入在本帧开始被消费，因此朝向语义必须取帧开始（而不是帧结束）状态。
+                BattleState stateBefore = CurrentState;
+
                 FrameInput input = ResolveInput(frame, inputProvider, inputSource);
 
                 // 防御：输入提供者返回的帧号必须与当前帧一致，否则立即失败而不是静默错帧。
@@ -147,7 +153,8 @@ public sealed class BattleSession
                 committed++;
 
                 // 本帧已完整提交：通知只读观察者（如指令识别）。
-                _frameCommitted?.Invoke(input, nextState);
+                // 传入「帧开始状态」，其 Facing 是本帧输入被消费时的朝向。
+                _frameCommitted?.Invoke(input, stateBefore);
             }
         }
         catch
@@ -196,6 +203,10 @@ public sealed class BattleSession
         for (int i = 0; i < count; i++)
         {
             int frame = CurrentState.Frame;
+
+            // 帧开始状态：供指令识别按「当帧开始朝向」解析（与 Advance 一致）。
+            BattleState stateBefore = CurrentState;
+
             FrameInput input = ResolveInput(frame, inputProvider, inputSource);
 
             if (input.Frame != frame)
@@ -210,8 +221,8 @@ public sealed class BattleSession
             CurrentState = nextState;
             Scheduler.CommitStep();
 
-            // 与 Advance 相同：完整提交后才通知观察者。
-            _frameCommitted?.Invoke(input, nextState);
+            // 与 Advance 相同：完整提交后才通知观察者，传帧开始状态。
+            _frameCommitted?.Invoke(input, stateBefore);
         }
     }
 

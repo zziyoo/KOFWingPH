@@ -43,6 +43,16 @@ namespace NewKOF.BattleCore.Commands;
 /// <para><b>消费语义</b>：一次按键边沿最多完成一条指令。胜出者会消费该边沿，
 /// 同一边沿不会在后续帧重复触发同一条或另一条指令。</para>
 ///
+/// <para><b>手势消费（阶段 03B-1 补修，抑制幽灵指令）</b>：当一条指令在某一帧胜出，
+/// 其方向序列的<b>末方向帧号</b>被标记为「已消费」。此后任何指令都不能再借该
+/// 手势来匹配——即使落败指令的按键边沿仍在容差窗口内，也不会在后续帧幽灵触发。
+/// 两个独立手势（重新走一遍方向）的末方向帧号不同，因此互不影响，后续合法输入
+/// 仍能正常识别。这区分了「同一手势的冲突落败」与「两个独立手势先后完成」。</para>
+///
+/// <para><b>帧号契约</b>：第一次 <see cref="Observe"/> 允许从任意非负初始帧开始
+/// （快照恢复可能从中途帧起）；此后必须<b>严格逐帧连续</b>，重复/回退/跳过都拒绝，
+/// 且非法帧在修改内部状态前即抛出。</para>
+///
 /// <para><b>内存上界</b>：方向历史、按键历史与识别结果缓冲都有显式上限/过期规则，
 /// 不随会话时长无限增长。</para>
 /// </summary>
@@ -81,17 +91,33 @@ public sealed class CommandRecognizer
     }
 
     /// <summary>
-    /// 观察一个已提交的逻辑帧。必须<b>每帧调用一次、帧号严格递增</b>。
+    /// 观察一个已提交的逻辑帧。
+    ///
+    /// <para><b>帧号契约：</b></para>
+    /// <list type="number">
+    /// <item>第一次调用允许从任意<b>非负</b>初始帧开始（快照恢复可能从中间帧起）。</item>
+    /// <item>后续必须<b>严格逐帧连续</b>：重复帧、回退帧、跳过帧都拒绝。</item>
+    /// <item>非法帧在<b>修改任何内部状态之前</b>即抛出，识别器保持原状。</item>
+    /// </list>
+    /// 该契约与 <see cref="Simulation.BattleSession"/> 的逐帧提交机制一致
+    /// （每帧恰好调用一次 <c>frameCommitted</c>）。
     /// </summary>
     /// <param name="input">该逻辑帧的双人输入。</param>
     /// <param name="player1Facing">P1 在该帧的朝向（来自当帧权威状态）。</param>
     /// <param name="player2Facing">P2 在该帧的朝向。</param>
-    /// <exception cref="InvalidOperationException">帧号没有严格递增。</exception>
+    /// <exception cref="ArgumentOutOfRangeException">帧号为负。</exception>
+    /// <exception cref="InvalidOperationException">帧号与上一帧不连续。</exception>
     public void Observe(FrameInput input, Facing player1Facing, Facing player2Facing)
     {
-        if (input.Frame <= _lastObservedFrame)
+        if (input.Frame < 0)
+            throw new ArgumentOutOfRangeException(nameof(input), input.Frame, "逻辑帧号不能为负。");
+
+        // 首次允许任意非负起始帧；此后必须严格 +1 连续。
+        if (_lastObservedFrame >= 0 && input.Frame != _lastObservedFrame + 1)
+        {
             throw new InvalidOperationException(
-                $"指令识别要求帧号严格递增：上一帧 {_lastObservedFrame}，收到 {input.Frame}。");
+                $"指令识别要求帧号严格逐帧连续：上一帧 {_lastObservedFrame}，收到 {input.Frame}（期望 {_lastObservedFrame + 1}）。");
+        }
 
         _lastObservedFrame = input.Frame;
 
@@ -141,16 +167,18 @@ public sealed class CommandRecognizer
         // 4) 同一帧所有指令一起评估，再按稳定优先级取唯一胜者。
         CommandMatch? best = null;
         ButtonPress? bestPress = null;
+        int bestEndFrame = -1;
         foreach (CommandDefinition definition in _definitions)
         {
             if (!TryMatch(player, playerIndex, definition, frame, out CommandMatch? match,
-                    out ButtonPress? press))
+                    out ButtonPress? press, out int endFrame))
                 continue;
 
             if (best is null || IsBetterThan(match, best))
             {
                 best = match;
                 bestPress = press;
+                bestEndFrame = endFrame;
             }
         }
 
@@ -161,6 +189,11 @@ public sealed class CommandRecognizer
         if (bestPress is not null)
             bestPress.Consumed = true;
 
+        // 抑制「同一手势」被其他指令在后续帧补完（幽灵指令）：
+        // 该手势的方向序列末方向帧号标记为已消费，之后任何指令都不能
+        // 再借它匹配。两个独立手势的末方向帧号不同，互不影响。
+        player.ConsumedEndFrames.Add(bestEndFrame);
+
         player.Buffer.Add(best);
         player.Last = best;
     }
@@ -168,6 +201,8 @@ public sealed class CommandRecognizer
     /// <summary>
     /// 尝试匹配一条指令。返回的 <paramref name="press"/> 尚未标记消费，
     /// 由调用方在确定胜者后统一消费（同帧竞争时不能提前吃边沿）。
+    /// <paramref name="matchedEndFrame"/> 是本次匹配所用方向序列末元素的帧号，
+    /// 供调用方标记「该手势已消费」以抑制幽灵指令。
     /// </summary>
     private bool TryMatch(
         PlayerState player,
@@ -175,10 +210,12 @@ public sealed class CommandRecognizer
         CommandDefinition definition,
         int frame,
         out CommandMatch match,
-        out ButtonPress? press)
+        out ButtonPress? press,
+        out int matchedEndFrame)
     {
         match = null!;
         press = null;
+        matchedEndFrame = -1;
 
         IReadOnlyList<CommandDirection> sequence = definition.DirectionSequence;
         List<DirectionEntry> directions = player.Directions;
@@ -195,6 +232,10 @@ public sealed class CommandRecognizer
             if (frame - endFrame > definition.ButtonToleranceFrames)
                 break;
 
+            // 已被其他指令消费过的方向手势，不能再被本指令借来匹配。
+            if (player.ConsumedEndFrames.Contains(endFrame))
+                continue;
+
             int startFrame = directions[endIndex - sequence.Count + 1].Frame;
             if (endFrame - startFrame > definition.MaxSequenceFrames)
                 continue;
@@ -209,6 +250,7 @@ public sealed class CommandRecognizer
                     continue;
 
                 match = CreateMatch(definition, playerIndex, frame, directions, endIndex, buttonFrame: -1);
+                matchedEndFrame = endFrame;
                 return true;
             }
 
@@ -219,6 +261,7 @@ public sealed class CommandRecognizer
 
             match = CreateMatch(definition, playerIndex, frame, directions, endIndex, candidate.Frame);
             press = candidate;
+            matchedEndFrame = endFrame;
             return true;
         }
 
@@ -329,6 +372,9 @@ public sealed class CommandRecognizer
 
         while (player.Presses.Count > 0 && frame - player.Presses[0].Frame > _maxButtonTolerance)
             player.Presses.RemoveAt(0);
+
+        // 已消费手势的帧号随方向条目一并淘汰，避免无限增长。
+        player.ConsumedEndFrames.RemoveWhere(endFrame => endFrame < oldestUsefulFrame);
     }
 
     /// <summary>把 SOCD 解析后的相对输入映射到九宫格方向。</summary>
@@ -383,6 +429,13 @@ public sealed class CommandRecognizer
         public List<CommandMatch> Buffer { get; } = new();
 
         public ReadOnlyCollection<CommandMatch> BufferView { get; }
+
+        /// <summary>
+        /// 已被某条指令消费的方向手势末方向帧号。用于抑制「同一手势」被
+        /// 其他指令在后续容差窗口内补完（幽灵指令）。帧号与方向条目一一对应，
+        /// 随方向条目淘汰时一并清理。
+        /// </summary>
+        public HashSet<int> ConsumedEndFrames { get; } = new();
 
         public InputBits HeldAttacks { get; set; }
 

@@ -655,4 +655,277 @@ public class CommandRecognitionTests
         for (int i = 0; i < count; i++)
             log[from + i] = new FrameInput(from + i, p1, p2);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段 03B-1 补修：P1 幽灵指令 / P2 校验与连续性 / 换边时序
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void LosingCandidateEdge_DoesNotGhostTriggerOnNextFrame()
+    {
+        // 236A（优先级 20）与 236B（优先级 10）共享同一方向序列，只差按键。
+        var fireballA = new CommandDefinition(
+            "236A",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnA,
+            maxSequenceFrames: 20,
+            buttonToleranceFrames: 3,
+            priority: 20,
+            bufferLifetimeFrames: 8);
+
+        var fireballB = new CommandDefinition(
+            "236B",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnB,
+            maxSequenceFrames: 20,
+            buttonToleranceFrames: 3,
+            priority: 10,
+            bufferLifetimeFrames: 8);
+
+        var recognizer = new CommandRecognizer(new[] { fireballA, fireballB });
+
+        // 帧 0 ↓；帧 1 ↘+B；帧 2 →+A；帧 3 →（无新攻击按键）。
+        // 帧 2 上 236A 与 236B 同时成立（B 在帧 1 仍处于 3 帧容差内），236A 胜出。
+        // 帧 3 必须不能利用帧 1 残留的 B 边沿再触发 236B。
+        Run(recognizer, new[]
+        {
+            Down,               // 0
+            Down | Right | BtnB, // 1
+            Right | BtnA,       // 2
+            Right,              // 3
+        });
+
+        IReadOnlyList<CommandMatch> matches = recognizer.BufferedMatches(0);
+        Assert.Single(matches);
+        Assert.Equal("236A", matches[0].CommandId);
+        Assert.Equal(2, matches[0].RecognizedFrame);
+    }
+
+    [Fact]
+    public void IndependentGestureAfterConflict_StillProducesLegalCommand()
+    {
+        var fireballA = new CommandDefinition(
+            "236A",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnA,
+            priority: 20);
+
+        var fireballB = new CommandDefinition(
+            "236B",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnB,
+            priority: 10);
+
+        var recognizer = new CommandRecognizer(new[] { fireballA, fireballB });
+
+        // 第一个手势：↓ ↘ → + A（帧 0..3，A 在帧 3）→ 236A 胜出。
+        // 第二个手势：独立地重新 ↓ ↘ → + B（帧 4..7，B 在帧 7），
+        // 必须仍能被识别为 236B —— 这是两个独立手势，不是同一手势的落败候选。
+        Run(recognizer, new[]
+        {
+            Down,               // 0
+            Down | Right,       // 1
+            Right,              // 2
+            Right | BtnA,       // 3 → 236A
+            Down,               // 4
+            Down | Right,       // 5
+            Right,              // 6
+            Right | BtnB,       // 7 → 236B
+        });
+
+        IReadOnlyList<CommandMatch> matches = recognizer.BufferedMatches(0);
+        Assert.Equal(2, matches.Count);
+        Assert.Equal("236A", matches[0].CommandId);
+        Assert.Equal("236B", matches[1].CommandId);
+        Assert.Equal(3, matches[0].RecognizedFrame);
+        Assert.Equal(7, matches[1].RecognizedFrame);
+    }
+
+    [Fact]
+    public void LosingCandidateSuppression_IsIndependentOfDefinitionOrder()
+    {
+        var fireballA = new CommandDefinition(
+            "236A",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnA,
+            priority: 20);
+
+        var fireballB = new CommandDefinition(
+            "236B",
+            new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward },
+            BtnB,
+            priority: 10);
+
+        InputBits[] input =
+        {
+            Down,
+            Down | Right | BtnB,
+            Right | BtnA,
+            Right,
+        };
+
+        var orderAB = new CommandRecognizer(new[] { fireballA, fireballB });
+        Run(orderAB, input);
+
+        var orderBA = new CommandRecognizer(new[] { fireballB, fireballA });
+        Run(orderBA, input);
+
+        Assert.Equal("236A", Single(orderAB).CommandId);
+        Assert.Equal("236A", Single(orderBA).CommandId);
+    }
+
+    [Fact]
+    public void DragonPunchVsFireballConflict_StillChooses623()
+    {
+        // 回归：236/623 竞争在补修后不得退化（→↓↘→ + A，623 胜出）。
+        CommandRecognizer recognizer = Run(Default(), Script(
+            (2, Right),
+            (2, Down),
+            (2, Down | Right),
+            (2, Right | BtnA)));
+
+        CommandMatch match = Single(recognizer);
+        Assert.Equal(CommandCatalog.DragonPunchLightPunch, match.CommandId);
+    }
+
+    [Fact]
+    public void Observe_RejectsDuplicateFrame_BeforeMutatingState()
+    {
+        var recognizer = Default();
+        recognizer.Observe(new FrameInput(0, InputBits.None, InputBits.None), Facing.Right, Facing.Left);
+
+        Assert.Throws<InvalidOperationException>(
+            () => recognizer.Observe(new FrameInput(0, InputBits.None, InputBits.None), Facing.Right, Facing.Left));
+
+        // 失败后继续送入正确帧，识别器仍正常工作。
+        recognizer.Observe(new FrameInput(1, Down, InputBits.None), Facing.Right, Facing.Left);
+        recognizer.Observe(new FrameInput(2, Down, InputBits.None), Facing.Right, Facing.Left);
+    }
+
+    [Fact]
+    public void Observe_RejectsSkippedFrame_AndContinuesAfterCorrectFrame()
+    {
+        var recognizer = Default();
+        recognizer.Observe(new FrameInput(0, InputBits.None, InputBits.None), Facing.Right, Facing.Left);
+
+        Assert.Throws<InvalidOperationException>(
+            () => recognizer.Observe(new FrameInput(2, InputBits.None, InputBits.None), Facing.Right, Facing.Left));
+
+        // 失败后送入正确帧（1）可继续。
+        recognizer.Observe(new FrameInput(1, Down, InputBits.None), Facing.Right, Facing.Left);
+    }
+
+    [Fact]
+    public void Observe_RejectsBackwardsFrame()
+    {
+        var recognizer = Default();
+        recognizer.Observe(new FrameInput(2, InputBits.None, InputBits.None), Facing.Right, Facing.Left);
+
+        Assert.Throws<InvalidOperationException>(
+            () => recognizer.Observe(new FrameInput(1, InputBits.None, InputBits.None), Facing.Right, Facing.Left));
+    }
+
+    [Fact]
+    public void Observe_AllowsNonZeroInitialFrame_ThenRequiresContiguous()
+    {
+        // 非零初始帧（快照恢复场景）：100、101、102 正常。
+        var recognizer = Default();
+        recognizer.Observe(new FrameInput(100, InputBits.None, InputBits.None), Facing.Right, Facing.Left);
+        recognizer.Observe(new FrameInput(101, Down, InputBits.None), Facing.Right, Facing.Left);
+        recognizer.Observe(new FrameInput(102, Down, InputBits.None), Facing.Right, Facing.Left);
+
+        // 回退到 101 拒绝。
+        Assert.Throws<InvalidOperationException>(
+            () => recognizer.Observe(new FrameInput(101, Down, InputBits.None), Facing.Right, Facing.Left));
+    }
+
+    [Fact]
+    public void CommandDefinition_RejectsAdjacentDuplicateDirections()
+    {
+        Assert.Throws<ArgumentException>(() => new CommandDefinition(
+            "DUP",
+            new[] { CommandDirection.Down, CommandDirection.Down, CommandDirection.Forward },
+            BtnA));
+    }
+
+    [Fact]
+    public void CommandDefinition_RejectsInvalidEnumValue()
+    {
+        var invalid = (CommandDirection)999;
+        Assert.Throws<ArgumentOutOfRangeException>(() => new CommandDefinition(
+            "BAD",
+            new[] { CommandDirection.Down, invalid },
+            BtnA));
+    }
+
+    [Fact]
+    public void CommandDefinition_CopiesDirectionSequence_IgnoresLaterSourceMutation()
+    {
+        var source = new[] { CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward };
+        var definition = new CommandDefinition("236A", source, BtnA);
+
+        source[0] = CommandDirection.Up;
+
+        Assert.Equal(CommandDirection.Down, definition.DirectionSequence[0]);
+    }
+
+    [Fact]
+    public void CommandDefinition_RejectsEmptySequence()
+    {
+        Assert.Throws<ArgumentException>(() => new CommandDefinition(
+            "EMPTY",
+            Array.Empty<CommandDirection>(),
+            BtnA));
+    }
+
+    [Fact]
+    public void Observe_RejectsNegativeFrame()
+    {
+        var recognizer = Default();
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => recognizer.Observe(new FrameInput(-1, InputBits.None, InputBits.None), Facing.Right, Facing.Left));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // P4：换边朝向时序 —— 输入按「当帧开始时的朝向」解析
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void FrameCommittedObserver_ReceivesFrameStartState_AlignedWithInputFrame()
+    {
+        // 观察者收到的「帧开始状态」必须与输入帧号对齐：
+        // state.Frame == input.Frame（不是帧结束后的 Frame+1）。
+        var observed = new List<(int StateFrame, int InputFrame, Facing Facing)>();
+
+        var session = new BattleSession(
+            initialState: BattleState.CreateDefault(),
+            frameCommitted: (input, state) =>
+                observed.Add((state.Frame, input.Frame, state.Fighter(0).Facing)));
+
+        // 推进一帧：默认 P1 朝右，模拟不改朝向。
+        session.StepExact(1);
+
+        (int stateFrame, int inputFrame, Facing facing) = Assert.Single(observed);
+        Assert.Equal(inputFrame, stateFrame);   // 帧开始状态，与输入同帧
+        Assert.Equal(0, stateFrame);            // 首帧
+        Assert.Equal(Facing.Right, facing);     // 当帧开始朝向 = 朝右
+    }
+
+    [Fact]
+    public void SideSwitchAcrossFrames_ResolvesEachFrameWithItsOwnFacing()
+    {
+        // 帧 0/1 朝右做 ↓、↓↘；帧 2 起翻转为朝左，用「左」表达前进完成 →
+        // 识别为 236A。证明识别器按「当帧」朝向解析，而非用最终朝向重算历史。
+        // （与既有 SideSwitchDuringInput 互补：这里显式断言面向右的两帧不被误解析。）
+        CommandRecognizer recognizer = Default();
+
+        recognizer.Observe(new FrameInput(0, Down, InputBits.None), Facing.Right, Facing.Left);
+        recognizer.Observe(new FrameInput(1, Down | Right, InputBits.None), Facing.Right, Facing.Left);
+        recognizer.Observe(new FrameInput(2, Left, InputBits.None), Facing.Left, Facing.Right);
+        recognizer.Observe(new FrameInput(3, Left | BtnA, InputBits.None), Facing.Left, Facing.Right);
+
+        CommandMatch match = Single(recognizer);
+        Assert.Equal(CommandCatalog.QuarterCircleForwardLightPunch, match.CommandId);
+        Assert.Equal(new[] { 0, 1, 2 }, match.DirectionFrames);
+    }
 }

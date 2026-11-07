@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 03B-1 完成：拳皇式基础指令识别）
+> 最后更新：2026-11-07（阶段 03B-1 补修与结项：指令竞争 / 校验 / 连续性 / 朝向时序）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 173，已跳过: 0，总计: 173`
+期望：`失败: 0，通过: 191，已跳过: 0，总计: 191`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,27 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 03B-1 补修（2026-11-07）指令竞争 / 校验 / 连续性 / 朝向时序 —— 本地提交（未推送）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Commands/CommandRecognizer.cs` | P1 手势消费（`ConsumedEndFrames` 抑制幽灵指令）；P2 帧号严格逐帧连续 |
+| `core/BattleCore/Commands/CommandDefinition.cs` | P2 构造期校验：相邻方向不同、非法枚举值、源数组复制 |
+| `core/BattleCore/Simulation/BattleSession.cs` | P4 `frameCommitted` 改传「帧开始状态」（`stateBefore`） |
+| `tests/BattleCore.Tests/CommandRecognitionTests.cs` | 新增幽灵指令复现、独立手势、校验、连续性、朝向时序等 11 项（26 → 37） |
+| `tests/BattleCore.Tests/InputIntegrityTests.cs` | 新增观察者异常安全 3 项（24 → 27） |
+
+**P1 根因**：同一方向手势在 `236A` 胜出后，落败的 `236B` 仍能用残留按键边沿 +
+末方向在下一帧幽灵触发。修复：胜出指令的「方向序列末方向帧号」标记已消费，
+后续指令不得再借该手势匹配；独立手势末方向帧号不同，互不影响。
+
+**P4 朝向时序**：输入按「当帧开始朝向」解析，`frameCommitted` 传入 `stateBefore`
+而非 `nextState`（D46）。
+
+**验收**：191/191 测试通过；核心与表现层 0 警告 0 错误；Godot 无头导入 `[ DONE ]`；
+图形运行 HUD 显示 `P1 Command: 236A`（`shots/fix_236a.png`）。
+变异验证：移除手势消费 → 幽灵指令 2 项失败。
 
 ### 阶段 03B-1（2026-11-07）拳皇式基础指令识别 —— 本地提交（未推送）
 
@@ -334,10 +355,11 @@ cd /d C:\Users\32360\Desktop\NewKOF
 | K18 | **`Commit()` 失败「无副作用」靠输入源自己实现** | 会话能保证自己的状态/计数不前进，但无法回滚第三方源内部已发生的写入 | `InputBuffer` 把校验放在写入前；自定义 `IInputSource` 必须遵守该契约，否则只有它自己脏，帧同步仍不被破坏 |
 | K19 | **快速双击（松开 + 再按落在同一逻辑帧之间）被合并** | 逻辑输入日志中没有中立帧，`66` 不会触发（Godot 实测复现） | 属电平格式的已知合并语义（K14/D31）；真实手感需要逐次事件流，属后续输入格式扩展 |
 | K20 | **指令方向序列要求严格连续** | 跳过 ↘ 的快速 236（↓ 直接到 →）不会被 `236A` 匹配 | 当前刻意严格，避免误判；若需宽松匹配，应在 `CommandDefinition` 增加显式配置，而不是放宽识别器默认行为 |
-| K21 | **`frameCommitted` 观察者不得抛异常** | 若抛，异常会在帧已提交、记账已完成之后向上传播（状态不会半提交） | 实现方必须自行保证不抛；第三方接入时不要把可能失败的业务逻辑塞进观察者 |
+| K21 | ~~**`frameCommitted` 观察者不得抛异常**~~ **已澄清（03B-1 补修）** | 观察者抛异常时该帧已记账、状态已推进、历史对齐，异常照常传播；`Advance` 会把剩余预算记入丢弃 | 安全；但实现方仍应避免塞入可能失败的业务逻辑，异常会中断本次调度批次（已补 3 项回归测试） |
 | K22 | 识别结果缓冲按逻辑帧过期，暂停时不流逝 | 暂停期间 `ExpiresAtFrame` 不会推进 | 设计如此：缓冲是逻辑帧语义，不是真实时间语义 |
+| K23 | **手势消费用「末方向帧号」锁定** | 同一方向手势被某指令消费后，其他指令不能再借它匹配；帧号随方向条目淘汰时清理 | 属 D43 刻意行为，避免幽灵指令；若未来需要「同一手势先后触发多条指令」需重新设计 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 03B-1 验收时 173/173 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 03B-1 补修验收时 191/191 测试通过，可正常启动运行。
 
 ---
 
@@ -352,8 +374,18 @@ cd /d C:\Users\32360\Desktop\NewKOF
   - `1538395` / `083abd5` — 仅文档
   - `bc048c8` — 仅文档（同步 `f145275` 状态）
   - **`0bd0c6d` — 阶段 03A 最终补修（输入与战斗状态原子提交顺序），已推送**
-  - **本轮 03B-1：本地提交 `feat(input): implement phase 03B-1 command recognition`（未推送）。**
-    SHA 用 `git log --oneline -1` 读取。提交内容（19 文件）：
+  - **本轮 03B-1 补修：本地提交 `fix(input): finalize phase 03B-1 command recognition`（未推送）。**
+    SHA 用 `git log --oneline -1` 读取。提交内容（5 文件）：
+    ```
+    修改: core/BattleCore/Commands/CommandRecognizer.cs
+          core/BattleCore/Commands/CommandDefinition.cs
+          core/BattleCore/Simulation/BattleSession.cs
+          tests/BattleCore.Tests/CommandRecognitionTests.cs
+          tests/BattleCore.Tests/InputIntegrityTests.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **上一轮 03B-1：本地提交 `feat(input): implement phase 03B-1 command recognition`（未推送）。**
+    SHA `4d4835b`。提交内容（19 文件）：
     ```
     新增: core/BattleCore/Commands/（5 个 .cs + 5 个 .uid）
           tests/BattleCore.Tests/CommandRecognitionTests.cs（+ .uid）
@@ -364,7 +396,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
     ```
   - **当前 HEAD 请用 `git rev-parse HEAD` 读取**：本节记录的是写文档时的状态，
     不要当作实时 HEAD。
-  - **工作区：干净**（03B-1 已创建本地提交，未推送）。
+  - **工作区：干净**（03B-1 补修已创建本地提交，未推送）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -416,7 +448,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
 2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D42 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、173 项测试、下一阶段计划
+3. `docs/PROGRESS.md` — 已完成/未完成边界、191 项测试、下一阶段计划
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
 6. `core/BattleCore/Input/InputBuffer.cs` — **阶段 03A 核心**：边沿闩锁、两阶段提交、只读历史
@@ -452,6 +484,8 @@ cd /d C:\Users\32360\Desktop\NewKOF
 2. ~~提交阶段 03A 各轮补修~~ **已推送 `0be9919`、`f145275`、`bc048c8`、`0bd0c6d`**。
 3. ~~阶段 03B-1 基础指令识别~~ **已完成并创建本地提交**：236A / 623A / 214B / 66、
    相对朝向与换边、冲突优先级、按键边沿消费、结果缓冲。
+3b. ~~阶段 03B-1 补修~~ **已完成并创建本地提交**：手势消费抑制幽灵指令（D43）、
+   帧连续性（D44）、构造期校验（D45）、朝向时序（D46）、观察者异常安全。
 4. **阶段 03B-2：蓄力与扩展指令** — 蓄力保持帧、超必杀重复序列、按角色拆分指令表、
    招式系统消费接口。**只处理输入与整数逻辑帧**：不需要运动系统、不需要改 `FighterState`、
    不需要先定运动定点数格式。
@@ -485,7 +519,7 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 173」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 191」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -498,7 +532,10 @@ cd /d C:\Users\32360\Desktop\NewKOF
 - [ ] 指令识别只在 `core/BattleCore/Commands/`；`scripts/` 只读取 `LastMatch` 显示，不做判定
 - [ ] 方向历史按「变化」压缩，每个条目用**当帧朝向**解析；换边不得重算历史条目
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D42）与代码实现一致
+- [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
+- [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向
+- [ ] `Observe` 帧号严格逐帧连续（首次任意非负），非法帧先抛后不改内部状态
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D46）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

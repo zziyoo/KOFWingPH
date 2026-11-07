@@ -63,6 +63,20 @@ public sealed class CommandDefinition
         if (sequence.Length == 0)
             throw new ArgumentException("方向序列不能为空。", nameof(directionSequence));
 
+        // 每个元素必须是合法枚举值；相邻元素不得相同（识别器按「方向变化」
+        // 压缩历史，相同相邻方向在定义里是冗余/错误，直接拒绝）。
+        for (int i = 0; i < sequence.Length; i++)
+        {
+            if (!Enum.IsDefined(sequence[i]))
+                throw new ArgumentOutOfRangeException(
+                    nameof(directionSequence), sequence[i], $"第 {i} 个方向不是合法的 {nameof(CommandDirection)} 值。");
+
+            if (i > 0 && sequence[i] == sequence[i - 1])
+                throw new ArgumentException(
+                    $"方向序列相邻元素不能相同（第 {i - 1} 与第 {i} 个都是 {sequence[i]}）。",
+                    nameof(directionSequence));
+        }
+
         InputBits nonAttack = requiredButtons & ~DirectionResolver.AttackButtons;
         if (nonAttack != InputBits.None)
             throw new ArgumentException(

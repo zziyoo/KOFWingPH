@@ -513,4 +513,93 @@ public class InputIntegrityTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new InputBuffer(0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new InputBuffer(-1));
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段 03B-1 补修：提交后观察者（frameCommitted）异常安全
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void FrameCommittedObserver_Throwing_KeepsFrameAccountedAndStateAdvanced()
+    {
+        // 观察者在第 2 帧抛异常：该帧必须已经记账、状态已经推进，
+        // 输入历史与状态对齐，异常照常向上传播（不回滚）。
+        var buffer = new InputBuffer();
+        var observedFrames = new List<int>();
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (input, state) =>
+            {
+                observedFrames.Add(input.Frame);
+                if (input.Frame == 2)
+                    throw new InvalidOperationException("观察者故障");
+            });
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+
+        Assert.Throws<InvalidOperationException>(() => session.StepExact(5, inputSource: buffer));
+
+        // 帧 0/1/2 已提交（观察者在帧 2 抛），帧 3/4 未提交。
+        Assert.Equal(3, session.Scheduler.TotalSteps);
+        Assert.Equal(3, session.CurrentState.Frame);
+        Assert.Equal(3, observedFrames.Count);
+        Assert.Equal(new[] { 0, 1, 2 }, observedFrames);
+        Assert.True(buffer.IsAlignedWith(session.CurrentState.Frame));
+    }
+
+    [Fact]
+    public void FrameCommittedObserver_Throwing_UncommittedBudgetIsRecordedAsDropped()
+    {
+        // 通过 Advance 推进：观察者抛异常后，本批次未提交的剩余预算应记入丢弃。
+        var buffer = new InputBuffer();
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (input, state) => throw new InvalidOperationException("观察者故障"));
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+
+        // 单次 Advance 的预算至少 1 帧；观察者在首帧即抛。
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: buffer));
+
+        // 已提交 1 帧（观察者抛在提交之后），剩余预算记为丢弃。
+        Assert.Equal(1, session.Scheduler.TotalSteps);
+        Assert.Equal(1, session.CurrentState.Frame);
+        Assert.True(session.Scheduler.DroppedStepCount >= 0);
+        Assert.True(session.IsFrameSyncIntact);
+    }
+
+    [Fact]
+    public void FrameCommittedObserver_Throwing_ThenRetryContinuesWithCorrectFrame()
+    {
+        // 观察者抛一次后，恢复用正常观察者继续推进，帧号不得跳变/漏帧。
+        var buffer = new InputBuffer();
+        var failOnce = true;
+        var recognized = new List<int>();
+
+        var session = new BattleSession(
+            scheduler: new FixedStepScheduler(maxStepsPerAdvance: 10),
+            frameCommitted: (input, state) =>
+            {
+                if (failOnce)
+                {
+                    failOnce = false;
+                    throw new InvalidOperationException("一次性故障");
+                }
+
+                recognized.Add(input.Frame);
+            });
+
+        buffer.Sample(InputBits.Right, InputBits.None);
+
+        // 第一次推进：帧 0 触发一次性故障。
+        Assert.Throws<InvalidOperationException>(() => session.Advance(Step, inputSource: buffer));
+
+        // 继续推进：观察者已恢复，后续帧正常。
+        buffer.Sample(InputBits.Right, InputBits.None);
+        session.Advance(Step, inputSource: buffer);
+
+        // 帧 0 已提交（尽管观察者抛了），后续帧从 1 开始，无跳变。
+        Assert.True(recognized.Count > 0);
+        Assert.Equal(1, recognized[0]);
+        Assert.True(session.IsFrameSyncIntact);
+    }
 }
