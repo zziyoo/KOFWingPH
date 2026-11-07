@@ -37,7 +37,9 @@ public class GroundMovementTests
     private static FightRoster CreateSymmetricRoster()
     {
         var movement = new MovementDefinition(
-            FixedPoint.FromInt(2), FixedPoint.FromInt(1));
+            FixedPoint.FromInt(2), FixedPoint.FromInt(1),
+            FixedPoint.FromInt(3), FixedPoint.FromFraction(4, 1), FixedPoint.FromFraction(13, 2),
+            FixedPoint.FromFraction(1, 2), FixedPoint.FromInt(3));
         FighterDefinition kai = DemoRoster.CreateKai();
         FighterDefinition rei = DemoRoster.CreateRei();
         return new FightRoster(
@@ -105,7 +107,10 @@ public class GroundMovementTests
             Assert.Equal(-X(state, 0), X(state, 1));
         }
 
-        Assert.Equal(FixedPoint.FromInt(0), X(state, 0)); // -120 + 2×60
+        // 双人最小间距（D71）在 gap < 60 时生效（f ≥ 46）：对称推挤后停在 ±30
+        // ——镜像对称性在推挤下依然逐帧保持，但不再走到 0。
+        Assert.Equal(FixedPoint.FromInt(-30), X(state, 0));
+        Assert.Equal(FixedPoint.FromInt(30), X(state, 1));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -338,12 +343,23 @@ public class GroundMovementTests
     [Fact]
     public void LongRun_3600Frames_NoDrift()
     {
-        BattleState state = Run(
-            BattleState.CreateDefault(),
-            Hold(InputBits.Right, InputBits.None), 3600);
+        // 长跑的目的是验证定点累计无漂移：超宽场地排除边界钳制；间距设 0 排除推挤。
+        // P1 后退 1.0×3600（朝右按左）、P2 后退 1.0×3600（朝左按右）：
+        // 同速背向而行，间距每帧 +2，绝不相遇/越身/翻转朝向；
+        // 双方各累计 3600 次定点加法，逐位精确无漂移。
+        var wideStage = new StageDefinition(
+            FixedPoint.FromInt(-1_000_000), FixedPoint.FromInt(1_000_000),
+            FixedPoint.Zero, FixedPoint.Zero);
+        var sim = new BattleSimulation(CreateSymmetricRoster(), wideStage);
+        BattleState state = BattleState.CreateDefault();
 
-        // -120 + 2.0×3600 = 7080，逐位精确（05A 无场地边界，越界属 05B 范围）。
-        Assert.Equal(FixedPoint.FromInt(7080), X(state, 0));
+        for (int f = 0; f < 3600; f++)
+            state = sim.Step(state, new FrameInput(f, InputBits.Left, InputBits.Right)).State;
+
+        Assert.Equal(FixedPoint.FromInt(-3720), X(state, 0)); // -120 - 1.0×3600
+        Assert.Equal(FixedPoint.FromInt(3720), X(state, 1));  // 120 + 1.0×3600
+        Assert.Equal(Facing.Right, state.Fighter(0).Facing);
+        Assert.Equal(Facing.Left, state.Fighter(1).Facing);
         Assert.Equal(FixedPoint.Zero, state.Fighter(0).PositionY);
     }
 
@@ -373,7 +389,9 @@ public class GroundMovementTests
     {
         // 0 与负数一律拒绝（速度是大小，方向由朝向与输入决定）。
         Assert.Throws<ArgumentOutOfRangeException>(() => new MovementDefinition(
-            FixedPoint.FromInt(forward), FixedPoint.FromInt(backward)));
+            FixedPoint.FromInt(forward), FixedPoint.FromInt(backward),
+            FixedPoint.FromInt(3), FixedPoint.FromInt(4), FixedPoint.FromInt(6),
+            FixedPoint.FromFraction(1, 2), FixedPoint.FromInt(3)));
     }
 
     [Fact]
@@ -381,9 +399,14 @@ public class GroundMovementTests
     {
         // 每帧 32 单位上限：超过视为配置错误（健全性边界）。
         Assert.Throws<ArgumentOutOfRangeException>(() => new MovementDefinition(
-            FixedPoint.FromInt(33), FixedPoint.FromInt(1)));
+            FixedPoint.FromInt(33), FixedPoint.FromInt(1),
+            FixedPoint.FromInt(3), FixedPoint.FromInt(4), FixedPoint.FromInt(6),
+            FixedPoint.FromFraction(1, 2), FixedPoint.FromInt(3)));
         // 恰好等于上限：合法。
-        var ok = new MovementDefinition(FixedPoint.FromInt(32), FixedPoint.FromInt(32));
+        var ok = new MovementDefinition(
+            FixedPoint.FromInt(32), FixedPoint.FromInt(32),
+            FixedPoint.FromInt(3), FixedPoint.FromInt(4), FixedPoint.FromInt(6),
+            FixedPoint.FromFraction(1, 2), FixedPoint.FromInt(3));
         Assert.Equal(FixedPoint.FromInt(32), ok.WalkForwardSpeed);
     }
 

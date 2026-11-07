@@ -29,7 +29,12 @@ public enum Facing
 /// <see cref="PositionYUnits"/>（向零截断的只读视图）与「int → FixedPoint 隐式转换 = 世界单位」
 /// 共同保留——旧调用点 <c>PositionX: -120</c> 语义不变（-120 单位，不是原始定点值）。</para>
 ///
-/// <para>仍然不包含：速度、重力、加速度、跳跃规则（阶段 05B）、碰撞、受击。</para>
+/// <para>阶段 05B（D68/D69）起，新增空中运动字段：<see cref="VelocityX"/> /
+/// <see cref="VelocityY"/>（世界单位/帧，空中积分，落地归零）、<see cref="JumpKind"/>
+/// （小跳/大跳，随快照携带供只读显示）、<see cref="UpHeldLastFrame"/>（上一逻辑帧解析后的
+/// 「上」电平——起跳边沿判定的事实来源，防自动连跳 B5）。</para>
+///
+/// <para>仍然不包含：碰撞、受击。</para>
 ///
 /// <para><b>不可变快照契约不退化</b>：本类型仍是 readonly record struct；新字段全部指向
 /// 不可变对象或标量，旧快照不会被新一帧修改。<see cref="RecognitionState"/> 重写了
@@ -45,7 +50,11 @@ public readonly record struct FighterState(
     FighterLogicState LogicState = FighterLogicState.Standing,
     string? MoveId = null,
     int PhaseRemainingFrames = 0,
-    RecognitionState? Recognition = null)
+    RecognitionState? Recognition = null,
+    FixedPoint VelocityX = default,
+    FixedPoint VelocityY = default,
+    JumpKind JumpKind = Combat.JumpKind.None,
+    bool UpHeldLastFrame = false)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -103,9 +112,42 @@ public readonly record struct FighterState(
             if (MoveId is not null)
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于待机状态 {LogicState} 但携带招式 {MoveId}。");
-            if (PhaseRemainingFrames != 0)
+
+            // PreJump 是唯一携带非零剩余帧的非动作状态（预备窗口倒计时，D67）；
+            // 其余待机/空中状态剩余必须为 0。
+            if (LogicState != FighterLogicState.PreJump && PhaseRemainingFrames != 0)
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于待机状态 {LogicState} 但阶段剩余帧数为 {PhaseRemainingFrames}（必须为 0）。");
+        }
+
+        // 空中运动不变式（阶段 05B，D68/D69）：
+        // - 地面状态（待机/预备跳/动作三阶段）必须在地面（Y=0）、零速度、无跳跃类型——
+        //   本阶段不做空中招式，动作只在地面发生；
+        // - PreJump 携带 1..∞ 的预备窗口剩余帧（由运动配置限制）；
+        // - Airborne 必须在空中（Y > 0）且携带跳跃类型（垂直速度在顶点可以为 0）。
+        // 新增枚举值不能绕过校验：Enum.IsDefined 通过后仍按状态逐项检查（D62 的延伸）。
+        if (LogicState == FighterLogicState.Airborne)
+        {
+            if (PositionY <= FixedPoint.Zero)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于空中但高度为 {PositionY}（空中状态必须 Y > 0；触地在同一帧内完成修正）。");
+            if (JumpKind == Combat.JumpKind.None)
+                throw new InvalidOperationException($"角色 {Id} 处于空中但没有跳跃类型。");
+        }
+        else
+        {
+            if (PositionY != FixedPoint.Zero)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于地面状态 {LogicState} 但高度为 {PositionY}（必须为 0）。");
+            if (VelocityX != FixedPoint.Zero || VelocityY != FixedPoint.Zero)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于地面状态 {LogicState} 但携带速度 ({VelocityX}, {VelocityY})（必须为零）。");
+            if (JumpKind != Combat.JumpKind.None)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于地面状态 {LogicState} 但携带跳跃类型 {JumpKind}。");
+            if (LogicState == FighterLogicState.PreJump && PhaseRemainingFrames < 1)
+                throw new InvalidOperationException(
+                    $"角色 {Id} 处于起跳预备但剩余帧数为 {PhaseRemainingFrames}（必须 ≥ 1）。");
         }
     }
 }

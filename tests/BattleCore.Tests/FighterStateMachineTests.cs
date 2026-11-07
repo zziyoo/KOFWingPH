@@ -65,11 +65,25 @@ public class FighterStateMachineTests
     }
 
     [Fact]
-    public void Idle_DownAndUp_StandsBecauseUpPriority()
+    public void Idle_UpAndDown_JumpRequestWinsByUpPriority()
     {
-        // SOCD 上优先已在 Resolve 处理；这里直接给「上优先后不为下」的解析结果。
+        // SOCD 上优先（D27）已把 Up+Down 解析为「上」。阶段 05B（D67）起，
+        // 「上」按下边沿 = 起跳请求：从蹲下也能直接进入起跳预备（任务书 B5 要求覆盖该 SOCD 情况），
+        // 不再回到站立。
         var tick = FighterStateMachine.Tick(
             FighterLogicState.Crouching, null, 0, Resolved(up: true), RecognitionState.Empty, Kai, 0);
+        Assert.Equal(FighterLogicState.PreJump, tick.State);
+        Assert.Equal(Kai.Movement.PreJumpFrames, tick.PhaseRemainingFrames);
+    }
+
+    [Fact]
+    public void Idle_UpHeld_NoNewEdge_DoesNotJump_AndUpPriorityStands()
+    {
+        // 「上」上一帧已按住（无新边沿）→ 不起跳（B5 防自动连跳）；
+        // 上优先仍压制蹲下 → 站立。
+        var tick = FighterStateMachine.Tick(
+            FighterLogicState.Crouching, null, 0, Resolved(up: true), RecognitionState.Empty, Kai, 0,
+            upHeldLastFrame: true);
         Assert.Equal(FighterLogicState.Standing, tick.State);
     }
 

@@ -44,10 +44,10 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 3 = 阶段 05A（FighterState 坐标升级为 Q16.16 定点数并接入地面运动；
-    /// 项目尚无序列化快照，无迁移负担，版本号标记格式边界）。
+    /// 状态格式版本 4 = 阶段 05B（FighterState 增加速度/跳跃类型/上一帧「上」电平字段，
+    /// 接入跳跃与场地边界；项目尚无序列化快照，无迁移负担，版本号标记格式边界）。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 3) => new(
+    public static BattleState CreateDefault(int stateVersion = 4) => new(
         frame: 0,
         fighters: new[]
         {

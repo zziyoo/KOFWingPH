@@ -1,5 +1,6 @@
 using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
+using NewKOF.BattleCore.Numerics;
 
 namespace NewKOF.BattleCore.Combat;
 
@@ -8,38 +9,50 @@ namespace NewKOF.BattleCore.Combat;
 /// </summary>
 /// <param name="State">新的角色逻辑状态。</param>
 /// <param name="MoveId">进行中的招式（待机为 null）。</param>
-/// <param name="PhaseRemainingFrames">当前阶段剩余帧数（待机为 0；动作期间恒 ≥ 1）。</param>
+/// <param name="PhaseRemainingFrames">当前阶段剩余帧数（待机为 0；动作/预备跳期间恒 ≥ 1）。</param>
 /// <param name="Recognition">应用了消费标记后的识别状态（纯函数结果）。</param>
 /// <param name="ConsumedMatch">本帧被消费的识别结果（无消费为 null；诊断/测试用）。</param>
+/// <param name="Launch">起跳参数（D68）：仅 PreJump 归零同帧起跳时非 null，
+/// 由运动阶段据此开始空中积分；其余帧为 null。</param>
 public readonly record struct FighterActionTick(
     FighterLogicState State,
     string? MoveId,
     int PhaseRemainingFrames,
     RecognitionState Recognition,
-    CommandMatch? ConsumedMatch);
+    CommandMatch? ConsumedMatch,
+    JumpLaunch? Launch = null);
 
 /// <summary>
-/// 角色<b>动作状态机</b>（阶段 04）：集中、显式、纯函数的状态转换。
+/// 角色<b>动作状态机</b>（阶段 04/05B）：集中、显式、纯函数的状态转换。
 ///
 /// <para>
 /// <b>每帧推进顺序（<see cref="Tick"/>，整数逻辑帧）：</b></para>
 /// <list type="number">
 /// <item><b>动作阶段推进</b>：若处于 Startup/Active/Recovery，剩余帧数 −1；
 ///       归零时按招式数据切换到下一阶段（Startup → Active → Recovery）；
-///       Recovery 结束回到待机——<b>同帧</b>即可进行待机更新与消费（B5）。</item>
-/// <item><b>待机更新（B9）</b>：仅待机状态下，按当帧解析输入切换
-///       Standing ↔ Crouching（「下」按住且「上」未按 → 蹲；SOCD 已由
-///       <c>DirectionResolver</c> 处理）。动作期间<b>不</b>被蹲下输入覆盖。</item>
+///       Recovery 结束回到待机——<b>同帧</b>即可进行待机更新、起跳与消费（B5）。</item>
+/// <item><b>起跳预备推进（D67，05B）</b>：PreJump 剩余 −1；归零同帧起跳——
+///       按当帧输入锁定跳跃类型（末帧「上」仍按住 → 大跳，否则小跳，D68）与
+///       水平初速度（前/后/中立），进入 Airborne 并由 <see cref="FighterActionTick.Launch"/>
+///       携带初始速度。PreJump 期间不消费指令、不做待机更新（不可取消）。</item>
+/// <item><b>待机更新（B9）</b>：仅待机状态下——①「上」按下边沿
+///       （<paramref name="upHeldLastFrame"/> 为上一帧电平，B5 防自动连跳）→ 进入
+///       PreJump（站立/蹲下皆可起跳，SOCD 上优先由解析层保证）；
+///       ② 否则按当帧解析输入切换 Standing ↔ Crouching。
+///       动作期间<b>不</b>被蹲下或起跳覆盖。</item>
 /// <item><b>指令消费（D60）</b>：按缓冲顺序（识别帧升序，每帧至多一条胜者）取
 ///       第一条未消费的有效结果；若其 CommandId 映射到招式、且招式允许从当前
 ///       待机状态发动 → 消费并进入 Startup；否则该结果<b>保留在缓冲中</b>到有效期
-///       结束（失败不消费、不破坏其他结果）。每帧至多消费一条、发动一个动作。</item>
+///       结束（失败不消费、不破坏其他结果）。每帧至多消费一条、发动一个动作。
+///       Airborne / PreJump 不消费（本阶段无空中招式；缓冲保留到有效期，
+///       落地后的第一个地面帧恢复消费——D69 明确语义并测试固定）。</item>
 /// </list>
 ///
 /// <para>
-/// <b>不允许的状态跳转</b>：转换边只有「待机 ↔ 蹲」「待机 → Startup →
-/// Active → Recovery → 待机」，由本函数唯一产生；非法输入（如未配置的 MoveId）
-/// 立即抛出而非静默修正。所有输入（状态、识别缓冲、招式配置）均为不可变数据，
+/// <b>不允许的状态跳转</b>：转换边唯一（待机 ↔ 蹲；待机 → PreJump → Airborne →
+/// 落地 → 待机；待机 → Startup → Active → Recovery → 待机）。落地边在运动阶段
+/// （D69）——Tick 对 Airborne 原样保持，由 <c>BattleSimulation</c> 的积分触地后置为待机。
+/// 非法输入（未配置的 MoveId 等）立即抛出而非静默修正。所有输入均为不可变数据，
 /// 同初态同输入必得同结果。</para>
 /// </summary>
 public static class FighterStateMachine
@@ -52,8 +65,10 @@ public static class FighterStateMachine
     /// <param name="phaseRemainingFrames">帧开始时当前阶段剩余帧数（待机为 0）。</param>
     /// <param name="resolvedInput">本帧按当帧朝向解析后的相对输入（SOCD 已处理）。</param>
     /// <param name="recognition">本帧识别推进<b>之后</b>的识别状态（含本帧新识别结果）。</param>
-    /// <param name="definition">该角色的配置（指令表 + 招式表）。</param>
+    /// <param name="definition">该角色的配置（指令表 + 招式表 + 运动数据）。</param>
     /// <param name="frame">本逻辑帧号（诊断与异常信息用）。</param>
+    /// <param name="upHeldLastFrame">上一逻辑帧解析后的「上」电平（D67 起跳边沿判定；
+    /// 默认 false——首次观察时「按住上」即视为新按下）。</param>
     public static FighterActionTick Tick(
         FighterLogicState state,
         string? moveId,
@@ -61,7 +76,8 @@ public static class FighterStateMachine
         RelativeInput resolvedInput,
         RecognitionState recognition,
         FighterDefinition definition,
-        int frame)
+        int frame,
+        bool upHeldLastFrame = false)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -98,17 +114,53 @@ public static class FighterStateMachine
                     return new FighterActionTick(FighterLogicState.Recovery, moveId,
                         move.RecoveryFrames, recognition, ConsumedMatch: null);
                 case FighterLogicState.Recovery:
-                    // 收招完成 → 回到待机；同帧继续走待机更新与消费（B5）。
+                    // 收招完成 → 回到待机；同帧继续走待机更新、起跳与消费（B5）。
                     break;
             }
         }
+        else if (state == FighterLogicState.PreJump)
+        {
+            // 2) 起跳预备推进（D67）：剩余 −1，归零同帧起跳（D68）。
+            //    跳跃类型与水平方向都按「本帧」（预备窗口末帧）的输入锁定——
+            //    不预知未来输入，也不回溯修改已提交状态。
+            int remaining = phaseRemainingFrames - 1;
+            if (remaining > 0)
+                return new FighterActionTick(FighterLogicState.PreJump, null, remaining,
+                    recognition, ConsumedMatch: null);
 
-        // 2) 待机更新：下方向进入蹲下，否则站立（动作期间不会走到这里——B9）。
-        FighterLogicState idle = resolvedInput.Down && !resolvedInput.Up
+            JumpKind kind = resolvedInput.Up ? JumpKind.HighJump : JumpKind.ShortHop;
+            FixedPoint horizontal = resolvedInput.Forward == resolvedInput.Back
+                ? FixedPoint.Zero
+                : (resolvedInput.Forward ? 1 : -1) * definition.Movement.HorizontalJumpSpeed;
+            FixedPoint vertical = kind == JumpKind.HighJump
+                ? definition.Movement.HighJumpInitialVelocity
+                : definition.Movement.ShortHopInitialVelocity;
+
+            return new FighterActionTick(FighterLogicState.Airborne, null, 0,
+                recognition, ConsumedMatch: null,
+                Launch: new JumpLaunch(kind, horizontal, vertical));
+        }
+        else if (state == FighterLogicState.Airborne)
+        {
+            // 空中：状态机原样保持（重力积分与落地在运动阶段完成，D69）。
+            // 不消费指令、不做待机更新、不响应「上」（空中无跳，B5）。
+            return new FighterActionTick(FighterLogicState.Airborne, null, 0,
+                recognition, ConsumedMatch: null);
+        }
+
+        // 3) 待机更新（B9）：起跳边沿优先于蹲下切换。
+        bool jumpRequested = resolvedInput.Up && !upHeldLastFrame;
+        if (jumpRequested)
+        {
+            return new FighterActionTick(FighterLogicState.PreJump, null,
+                definition.Movement.PreJumpFrames, recognition, ConsumedMatch: null);
+        }
+
+        FighterLogicState idle = resolvedInput.Down
             ? FighterLogicState.Crouching
             : FighterLogicState.Standing;
 
-        // 3) 指令消费（D60）：缓冲顺序即选择顺序（识别帧升序，确定性）。
+        // 4) 指令消费（D60）：缓冲顺序即选择顺序（识别帧升序，确定性）。
         foreach (BufferedResult result in recognition.Buffer)
         {
             if (result.Consumed)

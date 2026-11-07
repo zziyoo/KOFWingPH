@@ -169,7 +169,9 @@ public partial class BattleScene : Node2D
                 $"P1: {Describe(last.Player1)}\n" +
                 $"P2: {Describe(last.Player2)}\n" +
                 $"P1 Pos: {DescribePosition(p1)}\n" +
+                $"P1 Vel: {DescribeVelocity(p1)}\n" +
                 $"P2 Pos: {DescribePosition(p2)}\n" +
+                $"P2 Vel: {DescribeVelocity(p2)}\n" +
                 $"P1 Command: {DescribeCommand(LatestCommand(state, 0))}\n" +
                 $"P2 Command: {DescribeCommand(LatestCommand(state, 1))}\n" +
                 $"P1 State: {state.Fighter(0).LogicState}\n" +
@@ -182,6 +184,11 @@ public partial class BattleScene : Node2D
     /// <summary>把权威定点坐标渲染成 HUD 文本（世界坐标，Y 向上，地面为 0；显示用浮点）。</summary>
     private static string DescribePosition(FighterState fighter) =>
         $"({fighter.PositionX.ToDouble():0.##}, {fighter.PositionY.ToDouble():0.##})";
+
+    /// <summary>把权威速度与跳跃类型渲染成 HUD 文本（速度 = 世界单位/帧；显示用浮点）。</summary>
+    private static string DescribeVelocity(FighterState fighter) =>
+        $"({fighter.VelocityX.ToDouble():0.##}, {fighter.VelocityY.ToDouble():0.##})" +
+        (fighter.JumpKind == JumpKind.None ? string.Empty : $"  Jump: {fighter.JumpKind}");
 
     /// <summary>从权威识别快照取最近一次识别结果（阶段 04：识别在内核，Godot 只读）。</summary>
     private static CommandMatch? LatestCommand(BattleState state, int player) =>

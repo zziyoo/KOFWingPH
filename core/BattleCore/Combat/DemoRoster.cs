@@ -68,10 +68,17 @@ public static class DemoRoster
                 startupFrames: 3, activeFrames: 2, recoveryFrames: 6,
                 allowedFrom: MoveAllowedStates.Standing),
         },
-        // 运动配置（D64）：Kai 前行 2.0 / 后撤 1.5 单位每帧（120 / 90 单位每秒）。
+        // 运动配置（D64/D68）：Kai——前行 2.0 / 后撤 1.5 单位每帧；预备跳 3 帧；
+        // 小跳初速 4.0（腾空 16 帧、最高 14）、大跳初速 6.5（腾空 26 帧、最高 39）、
+        // 重力 0.5、水平跳速 3.0。
         movement: new MovementDefinition(
             walkForwardSpeed: FixedPoint.FromFraction(2, 1),
-            walkBackwardSpeed: FixedPoint.FromFraction(3, 2)));
+            walkBackwardSpeed: FixedPoint.FromFraction(3, 2),
+            preJumpFrames: FixedPoint.FromInt(3),
+            shortHopInitialVelocity: FixedPoint.FromFraction(4, 1),
+            highJumpInitialVelocity: FixedPoint.FromFraction(13, 2),
+            jumpGravity: FixedPoint.FromFraction(1, 2),
+            horizontalJumpSpeed: FixedPoint.FromInt(3)));
 
     /// <summary>角色乙「Rei」的配置。</summary>
     public static FighterDefinition CreateRei() => new(
@@ -97,10 +104,17 @@ public static class DemoRoster
             new MoveDefinition(SweepPrototype, "214B",
                 startupFrames: 3, activeFrames: 4, recoveryFrames: 9),
         },
-        // 运动配置（D64）：Rei 与 Kai 刻意不同——证明 P1/P2 可携带不同运动数据。
+        // 运动配置（D64/D68）：Rei 与 Kai 刻意不同——证明 P1/P2 可携带不同运动数据：
+        // 前 1.75 / 后 1.25 单位每帧；预备跳 4 帧；小跳初速 3.5、大跳初速 6.0、
+        // 重力 0.5、水平跳速 2.5。
         movement: new MovementDefinition(
             walkForwardSpeed: FixedPoint.FromFraction(7, 4),
-            walkBackwardSpeed: FixedPoint.FromFraction(5, 4)));
+            walkBackwardSpeed: FixedPoint.FromFraction(5, 4),
+            preJumpFrames: FixedPoint.FromInt(4),
+            shortHopInitialVelocity: FixedPoint.FromFraction(7, 2),
+            highJumpInitialVelocity: FixedPoint.FromInt(6),
+            jumpGravity: FixedPoint.FromFraction(1, 2),
+            horizontalJumpSpeed: FixedPoint.FromFraction(5, 2)));
 
     /// <summary>默认演示对局：Kai（P1）对 Rei（P2）。</summary>
     public static FightRoster CreateKaiVsRei() => new(CreateKai(), CreateRei());
