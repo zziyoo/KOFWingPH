@@ -62,6 +62,13 @@ public readonly record struct FighterState(
         if (Health < 0 || Health > MaxHealth)
             throw new InvalidOperationException($"角色 {Id} 的 Health 越界：{Health}/{MaxHealth}。");
 
+        // 合法枚举检查（D62）：未定义的 FighterLogicState 无论其他字段是什么都拒绝——
+        // 否则 (FighterLogicState)999 + 空 MoveId + 0 帧会被误认为正常待机。
+        // Enum.IsDefined 以枚举定义本身为唯一事实来源，不会与状态机维护出两份清单。
+        if (!Enum.IsDefined(LogicState))
+            throw new InvalidOperationException(
+                $"角色 {Id} 携带未定义的角色逻辑状态：{LogicState}（{(int)LogicState}）。");
+
         // 动作状态不变式（D57）：阶段剩余帧数不允许为负；动作期间必须带 MoveId 且
         // 剩余 ≥ 1（阶段切换在归零的同一帧完成，不产生 0 帧的中间状态）；
         // 待机状态必须无 MoveId 且剩余为 0。

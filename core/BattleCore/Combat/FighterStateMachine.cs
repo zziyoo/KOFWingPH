@@ -66,6 +66,15 @@ public static class FighterStateMachine
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
 
+        // 入口合法性校验（D62）：直接调用 Tick 也必须拒绝未定义状态——
+        // 不允许未知枚举被当作待机「修正」，也不依赖 BattleState 构造代为校验。
+        // Enum.IsDefined 以枚举定义本身为唯一事实来源（与 FighterState.Validate 一致）。
+        if (!Enum.IsDefined(state))
+        {
+            throw new InvalidOperationException(
+                $"帧 {frame}：未定义的角色逻辑状态 {state}（{(int)state}）不能推进。");
+        }
+
         // 1) 动作阶段推进。
         if (IsInMove(state))
         {

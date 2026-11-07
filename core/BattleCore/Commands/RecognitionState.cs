@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.State;
 
@@ -71,6 +72,13 @@ public readonly record struct ChargePending(bool HasPending, int AmountHeld, int
 /// <para><b>内存上界</b>：方向条目 ≤ <see cref="MaxDirectionEntries"/>，按键/缓冲/消费标记
 /// 按时间窗裁剪；蓄力槽位 = 指令数，不随时长增长。</para>
 ///
+/// <para><b>集合所有权（D61）</b>：五个公开集合（Directions/Presses/Buffer/
+/// ConsumedEndFrames/ChargePendings）在构造点一律包装为单实例
+/// <see cref="ReadOnlyCollection{T}"/>——强转 <c>List{T}</c>/<c>T[]</c> 得 null，
+/// <c>IList{T}</c>/非泛型 <c>IList</c> 写操作抛 <see cref="NotSupportedException"/>
+/// 且不生效。内部构造仍用可变 List（高效流程保留），只在快照落定点包装一次；
+/// 新旧状态各自持有独立包装（不共享可写底层），只读包装之间共享是安全的。</para>
+///
 /// <para><b>结构化相等</b>：重写了 <c>Equals</c>——两个内容相同的状态相等，
 /// 因此携带识别状态的 <c>FighterState</c> 在跨实例确定性比较中仍然成立。</para>
 /// </summary>
@@ -79,15 +87,16 @@ public sealed class RecognitionState
     /// <summary>方向条目数量上限（兜底，防极端抖动输入下无界增长）。</summary>
     private const int MaxDirectionEntries = 64;
 
-    /// <summary>未观察过的初始状态（无任何历史；蓄力槽位在首次推进时按指令数补齐）。</summary>
+    /// <summary>未观察过的初始状态（无任何历史；蓄力槽位在首次推进时按指令数补齐）。
+    /// 共享实例被多角色/多对局使用，因此与常规状态一样是只读包装（D61）。</summary>
     public static RecognitionState Empty { get; } = new(
         lastObservedFrame: -1,
         heldAttacks: InputBits.None,
-        directions: Array.Empty<DirectionEntry>(),
-        presses: Array.Empty<PressRecord>(),
-        buffer: Array.Empty<BufferedResult>(),
-        consumedEndFrames: Array.Empty<int>(),
-        chargePendings: Array.Empty<ChargePending>(),
+        directions: new ReadOnlyCollection<DirectionEntry>(Array.Empty<DirectionEntry>()),
+        presses: new ReadOnlyCollection<PressRecord>(Array.Empty<PressRecord>()),
+        buffer: new ReadOnlyCollection<BufferedResult>(Array.Empty<BufferedResult>()),
+        consumedEndFrames: new ReadOnlyCollection<int>(Array.Empty<int>()),
+        chargePendings: new ReadOnlyCollection<ChargePending>(Array.Empty<ChargePending>()),
         last: null);
 
     private RecognitionState(
@@ -218,8 +227,13 @@ public sealed class RecognitionState
 
         if (best is null)
         {
-            return new RecognitionState(frame, attacks, directions, presses, buffer,
-                consumedEndFrames, pendings, Last);
+            return new RecognitionState(frame, attacks,
+                new ReadOnlyCollection<DirectionEntry>(directions),
+                new ReadOnlyCollection<PressRecord>(presses),
+                new ReadOnlyCollection<BufferedResult>(buffer),
+                new ReadOnlyCollection<int>(consumedEndFrames),
+                new ReadOnlyCollection<ChargePending>(pendings),
+                Last);
         }
 
         // 一次按键边沿只允许完成一条指令：胜者与落败候选的边沿都消费（D47）。
@@ -238,8 +252,13 @@ public sealed class RecognitionState
         // 胜者进缓冲（未消费），Last 更新（LastMatch 仅供显示，D41）。
         buffer.Add(new BufferedResult(best, false));
 
-        return new RecognitionState(frame, attacks, directions, presses, buffer,
-            consumedEndFrames, pendings, best);
+        return new RecognitionState(frame, attacks,
+            new ReadOnlyCollection<DirectionEntry>(directions),
+            new ReadOnlyCollection<PressRecord>(presses),
+            new ReadOnlyCollection<BufferedResult>(buffer),
+            new ReadOnlyCollection<int>(consumedEndFrames),
+            new ReadOnlyCollection<ChargePending>(pendings),
+            best);
     }
 
     /// <summary>
@@ -269,8 +288,9 @@ public sealed class RecognitionState
             buffer[i] = Buffer[i];
         buffer[index] = new BufferedResult(Buffer[index].Match, true);
 
+        // 其余四个集合复用旧状态的只读包装（只读实例可安全共享）；Buffer 换新包装。
         return new RecognitionState(LastObservedFrame, HeldAttacks, Directions, Presses,
-            buffer, ConsumedEndFrames, ChargePendings, Last);
+            new ReadOnlyCollection<BufferedResult>(buffer), ConsumedEndFrames, ChargePendings, Last);
     }
 
     /// <summary>

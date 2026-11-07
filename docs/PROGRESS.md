@@ -1,6 +1,6 @@
 ﻿# PROGRESS.md — NewKOF 开发进度
 
-> 最后更新：2026-11-07（阶段 04 角色状态机与招式系统）
+> 最后更新：2026-11-07（阶段 04 最终补修：快照不可变性 / 非法状态校验）
 
 ---
 
@@ -363,9 +363,9 @@ cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
 
-**最近一次实际运行结果（2026-11-07，阶段 04 后实测）**
+**最近一次实际运行结果（2026-11-07，阶段 04 最终补修后实测）**
 ```
-已通过! - 失败: 0，通过: 326，已跳过: 0，总计: 326，持续时间: 664 ms - BattleCore.Tests.dll (net8.0)
+已通过! - 失败: 0，通过: 343，已跳过: 0，总计: 343，持续时间: 854 ms - BattleCore.Tests.dll (net8.0)
 ```
 
 | 测试文件 | 用例数（`--list-tests` 实测） | 内容 |
@@ -388,8 +388,10 @@ dotnet test
 | `FighterStateMachineTests.cs` | 13 | **04（D58）**：默认站立、蹲下切换（含 SOCD 上优先）、阶段推进与 1 帧边界、动作期间不产生非法跳转、损坏状态（无 MoveId/未知招式）抛出、待机消费进 Startup、动作期间不消费、收招同帧消费 |
 | `MoveConsumptionTests.cs` | 15 | **04（D60/D56）**：一次消费/第二次失败、过期不可消费、保留到有效期、无映射跳过不阻断、FIFO 选择顺序、同指令不同招式（Kai/Rei）、朝左识别、蹲姿门控、裸按键（长待机触发/按住不重复/让位高优先级）、Last≠可发动、纯函数不改入参、Step 分批一致 |
 | `Phase04IntegrationTests.cs` | 12 | **04（B6/B8）**：完整招式时间线逐帧断言（4/3/8）、独立二次发动、动作期间重复输入、蹲下不覆盖动作、P1/P2 独立角色表、确定性、旧快照重放、批次一致、Advance/StepExact + 暂停 + 帧同步、观察者故障封闭、快照含动作状态 |
+| `SnapshotImmutabilityTests.cs` | 6 | **04 补修（D61）**：五集合不可被强转 List/数组/`IList` 修改（含只读接口抛错与内容保持）、Empty 共享安全、WithResultConsumed 新旧互不污染、旧快照修改尝试后重放仍确定、1000 帧双人隔离与裁剪有界、相等状态哈希一致且稳定 |
+| `FighterStateValidationTests.cs` | 11 | **04 补修（D62）**：`(999)/(-1)/(5)/(100)` 拒绝并含具体值、非法枚举 + MoveId 字段仍拒绝、BattleState 构造期拒绝（第一道门）、Tick 直接拒绝未知状态且不被静默修正（第二道门）、合法五态通过校验并正常推进、负帧数保持拒绝 |
 | `DoubleMotionCommandTests.cs` | 11 | **03B-2 + 最终补修**：双重指令成功/缺段/超时、**真正 40/41 帧跨度超时边界（连续方向序列）**、与单段竞争、新手势识别、无按键不触发 |
-| **合计** | **326** | 与 `dotnet test` 的「总计: 326」一致 |
+| **合计** | **343** | 与 `dotnet test` 的「总计: 343」一致 |
 
 > 说明：上表是 **xUnit 用例数**（`Theory` 的每个 `InlineData` 计一条），不是方法数。
 > 早先版本按方法数填写，与「总计」对不上，已按 `--list-tests` 实测校正。
@@ -986,6 +988,55 @@ HUD 九行只读权威状态（Logic Frame / 双人输入 / 双人 Command / 双
 
 ---
 
+## 阶段 04 最终补修（2026-11-07）—— 快照深层不可变性 / 非法状态校验（D61/D62）
+
+### P1：识别快照集合可被外部修改（D61）
+
+**根因**：`RecognitionState.Advance` 把工作 `List<T>` 直接存进 `IReadOnlyList<T>` 属性
+（接口仅限制编译期视图）；`WithResultConsumed` 暴露裸 `BufferedResult[]`；
+`Empty` 共享 `Array.Empty`。识别状态随 `FighterState` 进入 `BattleState`，
+外部强转即可篡改权威快照。
+
+**修复前失败复现（实测 17 项新测试中 5 项失败）**：
+`PublicCollections_AreNotExternallyMutable`（Directions 可强转 `List<DirectionEntry>`
+并被 `Clear()`）、`EmptyState_IsSharedSafely`、`WithResultConsumed_OldAndNewStates_BothImmutable`、
+`OldSnapshot_MutationAttempts_DoNotAffectReplay`、`LongRun_1000Frames_PlayersIsolated_NoPollution`。
+
+**修复（D61）**：五个公开集合（Directions/Presses/Buffer/ConsumedEndFrames/ChargePendings）
+在构造点一律包装为单实例 `ReadOnlyCollection<T>`（D34 先例）——强转 `List<T>`/`T[]`
+得 null；`IList{T}`/非泛型 `IList` 写操作抛 `NotSupportedException` 且不生效。
+内部构造保留可变 List 高效流程，只在快照落定点包装一次；每帧状态各持独立包装，
+只读包装之间共享安全。哈希/相等语义不变。
+
+### P2：非法 FighterLogicState 静默通过（D62）
+
+**根因**：`Validate` 的待机分支把一切非动作状态当待机——`(FighterLogicState)999`
+携带空 MoveId 与 0 帧即可通过构造；`Tick` 把未知状态静默「修正」为 Standing/Crouching。
+
+**修复前失败复现**：P2 相关 10 项新测试全部失败（Validate 不抛、Tick 不抛、
+BattleState 构造接受）。
+
+**修复（D62）**：两道门都用 `Enum.IsDefined` 集中校验（唯一事实来源 = 枚举定义）——
+`Validate` 无论其他字段一律拒绝未定义状态（错误消息含具体非法值）；
+`Tick` 推进前独立拒绝（不依赖构造代为校验）。损坏状态在 BattleState 构造期即被拒
+（第一道门），Tick 为第二道门。合法状态（含收招回待机）与负帧数拒绝行为不变。
+
+### 验收（补修实测）
+
+| 项 | 结果 |
+|---|---|
+| 全量测试 | **343/343 通过**（326 + 17：P1 复现+回归 6 项、P2 复现+回归 11 项） |
+| `dotnet build core/BattleCore` | 0 警告 / 0 错误 |
+| `dotnet build NewKOF.csproj` | 0 警告 / 0 错误 |
+| Godot 无头导入 | `[ DONE ]` |
+| Godot 图形运行 | 5A 链路完好：`P1 Command: 5A` / `StandLightPunch / Startup 2`（`shots/p04_fix_5a.png`，与注入日志推演逐帧吻合），HUD 无退化 |
+
+快照重放、输入提交异常封闭、帧同步、蓄力/双重指令、一次消费、双人独立均由
+既有回归 + 新增 D61 测试双重覆盖（`OldSnapshot_MutationAttempts_DoNotAffectReplay`、
+`LongRun_1000Frames_PlayersIsolated_NoPollution`、`EqualStates_HaveStableAndConsistentHashes`）。
+
+---
+
 ## 下一阶段计划：阶段 05（运动系统 / 判定与结算前置）
 
 **进入前必须先读** `ARCHITECTURE.md` 第 4 节（D37–D60：输入、指令、状态机与配置规则）与第 5 节。
@@ -1007,8 +1058,8 @@ HUD 九行只读权威状态（Logic Frame / 双人输入 / 双人 Command / 双
 
 **注意**：若要「后输入优先」SOCD，必须先扩展 `FrameInput` 记录事件顺序（D27 仍有效）。
 
-> 阶段 04 已结项。接手后先看 `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test`
-> 确认 **326** 项通过再继续。
+> 阶段 04 已连同最终补修结项。接手后先看 `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test`
+> 确认 **343** 项通过再继续。
 
 **每完成一个子任务，立即更新本文件与 `AGENT_HANDOFF.md`。**
 

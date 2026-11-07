@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — NewKOF 架构说明
 
-> 最后更新：阶段 04 完成（2026-11-07，含 D54–D60）
+> 最后更新：阶段 04 最终补修（2026-11-07，含 D61–D62：快照不可变性 / 非法状态校验）
 > 本文描述**已确定**的架构与**未决定**的问题。修改代码前请先读本文件。
 
 ---
@@ -292,6 +292,8 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | **D58** | **状态机集中为纯函数 `FighterStateMachine.Tick`：阶段推进 → 待机更新 → 消费，转换边唯一** | 不把状态写成嵌套 if/else 散落各处（B2）：合法转换图唯一（待机↔蹲、待机→Startup→Active→Recovery→待机），由 Tick 单点产生；损坏状态（动作无 MoveId、未配置招式）立即抛出而非静默修正。每帧顺序固定：① 阶段剩余 −1，归零按招式数据切换（Recovery 完成同帧即可待机更新与消费）；② 仅待机时按解析输入切换站立/蹲下（动作不被蹲下覆盖，B9）；③ 消费（D60）。Airborne/Hitstun 等未来状态只做文档预留，不加空枚举值。 |
 | **D59** | **角色专属配置：`FighterDefinition`（指令表 + 招式表）与 `FightRoster`（双方配置），构造期校验 + 防御复制** | B4：不同角色不同指令集合；两名角色可有相同 CommandId 映射不同 MoveId（演示配置 Kai/Rei 均有 236A → 不同招式不同帧数）。识别器不认识角色，只按配置给出的指令表匹配；指令→招式映射只存在于配置。校验：指令 ID 重复、招式 ID 重复、招式引用不存在指令、空 ID 全部构造期失败；招式阶段帧数 ≥ 1；传入集合防御性复制（外部改动不影响配置）。空配置 `FightRoster.CreateEmpty()` 保持阶段 01–03 默认行为。 |
 | **D60** | **消费契约：`RecognitionState.WithResultConsumed`（显式失败）+ `Tick` 内确定选择顺序** | 识别、缓冲、消费、动作状态转换是四个概念（B5）：每条结果最多成功消费一次（消费标记在快照里）；过期不能消费（过期结果在 Advance 时移除；WithResultConsumed 对不存在/已消费结果抛出）；不属于当前角色的指令不会误消费（按角色配置查招式，无映射则保留）；失败不破坏其他结果（逐条尝试，跳过保留）；不能行动时保留到有效期结束、恢复可行动同帧可消费；选择顺序 = 缓冲顺序（识别帧升序，每帧至多一条胜者，确定性）；`LastMatch` 只是显示——绝不据其发动（有「Last 有值但缓冲空 → 不发动」测试）。 |
+| **D61** | **识别快照集合所有权：五个公开集合一律只读包装（修复深层不可变性缺陷）** | 复现出的缺陷：`Advance` 把工作 `List<T>` 直接存进 `IReadOnlyList<T>` 属性——接口只是编译期视图，实测可强转回 `List<T>` 并 `Clear()` 修改权威快照；`WithResultConsumed` 暴露裸数组（可经 `IList<T>`/`T[]` 写入）；`Empty` 共享 `Array.Empty`。识别状态随 `FighterState` 进入 `BattleState`，这是权威快照完整性问题（15 项复现测试失败）。修复：五个公开集合（Directions/Presses/Buffer/ConsumedEndFrames/ChargePendings）在构造点一律包装为单实例 `ReadOnlyCollection<T>`（与 D34 `InputBuffer.History` 同一先例）——强转 `List<T>`/`T[]` 得 null，`IList{T}`/非泛型 `IList` 写操作抛 `NotSupportedException` 且不生效。内部构造保留可变 List 高效流程，只在快照落定点包装一次；每帧状态各持独立包装（不共享可写底层），只读包装之间共享安全（`Empty` 同样包装）。哈希与相等语义不变：相等状态哈希一致、内容比较不受包装影响。 |
+| **D62** | **非法 `FighterLogicState` 两道门拒绝：`Validate` 构造期 + `Tick` 推进期，均用 `Enum.IsDefined` 集中校验** | 复现出的缺陷：`Validate` 的待机分支把一切非动作状态当待机——`(FighterLogicState)999` 携带空 MoveId 与 0 帧即可通过构造；`Tick` 的 `IsInMove(999)` 为 false，未知状态被静默「修正」成 Standing/Crouching。修复：两处入口都用 `Enum.IsDefined`（唯一事实来源 = 枚举定义本身，不会维护出两份不一致的状态清单）——Validate 无论其他字段是什么一律拒绝；Tick 推进前独立拒绝（不依赖构造代为校验）。合法状态（含收招回待机）行为不变；负剩余帧数拒绝保持。实测：损坏状态在 BattleState 构造期即被拒（第一道门），Tick 校验为第二道门。 |
 
 
 

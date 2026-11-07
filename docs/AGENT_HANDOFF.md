@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 04 角色状态机与招式系统 —— 结项）
+> 最后更新：2026-11-07（阶段 04 最终补修：快照不可变性 D61 / 非法状态校验 D62）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 326，已跳过: 0，总计: 326`
+期望：`失败: 0，通过: 343，已跳过: 0，总计: 343`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +118,19 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 04 最终补修（2026-11-07）快照不可变性 / 非法状态校验（D61/D62）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Commands/RecognitionState.cs` | **D61**：五个公开集合（Directions/Presses/Buffer/ConsumedEndFrames/ChargePendings）在构造点包装为单实例 `ReadOnlyCollection<T>`——修复「`IReadOnlyList` 只是接口视图、底层 List/数组可被强转修改」的权威快照完整性缺陷；内部可变 List 构造流程保留，只在快照落定点包装一次；`Empty` 同样包装（共享安全） |
+| `core/BattleCore/State/FighterState.cs` | **D62**：`Validate` 首项用 `Enum.IsDefined` 拒绝未定义 `FighterLogicState`（错误消息含具体非法值），无论其他字段是什么 |
+| `core/BattleCore/Combat/FighterStateMachine.cs` | **D62**：`Tick` 入口独立校验未定义状态（不依赖构造代为校验，不被静默「修正」为待机） |
+| `tests/BattleCore.Tests/SnapshotImmutabilityTests.cs` | **新增 6 项**：五集合强转/只读接口/内容保持断言、Empty 共享安全、WithResultConsumed 新旧互不污染、旧快照修改尝试后重放仍确定、1000 帧双人隔离、哈希一致且稳定 |
+| `tests/BattleCore.Tests/FighterStateValidationTests.cs` | **新增 11 项**：`(999)/(-1)/(5)/(100)` 拒绝含具体值、带 MoveId 字段仍拒绝、BattleState 构造期拒绝、Tick 直接拒绝且不静默修正、合法五态校验与推进、负帧数保持 |
+
+**修复前失败复现**：17 项新测试中 **15 项失败**（P1 五项：Directions 可强转 `List` 被
+`Clear()` 等；P2 十项：`(999)` 静默通过构造与推进）。修复后 **343/343 通过**。
 
 ### 阶段 04（2026-11-07）角色状态机与招式系统 —— 结项
 
@@ -475,8 +488,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K27 | **序列指令要求「末方向新进入」** | 按住某方向较久后按攻击键，不会触发以该方向结尾的序列指令（按键容差从末方向**进入帧**起算）——如长按 ↓ 再按 A 不触发「↓+A」型指令 | D39 的既有语义在长按场景的自然结果；「无方向要求」的基础动作用裸按键指令（D56）表达。若要「按住方向 + 按键」，应扩展容差锚点（显式设计，勿放宽默认） |
 | K28 | **识别状态与动作状态随快照推进** | `FighterState` 每帧都产生新实例（识别历史合法前进）；跨实例比较依赖 `RecognitionState` 的结构化相等 | D55 设计如此；不要把识别状态移出权威快照（会破坏重放契约 B6.3/6.8） |
 | K29 | **`StateVersion` 已升到 2 / CoreVersion 2** | 阶段 04 改变了 FighterState 格式（动作状态 + 识别快照） | 项目无序列化快照，无迁移负担；未来引入序列化时以版本号分支（K8 仍有效） |
+| K30 | **识别快照的五个公开集合是 `ReadOnlyCollection` 包装** | 强转 `List<T>`/`T[]` 得 null；`IList` 写操作抛 `NotSupportedException` | D61 设计如此（D34 同一先例）；需要改动集合请走 `Advance`/`WithResultConsumed` 纯函数，不要试图绕过包装 |
+| K31 | **非法 `FighterLogicState` 在两道门被拒** | `FighterState.Validate`（BattleState 构造期）与 `FighterStateMachine.Tick` 入口都用 `Enum.IsDefined` 拒绝未定义枚举 | D62 设计如此；新增状态枚举值时两处自动跟随枚举定义，无需维护状态清单 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 04 验收时 326/326 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 04 最终补修验收时 343/343 测试通过，可正常启动运行。
 
 ---
 
@@ -498,22 +513,18 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
     不要当作实时 HEAD。
   - **本轮 03B-2 最终补修：`fix(input): finalize charge timing and command timeout`（`0843dd6`），已推送。**
   - **03B 边界补修：`fix(input): prevent stale direction reuse after charge release`（`5434c5b`），已推送。**
-  - **本轮阶段 04：`feat(combat): implement phase 04 fighter state machine`**
+  - **阶段 04：`feat(combat): implement phase 04 fighter state machine`（`b622d0f`），已推送。**
+  - **本轮阶段 04 最终补修：`fix(combat): enforce immutable snapshots and valid fighter states`**
     （创建后用 `git rev-parse HEAD` 读取 SHA）。提交内容：
     ```
-    新增: core/BattleCore/Commands/RecognitionState.cs
-          core/BattleCore/Combat/{FighterLogicState,MoveDefinition,FighterDefinition,
-                                  FightRoster,DemoRoster,FighterStateMachine}.cs
-          tests/BattleCore.Tests/{FighterDefinitionTests,FighterStateMachineTests,
-                                  MoveConsumptionTests,Phase04IntegrationTests}.cs
-    修改: core/BattleCore/Commands/{CommandDefinition,CommandRecognizer}.cs
-          core/BattleCore/State/{BattleState,FighterState}.cs
-          core/BattleCore/Simulation/{BattleSimulation,BattleSession}.cs
-          core/BattleCore/BattleCoreInfo.cs
-          scripts/BattleScene.cs  scenes/Battle.tscn
+    修改: core/BattleCore/Commands/RecognitionState.cs
+          core/BattleCore/State/FighterState.cs
+          core/BattleCore/Combat/FighterStateMachine.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    新增: tests/BattleCore.Tests/{SnapshotImmutabilityTests,FighterStateValidationTests}.cs
+          （含各自 .uid）
     ```
-  - **工作区：干净**（阶段 04 提交并推送后）。
+  - **工作区：干净**（阶段 04 最终补修提交并推送后）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -611,7 +622,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    一次性消费 D53、双重超时边界测试）。**03B-2 正式结项**。
 4c. ~~阶段 04 入口：按角色指令表 / 消费接口~~ **已完成并推送**：识别进内核（D55）、
    裸按键指令（D56）、FighterState 扩展（D57）、状态机（D58）、角色配置（D59）、
-   消费契约（D60）。**阶段 04 正式结项**。仍未做：序列指令的「按住方向 + 按键」容差锚点（K27）、
+   消费契约（D60）；**最终补修已推送**（快照只读包装 D61、非法状态两道门 D62）。
+   **阶段 04 正式结项**。仍未做：序列指令的「按住方向 + 按键」容差锚点（K27）、
    招式判定/伤害/动画、运动系统。
 4d. **阶段 05 入口**：先定定点数格式（ARCHITECTURE 第 5 节问题 2），再接移动/跳跃
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
@@ -647,7 +659,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 191」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 343」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -666,11 +678,14 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 产生过候选的蓄力指令挂起立即作废（D53）：同一蓄力不得二次触发
 - [ ] 识别状态为不可变 `RecognitionState` 并随 `FighterState` 进快照（D55）：
       `Advance` 纯函数、结构化相等、Step 内零帧延迟完成识别→消费→推进
+- [ ] 识别快照的五个公开集合是只读包装（D61）：强转 List/数组得 null、
+      `IList` 写抛 `NotSupportedException`、旧快照不被污染、新旧状态不共享可写底层
+- [ ] 非法 `FighterLogicState` 两道门拒绝（D62）：`Validate` 与 `Tick` 都用 `Enum.IsDefined`
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向
 - [ ] `Observe` 帧号严格逐帧连续（首次任意非负），非法帧先抛后不改内部状态
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D60）与代码实现一致
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D62）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**
