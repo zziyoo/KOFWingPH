@@ -6,7 +6,11 @@ public enum BattleEventType
     /// <summary>一名角色消费指令并发动招式（进入 Startup）。</summary>
     MoveStarted = 0,
 
-    /// <summary>攻击实例进入生效帧（该帧存在至少一个 Active 攻击框；每次发动只发一次）。</summary>
+    /// <summary>
+    /// 攻击实例进入生效帧：<b>本帧确实有攻击框生效</b>（结算前视图，同帧被打断也照发）。
+    /// 每次发动只发一次——多攻击定义错开生效窗口时，取首个进入生效窗口的帧。
+    /// Amount = 0。
+    /// </summary>
     AttackActive = 1,
 
     /// <summary>命中：Amount = 实扣伤害（已应用 max(0, …) 钳制）。DamageApplied 并入本类型。</summary>
@@ -27,7 +31,8 @@ public enum BattleEventType
 ///
 /// <para><b>EventId（D82）</b>：= Frame × 16 + 帧内序号（0 起始）——同初态同输入必得
 /// 相同 EventId 与事件顺序；绝不使用 Guid/时钟/随机数/渲染帧号。
-/// 每帧事件数硬上限 16（超出显式抛异常，防静默碰撞）。</para>
+/// 每帧事件数硬上限 16（超出显式抛异常，防静默碰撞）；帧号上限见
+/// <see cref="MaxFrameForEventIds"/>（int 空间约 25.9 天连续对局，超出同样显式失败）。</para>
 ///
 /// <para><b>帧内排序（D82）</b>：按权威阶段固定——① MoveStarted（攻击者 ID 升序）；
 /// ② AttackActive（攻击者 ID 升序）；③ 逐被击者（ID 升序）：Hit → HitstunStarted
@@ -49,4 +54,14 @@ public readonly record struct BattleEvent(
 {
     /// <summary>每帧事件数上限（EventId 帧内 4 位空间）。</summary>
     public const int MaxEventsPerFrame = 16;
+
+    /// <summary>
+    /// EventId 可用的最大逻辑帧号：<c>MaxFrameForEventIds × 16 + 15 ≤ int.MaxValue</c>。
+    ///
+    /// <para>int 空间在 60Hz 下可覆盖约 <b>25.9 天</b>的连续对局（134,217,727 帧），
+    /// 单场对局远不会触达；超出时 <c>BattleSimulation</c> 显式抛异常，
+    /// 绝不静默回绕产生与历史帧重复的 EventId。若未来需要跨场次长期累积 ID，
+    /// 应整体升级为 long（含公开接口与测试），而不是只改一个字段。</para>
+    /// </summary>
+    public const int MaxFrameForEventIds = int.MaxValue / MaxEventsPerFrame;
 }

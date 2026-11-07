@@ -63,44 +63,83 @@ public static class FighterBoxes
     /// <summary>
     /// 该角色当帧的<b>生效攻击框</b>列表（随角色位置与朝向镜像）。
     /// 无招式 / 非 Active 阶段 / 招式无攻击数据 / 当前帧不在攻击生效范围内 → 空列表。
+    ///
+    /// <para>本重载只给<b>几何消费者</b>（调试绘制）使用；命中结算必须使用
+    /// <see cref="GetActiveHitboxesWithIndex"/>——过滤后的列表下标<b>不是</b>
+    /// 攻击定义在 <see cref="MoveDefinition.Attacks"/> 中的原始序号。</para>
     /// </summary>
     /// <param name="fighter">权威角色状态（动作阶段与剩余帧决定 elapsed）。</param>
     /// <param name="definition">该角色的配置（按 MoveId 查招式数据）。</param>
     public static IReadOnlyList<FixedRect> GetActiveHitboxes(FighterState fighter, FighterDefinition definition)
     {
+        IReadOnlyList<ActiveHitbox> active = GetActiveHitboxesWithIndex(fighter, definition);
+        if (active.Count == 0)
+            return Array.Empty<FixedRect>();
+
+        var boxes = new FixedRect[active.Count];
+        for (int i = 0; i < boxes.Length; i++)
+            boxes[i] = active[i].Box;
+
+        return Array.AsReadOnly(boxes);
+    }
+
+    /// <summary>
+    /// 该角色当帧的<b>生效攻击框</b>列表，同时携带每块框对应的
+    /// <see cref="AttackDefinition"/> 在 <see cref="MoveDefinition.Attacks"/> 中的<b>原始序号</b>。
+    ///
+    /// <para><b>为什么需要原始序号（阶段 06 专项补修 P1）</b>：过滤掉未生效的攻击定义后，
+    /// 列表下标与配置下标不再一致（例如 Attack[0] 只在第 2 个 Active 帧生效，
+    /// 第 1 帧的列表只有 Attack[1]，其下标是 0 而原始序号是 1）。结算必须按原始序号
+    /// 取回同一份攻击数据，否则会取到错误的伤害/高度/硬直。</para>
+    ///
+    /// <para>顺序固定：按 <see cref="MoveDefinition.Attacks"/> 的原始序号升序，
+    /// 同一攻击定义一帧内至多一块框。</para>
+    /// </summary>
+    /// <param name="fighter">权威角色状态（动作阶段与剩余帧决定 elapsed）。</param>
+    /// <param name="definition">该角色的配置（按 MoveId 查招式数据）。</param>
+    public static IReadOnlyList<ActiveHitbox> GetActiveHitboxesWithIndex(
+        FighterState fighter, FighterDefinition definition)
+    {
         ArgumentNullException.ThrowIfNull(definition);
 
         // 只有 Active 阶段产生攻击框：Startup 不命中、Recovery 不再命中（D76）。
         if (fighter.LogicState != FighterLogicState.Active || fighter.MoveId is null)
-            return Array.Empty<FixedRect>();
+            return Array.Empty<ActiveHitbox>();
 
         MoveDefinition? move = definition.FindMoveById(fighter.MoveId);
         if (move is null || move.Attacks.Count == 0)
-            return Array.Empty<FixedRect>();
+            return Array.Empty<ActiveHitbox>();
 
         // D58 时序：Active 阶段内已流逝帧号 = ActiveFrames − 剩余帧数（0 起始）。
         // Startup → Active 转换完成的那一逻辑帧即 elapsed 0（第 1 个生效帧）。
         int elapsed = move.ActiveFrames - fighter.PhaseRemainingFrames;
 
-        List<FixedRect>? boxes = null;
+        // 朝向镜像（D76）：前向偏移按权威 Facing 施加，世界 X 恒向右为正。
+        FixedPoint forwardSign = fighter.Facing == Facing.Right ? FixedPoint.One : -FixedPoint.One;
+
+        List<ActiveHitbox>? boxes = null;
         for (int i = 0; i < move.Attacks.Count; i++)
         {
             AttackDefinition attack = move.Attacks[i];
             if (elapsed < attack.FirstActiveFrame || elapsed > attack.LastActiveFrame)
                 continue;
 
-            // 朝向镜像（D76）：前向偏移按权威 Facing 施加，世界 X 恒向右为正。
-            FixedPoint forwardSign = fighter.Facing == Facing.Right ? FixedPoint.One : -FixedPoint.One;
             FixedPoint centerX = fighter.PositionX + forwardSign * attack.OffsetForward;
             FixedPoint centerY = fighter.PositionY + attack.OffsetUp;
 
-            boxes ??= new List<FixedRect>(move.Attacks.Count);
-            boxes.Add(FixedRect.FromCenter(centerX, centerY, attack.HalfWidth, attack.HalfHeight));
+            boxes ??= new List<ActiveHitbox>(move.Attacks.Count);
+            boxes.Add(new ActiveHitbox(
+                FixedRect.FromCenter(centerX, centerY, attack.HalfWidth, attack.HalfHeight), i));
         }
 
-        return boxes ?? (IReadOnlyList<FixedRect>)Array.Empty<FixedRect>();
+        return boxes ?? (IReadOnlyList<ActiveHitbox>)Array.Empty<ActiveHitbox>();
     }
 }
+
+/// <summary>一个生效攻击框 + 它在 <see cref="MoveDefinition.Attacks"/> 中的原始序号（阶段 06 补修 P1）。</summary>
+/// <param name="Box">世界坐标攻击框（已按权威朝向镜像）。</param>
+/// <param name="AttackIndex">原始攻击定义序号（结算取数据的唯一凭据）。</param>
+public readonly record struct ActiveHitbox(FixedRect Box, int AttackIndex);
 
 /// <summary>一帧内的一组攻击接触候选（不可变；空列表共享同一实例）。</summary>
 /// <param name="AttackerId">攻击者角色 ID。</param>
@@ -153,7 +192,7 @@ public static class HitDetection
         int attackerId,
         ref List<AttackContact>? contacts)
     {
-        IReadOnlyList<FixedRect> hitboxes = FighterBoxes.GetActiveHitboxes(attacker, attackerDefinition);
+        IReadOnlyList<ActiveHitbox> hitboxes = FighterBoxes.GetActiveHitboxesWithIndex(attacker, attackerDefinition);
         if (hitboxes.Count == 0)
             return;
 
@@ -164,10 +203,12 @@ public static class HitDetection
 
         for (int i = 0; i < hitboxes.Count; i++)
         {
-            if (hitboxes[i].Overlaps(hurtbox))
+            if (hitboxes[i].Box.Overlaps(hurtbox))
             {
                 contacts ??= new List<AttackContact>(4);
-                contacts.Add(new AttackContact(attackerId, 1 - attackerId, moveId, i));
+
+                // 原始攻击定义序号（不是过滤后列表下标）：结算据此取回同一份攻击数据。
+                contacts.Add(new AttackContact(attackerId, 1 - attackerId, moveId, hitboxes[i].AttackIndex));
             }
         }
     }

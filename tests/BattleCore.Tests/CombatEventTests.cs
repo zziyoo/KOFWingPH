@@ -1,5 +1,7 @@
 using NewKOF.BattleCore.Combat;
+using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
+using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.Simulation;
 using NewKOF.BattleCore.State;
 using Xunit;
@@ -400,6 +402,220 @@ public class CombatEventTests
         Assert.Equal(stateA.Fighter(1), stateB.Fighter(1));
         Assert.Equal(eventsA, eventsB);
         Assert.Equal(eventsA.Count, eventsA.Select(e => e.EventId).Distinct().Count());
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段 06 专项补修 P1：Hit.Amount 必须是实扣伤害
+    // ─────────────────────────────────────────────────────────────
+
+    private const string PokeMove = "Poke";
+
+    /// <summary>伤害可配置的单招配置（Poke：Startup 1 / Active 3 / Recovery 4，
+    /// Active 第 1 帧生效、Mid、命中硬直 12、防御硬直 8）。</summary>
+    private static BattleSimulation DamageSim(int p1Damage, int p2Damage = -1)
+    {
+        MovementDefinition movement = MovementDefinition.CreateDefault();
+
+        FighterDefinition Build(string id, int damage) => new(
+            id,
+            new[] { new CommandDefinition("5A", Array.Empty<CommandDirection>(), InputBits.LightPunch, priority: 5) },
+            new[]
+            {
+                new MoveDefinition(PokeMove, "5A", startupFrames: 1, activeFrames: 3, recoveryFrames: 4,
+                    attacks: new[]
+                    {
+                        new AttackDefinition(
+                            FixedPoint.FromInt(45), FixedPoint.FromInt(60),
+                            FixedPoint.FromInt(30), FixedPoint.FromInt(30),
+                            firstActiveFrame: 0, lastActiveFrame: 0,
+                            AttackHeight.Mid, damage: damage, hitstunFrames: 12, blockstunFrames: 8),
+                    }),
+            },
+            movement);
+
+        return new BattleSimulation(new FightRoster(Build("Kai", p1Damage), Build("Rei", p2Damage < 0 ? p1Damage : p2Damage)));
+    }
+
+    /// <summary>处于 Poke 第 1 个 Active 帧（elapsed 0）的角色；remaining = ActiveFrames + 1。</summary>
+    private static FighterState MidPoke(int id, int x, Facing facing, int health)
+    {
+        FighterState fighter = FighterState.Create(id, 1000, x, facing);
+        if (health < 1000)
+            fighter = fighter with { Health = health };
+
+        return fighter with
+        {
+            LogicState = FighterLogicState.Active,
+            MoveId = PokeMove,
+            PhaseRemainingFrames = 4,
+            MoveStartedFrame = 0,
+        };
+    }
+
+    private static BattleState Duel(FighterState p1, FighterState p2) =>
+        new(0, new[] { p1, p2 }, BattleState.CreateDefault().StateVersion);
+
+    [Theory]
+    [InlineData(10, 30, 10)]    // 体力不足：实扣 10（不是 30）
+    [InlineData(100, 30, 30)]
+    [InlineData(30, 30, 30)]    // 恰好打空
+    [InlineData(1, int.MaxValue, 1)]
+    [InlineData(1000, 0, 0)]    // 0 伤害仍是有效命中（进 Hitstun），实扣 0
+    public void HitEvent_Amount_IsAppliedDamage(int healthBefore, int damage, int expectedAmount)
+    {
+        var sim = DamageSim(damage);
+        BattleState before = Duel(
+            MidPoke(0, -60, Facing.Right, 1000),
+            FighterState.Create(1, 1000, 0, Facing.Left) with { Health = healthBefore });
+
+        BattleStepResult result = sim.Step(before, FrameInput.Empty(0));
+        BattleState after = result.State;
+
+        // 状态侧：扣血由 max(0, …) 钳制，绝不越界为负。
+        Assert.Equal(healthBefore, before.Fighter(1).Health);
+        Assert.Equal(healthBefore - expectedAmount, after.Fighter(1).Health);
+
+        // 事件侧：Amount 与状态侧的实际变化逐位一致，且等于「前 − 后」。
+        BattleEvent hit = Assert.Single(result.Events, e => e.Type == BattleEventType.Hit);
+        Assert.Equal(expectedAmount, hit.Amount);
+        Assert.Equal(before.Fighter(1).Health - after.Fighter(1).Health, hit.Amount);
+
+        // 0 伤害仍按当前规则进入 Hitstun（伤害与硬直是两条独立规则）。
+        Assert.Equal(FighterLogicState.Hitstun, after.Fighter(1).LogicState);
+        Assert.Equal(12, Assert.Single(result.Events, e => e.Type == BattleEventType.HitstunStarted).Amount);
+    }
+
+    [Fact]
+    public void BlockedAttack_ProducesNoHitEvent()
+    {
+        var sim = DamageSim(30);
+        BattleState before = Duel(
+            MidPoke(0, -60, Facing.Right, 1000),
+            FighterState.Create(1, 1000, 0, Facing.Left));
+
+        // P2 朝左，「后」= Right。
+        BattleStepResult result = sim.Step(before,
+            new FrameInput(0, InputBits.None, InputBits.Right));
+
+        Assert.DoesNotContain(result.Events, e => e.Type == BattleEventType.Hit);
+        Assert.Equal(1000, result.State.Fighter(1).Health);
+        Assert.Equal(0, Assert.Single(result.Events, e => e.Type == BattleEventType.Blocked).Amount);
+    }
+
+    [Fact]
+    public void MutualHits_EachReportsOwnAppliedDamage()
+    {
+        // 同帧互中：P1 体力 10 吃 30 → 实扣 10；P2 满血吃 30 → 实扣 30。
+        var sim = DamageSim(30);
+        BattleState before = Duel(
+            MidPoke(0, -60, Facing.Right, 10),
+            MidPoke(1, 0, Facing.Left, 1000));
+
+        BattleStepResult result = sim.Step(before, FrameInput.Empty(0));
+        BattleState after = result.State;
+
+        Assert.Equal(0, after.Fighter(0).Health);
+        Assert.Equal(970, after.Fighter(1).Health);
+
+        BattleEvent[] hits = result.Events.Where(e => e.Type == BattleEventType.Hit).ToArray();
+        Assert.Equal(2, hits.Length);
+        Assert.Equal(10, hits.Single(e => e.TargetFighterId == 0).Amount);
+        Assert.Equal(30, hits.Single(e => e.TargetFighterId == 1).Amount);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段 06 专项补修 P2：AttackActive 语义 / 提交契约 / EventId 边界
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void MutualHits_OnFirstActiveFrame_EmitBothAttackActive()
+    {
+        // 双方走真实时间线（帧 0 同按 A → 帧 1 同为 Active 首帧）互中，同帧被打断：
+        // 本帧的攻击生效事实已经发生，两个 AttackActive 都必须存在
+        // （语义 = 本帧曾进入生效状态，取结算前视图）。
+        var sim = DamageSim(30);
+        BattleState state = Duel(
+            FighterState.Create(0, 1000, -60, Facing.Right),
+            FighterState.Create(1, 1000, 0, Facing.Left));
+
+        BattleState started = sim.Step(state,
+            new FrameInput(0, InputBits.LightPunch, InputBits.LightPunch)).State;
+        Assert.Equal(FighterLogicState.Startup, started.Fighter(0).LogicState);
+        Assert.Equal(FighterLogicState.Startup, started.Fighter(1).LogicState);
+
+        BattleStepResult result = sim.Step(started, FrameInput.Empty(1));
+
+        var active = result.Events.Where(e => e.Type == BattleEventType.AttackActive).ToArray();
+        Assert.Equal(2, active.Length);
+        Assert.Equal(new[] { 0, 1 }, active.Select(e => e.SourceFighterId).ToArray());
+        Assert.All(active, e => Assert.Equal(0, e.Amount));
+
+        // 结算后双方都已在 Hitstun（招式被中断）——生效事件仍然存在。
+        Assert.All(result.State.Fighters,
+            f => Assert.Equal(FighterLogicState.Hitstun, f.LogicState));
+        Assert.Equal(2, result.Events.Count(e => e.Type == BattleEventType.Hit));
+
+        // 帧内顺序：AttackActive 在 Hit 之前。
+        var list = result.Events.ToList();
+        Assert.True(list.FindLastIndex(e => e.Type == BattleEventType.AttackActive)
+            < list.FindIndex(e => e.Type == BattleEventType.Hit));
+    }
+
+    [Fact]
+    public void Session_StepFailure_DoesNotPublishEvents()
+    {
+        // Step 失败（状态携带未配置的招式）：候选状态被丢弃，观察者一次都不被调用，
+        // 帧号与记账都停在原处，且不进入故障封闭（权威状态没有半提交）。
+        var collected = new List<BattleEvent>();
+        var broken = new BattleState(0, new[]
+        {
+            FighterState.Create(0, 1000, -60, Facing.Right) with
+            {
+                LogicState = FighterLogicState.Startup,
+                MoveId = "GhostMove",
+                PhaseRemainingFrames = 1,
+                MoveStartedFrame = 0,
+            },
+            FighterState.Create(1, 1000, 0, Facing.Left),
+        }, BattleState.CreateDefault().StateVersion);
+
+        var session = new BattleSession(
+            initialState: broken,
+            simulation: new BattleSimulation(DemoRoster.CreateKaiVsRei()),
+            eventsCommitted: (input, state, events) => collected.AddRange(events));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            session.StepExact(1, inputProvider: f => FrameInput.Empty(f)));
+
+        Assert.Empty(collected);
+        Assert.Equal(0, session.CurrentState.Frame);
+        Assert.Equal(0L, session.Scheduler.TotalSteps);
+        Assert.False(session.IsFaulted);
+    }
+
+    [Fact]
+    public void EventId_FrameBeyondIntRange_ThrowsInsteadOfWrapping()
+    {
+        // EventId = Frame × 16 + seq 用 int：最后一帧是 MaxFrameForEventIds。
+        // 再往后会溢出成负数并与历史帧撞号——必须显式失败，不能静默回绕。
+        Assert.Equal(int.MaxValue / 16, BattleEvent.MaxFrameForEventIds);
+        Assert.True((long)BattleEvent.MaxFrameForEventIds * BattleEvent.MaxEventsPerFrame
+            + (BattleEvent.MaxEventsPerFrame - 1) <= int.MaxValue);
+
+        var sim = NewSim();
+        var overflowFrame = new BattleState(
+            BattleEvent.MaxFrameForEventIds + 1,
+            new[]
+            {
+                FighterState.Create(0, 1000, -120, Facing.Right),
+                FighterState.Create(1, 1000, 120, Facing.Left),
+            },
+            BattleState.CreateDefault().StateVersion);
+
+        // 该帧产生 MoveStarted 事件 → EventId 组装处显式抛异常。
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            sim.Step(overflowFrame, new FrameInput(overflowFrame.Frame, InputBits.LightPunch, InputBits.None)));
+        Assert.Contains("EventId", ex.Message);
     }
 
     /// <summary>测试专用输入源：指定帧的 Commit 抛异常（复用 03A 的失败注入模式）。</summary>

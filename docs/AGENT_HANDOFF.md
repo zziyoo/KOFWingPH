@@ -1,7 +1,8 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-07（阶段 06C：攻击实例去重 + 确定性事件流，D81–D83——阶段 06 结项）
+> 最后更新：2026-11-07（阶段 06 专项补修：多攻击框序号 / 实扣伤害 / 事件契约复核，D84–D86——
+> 阶段 06 独立交接验收通过）
 
 ---
 
@@ -61,7 +62,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 540，已跳过: 0，总计: 540`
+期望：`失败: 0，通过: 558，已跳过: 0，总计: 558`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -118,6 +119,24 @@ cd /d C:\Users\32360\Desktop\NewKOF
 ---
 
 ## 4. 最近完成的修改
+
+### 阶段 06 专项补修（2026-11-07）多攻击框序号 / 实扣伤害 / 事件契约（D84–D86）
+
+**这一轮是「独立交接复核」**：新 Agent 不采信 06A–06C 报告，先跑基线（540/540 属实），
+再逐文件审查并在**先写失败复现**后修复。缺陷与复现见 `PROGRESS.md` 同名章节。
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Combat/HitDetection.cs` | **D84**：新增 `ActiveHitbox(FixedRect Box, int AttackIndex)` + `FighterBoxes.GetActiveHitboxesWithIndex`；`GetActiveHitboxes` 退化为几何视图（调试绘制 API 不变）；`HitDetection.Collect` 改用<b>原始序号</b>（此前用过滤后下标） |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | **D85**：结算用 `Health前 − Health后` 覆盖 `CombatSettlement.Damage`，`Hit.Amount` 直接取该值。**D86**：新增 `CollectAttackActive`，在 `ApplyCombatSettlement` **之前**取结算前视图（该函数原地改写数组）；`CollectEvents` 改为消费布尔标记；`Add` 增加帧号上限检查 |
+| `core/BattleCore/Simulation/BattleEvent.cs` | **D86**：新增 `MaxFrameForEventIds = int.MaxValue / MaxEventsPerFrame`（134,217,727）；AttackActive 文档改为「本帧曾进入生效状态、每次发动一次」 |
+| `tests/BattleCore.Tests/MultiAttackContactTests.cs` | **新增 8 项**（原始序号、两帧各自结算、镜像、Low/High 防御表、同帧双框优先级、错开窗口只发一次 AttackActive） |
+| `tests/BattleCore.Tests/CombatEventTests.cs` | **新增 10 项**（实扣伤害 5 组 Theory、防御无 Hit、互中各自实扣、同帧互中两个 AttackActive、Step 失败零事件、EventId 越界显式失败） |
+
+**验收**：558/558（Debug/Release）；四构建 0/0；无头导入 `[ DONE ]`；图形运行
+`shots/p06fix_hit_verify.png`（`HP 970` + `Hitstun(12)` + `Event ... (id=1890)` = 118×16+2）。
+**未改**：EventId 仍 `int`（25.9 天余量，升级 long 需整体评估）；D83 提交时序本来就对，
+只补测试固定。既有 540 项无一删除或削弱。
 
 ### 阶段 06C（2026-11-07）攻击实例去重、确定性事件流（D81–D83）—— 阶段 06 结项
 
@@ -618,7 +637,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K36 | **`StageDefinition` 只接受 GroundY=0（D74）** | 落地判定/状态校验/出生高度/Godot 显示全部以 Y=0 为基准，非零配置会产生双重权威地面高度 | 需要平台/斜坡时必须统一扩展全部关联模块与测试，不能只改一个判断 |
 | K37 | **`JumpKind` 在 `Validate` 中完整枚举校验（D75）** | `(JumpKind)999` 此前能借 Airborne+Y>0 进入权威快照 | 与 D62 同一模式；`JumpLaunch.Kind` 只由状态机产生，无需额外入口校验 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 05B 验收时 460/460 测试通过，可正常启动运行。
+| K38 | **`AttackContact.AttackIndex` 是「原始攻击定义序号」，不是过滤后列表下标（D84）** | 曾导致多攻击定义错开生效窗口时用错伤害/高度/硬直（复现：970 期望变 990、蹲防 Low 破防）。几何消费者请用 `GetActiveHitboxes`（只有 Rect），结算请用 `GetActiveHitboxesWithIndex` | 不要用 `move.Attacks[i]` 之外的任何位置推导序号；**同帧多框**的取舍已定为「接触全部产生、结算取最小原始序号」（测试 `SameFrame_TwoActiveHitboxes_*` 固定），改规则要先改测试与文档 |
+| K39 | **`Hit.Amount` / `CombatSettlement.Damage` = 实扣伤害（D85）** | 曾报配置伤害（体力 10 受 30 报 30、受 `int.MaxValue` 报 21 亿） | 事件值只能来自结算结果 `Health前 − Health后`；不要为了显示「原始伤害」另开计算路径——需要时新增字段并同步文档/测试。0 伤害仍是有效命中（进 Hitstun，Amount 0） |
+| K40 | **`AttackActive` 取结算前视图，且每个攻击实例只发一次（D86）** | 事件收集若放在 `ApplyCombatSettlement` 之后，同帧互中被打断者的事件会全部丢失（复现 0 个）；`ApplyCombatSettlement` 会**原地改写**传入的 `FighterState[]` | 新增任何「结算前事实」类事件都要在结算前采样；`MaxFrameForEventIds = 134217727`（60Hz ≈ 25.9 天），超出显式抛异常不回绕 |
+
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 06 专项补修验收时 558/558 测试通过，可正常启动运行。
 
 ---
 
@@ -686,7 +709,16 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/{CombatSettlementTests,HitDetectionTests,FighterStateValidationTests}.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **工作区：干净**（阶段 06C 提交并推送后）。
+  - **本轮阶段 06 专项补修：`fix(combat): correct attack contact mapping and event damage`**
+    （文档与代码同一提交，SHA 由 `git rev-parse HEAD` 读取，不自引用）。提交内容：
+    ```
+    新增: tests/BattleCore.Tests/MultiAttackContactTests.cs（含 .uid）
+    修改: core/BattleCore/Combat/HitDetection.cs
+          core/BattleCore/Simulation/{BattleSimulation,BattleEvent}.cs
+          tests/BattleCore.Tests/CombatEventTests.cs
+          docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
+    ```
+  - **工作区：干净**（阶段 06 专项补修提交并推送后）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -737,10 +769,12 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 **按顺序阅读：**
 
 1. `docs/AGENT_HANDOFF.md`（本文件）— 环境、命令、已知问题
-2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D60 决策）与第 5 节（未决定问题）
-3. `docs/PROGRESS.md` — 已完成/未完成边界、191 项测试、下一阶段计划
+2. `docs/ARCHITECTURE.md` — 第 4 节（D1–D86 决策）与第 5 节（未决定问题）
+3. `docs/PROGRESS.md` — 已完成/未完成边界、558 项测试、阶段 07 建议顺序
 4. `core/BattleCore/Simulation/FixedStepScheduler.cs` — **阶段 02 核心**，理解时间调度
 5. `core/BattleCore/Simulation/BattleSession.cs` — 输入帧号与状态帧号的绑定规则
+6. `core/BattleCore/Combat/HitDetection.cs` — 三框几何 + **原始攻击序号**（K38）
+7. `core/BattleCore/Simulation/BattleEvent.cs` — 事件契约与 EventId 边界（K40）
 6. `core/BattleCore/Input/InputBuffer.cs` — **阶段 03A 核心**：边沿闩锁、两阶段提交、只读历史
 7. `core/BattleCore/Input/IInputSource.cs` — 输入提交契约（Prepare/Commit）
 8. `core/BattleCore/Input/DirectionResolver.cs` — SOCD 与相对朝向规则
@@ -791,6 +825,12 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
+4e. **阶段 06 已结项（D76–D86）**。阶段 07 推荐顺序（**本轮未开工，不要顺手做**）：
+   ① KO / 体力归零裁决（先定 KO 检测在 Step 的哪个阶段、归零当帧是否仍结算对方攻击——
+   与 D80 同时性相关）；② 连段与取消（先定可取消窗口与目标动作的数据形状，不要在
+   `FighterStateMachine` 加特例）；③ 击飞 / 空中受击（当前空中被击显式跳过，属完整状态簇，
+   需连同落地-起身一起设计）；④ 招式数据外置（与前三项解耦，可并行）；⑤ 回滚/录像
+   （`StateVersion` 已到 6，序列化格式仍未定）。
 5. **为现有测试增加用例** — 只要不改动 `BattleCore` 公共契约。
 6. **把 `CaptureHelper.cs` 移到 `tools/`** — 需同步改 `scenes/Battle.tscn` 的 `ext_resource`
    与 `NewKOF.csproj` 的 `Compile Include`。
@@ -799,9 +839,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 ### 需要先决策 ⚠️
 
 8. **修改 `BattleState` 结构**（增加速度/状态字段）— 先读 `ARCHITECTURE.md` 第 5 节问题 1。
-9. **引入碰撞/判定框** — 先决定几何类型（AABB/OBB）与推挤算法。
-10. **引入事件流** — 先设计 `(frame, eventId)` 事件契约。
-10. **SOCD 改「后输入优先」** — 必须先扩展 `FrameInput` 记录事件顺序，否则无法重放。
+9. ~~**引入碰撞/判定框**~~ **已完成（D76/D84）**：AABB `FixedRect` + 三框职责 +
+   原始攻击定义序号映射。改动前先读 K38。
+10. ~~**引入事件流**~~ **已完成（D82/D83/D86）**：`(frame, eventId)` 契约、提交后投递、
+   AttackActive 结算前视图。改动前先读 K39/K40。
+10b. **SOCD 改「后输入优先」** — 必须先扩展 `FrameInput` 记录事件顺序，否则无法重放。
 
 ### 禁止 ❌
 
@@ -821,7 +863,7 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 540」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 558」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
@@ -864,11 +906,15 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 去重与事件（D81–D83）：同实例（攻击者+发动帧）对同一目标只结算一次（被防御也算）；
       EventId = Frame×16+帧内序号；事件由 Step 产生、Session 提交后才投递（失败帧零事件）；
       eventsCommitted 异常进入 Faulted；Recover 不重发（消费者按 EventId 去重）
+- [ ] 补修契约（D84–D86）：`AttackContact.AttackIndex` = **原始**攻击定义序号（结算必须走
+      `GetActiveHitboxesWithIndex`，同帧多框取最小序号）；`Hit.Amount` = 实扣伤害
+      （`Health前 − Health后`，不是配置伤害）；`AttackActive` 取**结算前**视图且每实例一次；
+      `MaxFrameForEventIds` 越界显式失败
 - [ ] 冲突裁决顺序为「优先级降序 → 序列长度降序 → ID 序数升序」，与定义顺序无关
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向
 - [ ] `Observe` 帧号严格逐帧连续（首次任意非负），非法帧先抛后不改内部状态
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D62）与代码实现一致
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D86）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

@@ -366,6 +366,16 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 
 
 
+### 阶段 06 专项补修决策（交接复核：多攻击框序号 / 实扣伤害 / 事件契约）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D84** | **攻击框查询分两个入口：`FighterBoxes.GetActiveHitboxes` 只给几何（调试绘制用）；结算必须走 `GetActiveHitboxesWithIndex`（返回 `ActiveHitbox(FixedRect Box, int AttackIndex)`）。`AttackContact.AttackIndex` 是攻击定义在 `MoveDefinition.Attacks` 中的<b>原始序号</b>，不是过滤后列表的下标；同一帧多块攻击框全部产生接触（原始序号升序），结算取该被击者的第一条 = 最小序号** | 复现出的真实缺陷：`GetActiveHitboxes` 先按生效帧过滤再返回 Rect 列表，`HitDetection.Collect` 却拿过滤后下标当序号。招式有多个攻击定义且生效窗口错开时（Attack[0] 只在 Active 第 2 帧、Attack[1] 只在第 1 帧），第 1 帧的接触被记成序号 0 → 结算取到错误定义的伤害/高度/硬直（复现：期望 970 实测 990；蹲防 Low 生效但被当成 High 而破防）。修复保留多攻击定义、不同生效窗口、左右镜像、AABB 正面积重叠与 D81 去重；**不通过禁止多攻击定义规避**。同帧多框的选择规则显式固定（最小原始序号）并用测试钉住。 |
+| **D85** | **`CombatSettlement.Damage` 表示本次<b>实扣</b>伤害：先 `healthAfter = max(0, Health − Damage)`，再取 `applied = Health前 − Health后` 写回结算结果；`Hit.Amount` 直接取该值。配置伤害只作为钳制前的上限，事件层绝不重算** | 复现出的真实缺陷：体力 10 受 30 伤害时 `Hit.Amount` 报 30（实扣 10），体力 1 受 `int.MaxValue` 伤害时报 21 亿级（实扣 1）。事件是权威结算的产物，必须与「前 − 后」逐位一致（测试断言 `Amount == HealthBefore − HealthAfter`）。0 伤害仍是有效命中（进入 Hitstun，Amount = 0）——伤害与硬直是两条独立规则，本轮不合并。 |
+| **D86** | **AttackActive 语义定为「本帧曾进入生效状态」（结算<b>前</b>视图）：`elapsed == min(FirstActiveFrame)`，每个攻击实例恰好发一次。事件收集前先算标记再结算，因为 `ApplyCombatSettlement` 会原地改写 `nextFighters`。EventId 保持 `int`，新增帧号上限 `MaxFrameForEventIds = int.MaxValue / MaxEventsPerFrame`（134,217,727），超出在事件组装处显式抛异常** | 复现出的两个问题：① 事件收集在结算之后，双方同帧在 Active 首帧互中、同时被打断时两个 AttackActive 全部丢失（实测 0 个，虽然该帧攻击确实生效并造成伤害）；② 原实现对多攻击定义错开窗口会重复发 AttackActive，与枚举文档「每次发动只发一次」矛盾——统一为只发一次并写入 XML 文档。EventId 用 int 在 60Hz 下可覆盖约 <b>25.9 天</b>连续对局（远超单场），但溢出会回绕成与历史帧相同的 ID，故显式失败而非静默；升级 `long` 需整体评估公开接口与全部测试，本轮不做（只记录结论）。 |
+
+
+
 ### 离线原型限定（重要）
 
 **当前丢帧策略与帧同步保证只适用于当前离线原型。**

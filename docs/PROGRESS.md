@@ -1346,7 +1346,78 @@ Faulted/Recover）；10000 帧混合战斗长跑确定性 + EventId 唯一 1 项
 
 ---
 
-## 下一阶段计划：阶段 06（攻击判定与结算前置）
+## 阶段 06 专项补修（独立交接复核，2026-11-07）—— 多攻击框序号 / 实扣伤害 / 事件契约（D84–D86）
+
+**背景**：新 Agent 独立复核阶段 06，不采信上一轮交接报告。基线 `5788b7f`、工作区干净、
+`dotnet test` 实测 **540/540** 通过——报告中的数字属实。但代码审查发现两处真实缺陷、
+两处契约不一致，全部先写失败复现再修。
+
+### 复现（修复前实测，编号即失败断言）
+
+| # | 复现 | 修复前实测 | 期望 |
+|---|---|---|---|
+| P1-a | 招式两个攻击定义（Attack[0] 仅 Active 第 2 帧 High/10、Attack[1] 仅第 1 帧 Low/30），第 1 帧的 `AttackContact.AttackIndex` | **0** | 1 |
+| P1-b | 同上第 1 帧结算伤害（满血 1000） | **990**（取到 Attack[0]） | 970 |
+| P1-c | 同上第 1 帧，P2 蹲防（Low 可防） | **990 + Hitstun(10)**（被当成 High 破防） | 1000 + Blockstun(6) |
+| P1-d | 镜像（P1 朝左）第 1 帧的 `AttackIndex` | **0** | 1 |
+| P2-a | 体力 10 受 30 伤害的 `Hit.Amount` | **30** | 10 |
+| P2-b | 体力 1 受 `int.MaxValue` 伤害的 `Hit.Amount` | **2147483647** | 1 |
+| P2-c | 同帧互中：P1 体力 10 / P2 满血，各自 `Hit.Amount` | **30 / 30** | 10 / 30 |
+| P2-d | 双方同帧在 Active 首帧互中并被同时打断的 `AttackActive` 事件数 | **0** | 2 |
+
+根因：① `FighterBoxes.GetActiveHitboxes` 先按生效帧过滤，`HitDetection.Collect` 用过滤后下标
+当攻击定义序号；② 结算把 `max(0, …)` 的结果写进状态，事件却仍读配置伤害；
+③ `CollectEvents` 在 `ApplyCombatSettlement` 之后读状态（该函数原地改写数组），被打断者已不在 Active。
+
+### 修复（D84–D86，最小改动，不动既有架构）
+
+1. **D84**：新增 `ActiveHitbox(FixedRect Box, int AttackIndex)` 与
+   `FighterBoxes.GetActiveHitboxesWithIndex`；`GetActiveHitboxes` 保留为几何视图（调试绘制不变）。
+   `HitDetection.Collect` 改用原始序号。同帧多框 → 全部产生接触（序号升序），结算取第一条（最小序号），
+   测试固定。
+2. **D85**：`ApplyCombatSettlement` 用 `Health前 − Health后` 覆盖 `CombatSettlement.Damage`，
+   事件层直接使用——不再有第二条计算路径。
+3. **D86**：新增 `CollectAttackActive`（结算前调用）产出布尔标记，`CollectEvents` 只消费标记；
+   语义统一为「本帧进入生效窗口（`elapsed == min(FirstActiveFrame)`）、每次发动一次」。
+   `BattleEvent.MaxFrameForEventIds = int.MaxValue / 16`，超出显式抛异常（不回绕）。
+4. 契约审查**未改**：EventId 仍为 `int`（60Hz ≈ 25.9 天余量，升级 long 需整体评估接口与测试）；
+   D83 提交时序本就正确（Step 失败/输入提交失败零事件、提交后才投递、Faulted/Recover 不重发、
+   Events/Contacts 只读）——本轮只补测试固定。
+
+### 测试与构建（专项补修实测）
+
+新增 **18 项**（540 → **558**）：`MultiAttackContactTests` 8 项（原始序号、两帧各自结算、
+镜像、Low/High 防御表、同帧双框优先级、错开窗口 AttackActive 只发一次）、
+`CombatEventTests` 10 项（实扣伤害 5 组 Theory、防御无 Hit 事件、互中各自实扣、
+同帧互中两个 AttackActive、Step 失败零事件、EventId 越界显式失败）。
+既有 540 项无一删除或削弱。
+
+| 项 | 结果 |
+|---|---|
+| `dotnet test`（Debug / Release） | **558/558 通过**（0 失败 0 跳过） |
+| 四构建（BattleCore / Godot × Debug / Release） | 均 **0 警告 / 0 错误** |
+| Godot 无头导入 | `[ DONE ]`，无错误 |
+| Godot 图形运行 | `shots/p06fix_hit_verify.png`（逻辑 119 = Active 首帧：红框与 P2 Hurtbox 相交、`P2 HP: 970/1000`、`Hitstun(12)`、`Event: HitstunStarted P1→P2 StandLightPunch 12 (id=1890)` = 118×16+2，与公式一致；`shots/` 被 `.gitignore` 忽略，仅本机证据） |
+| 旧快照重放 / 同帧互中 / 多窗口 / 事件一致 / 阶段 05 推挤回归 | 由 `MidSnapshotReplay_ProducesIdenticalEvents`、`MutualHits_*`、`StaggeredWindows_*`、`HitEvent_Amount_*`、`Step_WallCornerPush_DoesNotRegress` 等测试覆盖 |
+
+**阶段 06 独立交接验收通过。**
+
+### 阶段 07 推荐实施顺序（未开工，仅建议）
+
+1. **KO / 体力归零裁决**：`Health == 0` 目前只是数值，无回合结束语义。先定「KO 检测在 Step 的哪一阶段、
+   归零当帧是否还结算对方攻击（D80 同时性）」，再动 `RoundSystem`。
+2. **连段与取消**：需要先定 hitstun/blockstun 期间的可取消窗口与「取消目标动作」数据形状，
+   不要在 `FighterStateMachine` 里加特例判断。
+3. **击飞 / 空中受击**：当前空中被击显式跳过（D78）。落地-受击-起身是完整状态簇，需一次设计
+   （含 `Airborne` + `Hitstun` 的组合状态，或新增 `AirHitstun` 枚举值并同步 `Validate`）。
+4. **招式数据外置**（ARCHITECTURE 第 5 节问题 7）：与上面三项解耦，可并行；先定格式与加载期校验。
+5. **回滚/录像**（第 5 节问题 8/10）：`StateVersion` 已到 6，序列化格式未定——排最后。
+
+---
+
+## 下一阶段计划（阶段 06 已结项；本节的入口列表保留作历史参考）
+
+> **本节的「阶段 06 入口」已于 2026-11-07 全部完成（D76–D83）。** 阶段 07 推荐顺序见上一节末尾。
 
 **进入前必须先读** `ARCHITECTURE.md` 第 4 节（D1–D72 全部决策）与第 5 节。
 
@@ -1368,7 +1439,7 @@ Faulted/Recover）；10000 帧混合战斗长跑确定性 + EventId 唯一 1 项
 **注意**：若要「后输入优先」SOCD，必须先扩展 `FrameInput` 记录事件顺序（D27 仍有效）。
 
 > 阶段 05 已连同 05B 结项。接手后先看 `AGENT_HANDOFF.md` 第 6 节，运行 `dotnet test`
-> 确认 **460** 项通过再继续。
+> 确认 **558** 项通过再继续。
 
 **每完成一个子任务，立即更新本文件与 `AGENT_HANDOFF.md`。**
 

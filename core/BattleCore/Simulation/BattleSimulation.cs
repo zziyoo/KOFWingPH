@@ -242,11 +242,16 @@ public sealed class BattleSimulation
         //    + 攻击实例去重（同一发动对同一目标只结算一次，被防御亦算已结算）。
         IReadOnlyList<AttackContact> contacts = HitDetection.Detect(
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
+
+        // AttackActive 必须取<b>结算前</b>视图（下方结算会原地改写 nextFighters）：
+        // 本帧确实生效过的攻击不能因为同帧被打断而丢事件。
+        bool[] attackActive = CollectAttackActive(nextFighters, _roster);
+
         var outcomes = new CombatSettlement?[2];
         ApplyCombatSettlement(nextFighters, contacts, candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
 
         // ── 第 7 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
-        IReadOnlyList<BattleEvent> events = CollectEvents(state.Frame, nextFighters, candidates, outcomes, _roster);
+        IReadOnlyList<BattleEvent> events = CollectEvents(state.Frame, nextFighters, candidates, outcomes, attackActive);
 
         // ── 第 8 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
@@ -332,6 +337,11 @@ public sealed class BattleSimulation
                 if (healthAfter < 0)
                     healthAfter = 0; // 体力下限：不允许负数（结算显式钳制，不依赖下游校验）。
 
+                // 事件/结算的唯一事实来源：本次<b>实际</b>扣除的体力
+                // （攻击配置伤害可能被 max(0, …) 截断——Target 只剩 10 时 30 伤害只扣 10）。
+                int appliedDamage = defenderState.Health - healthAfter;
+                outcomes[defender] = settled with { Damage = appliedDamage };
+
                 fighters[defender] = defenderState with
                 {
                     LogicState = FighterLogicState.Hitstun,
@@ -414,23 +424,68 @@ public sealed class BattleSimulation
     };
 
     /// <summary>
+    /// 计算本帧「攻击实例首个生效帧」标记（D82 的 AttackActive 语义来源）。
+    ///
+    /// <para>必须在<b>结算之前</b>用结算前状态调用：本帧生效的攻击即使在同帧命中结算中
+    /// 被打断（进入 Hitstun），其生效事实已经发生，事件不得丢失。</para>
+    ///
+    /// <para>语义 = <b>该次发动的首个生效帧</b>：本帧有至少一个攻击定义进入生效窗口
+    /// （<c>elapsed == min(FirstActiveFrame)</c>），且下一次发动（新 MoveStarted）会重新计数。
+    /// 一个攻击实例至多产生一条 AttackActive——多攻击定义、错开窗口也只发一次。</para>
+    /// </summary>
+    private static bool[] CollectAttackActive(FighterState[] fighters, FightRoster roster)
+    {
+        var flags = new bool[fighters.Length];
+
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            FighterState fighter = fighters[i];
+            if (fighter.LogicState != FighterLogicState.Active || fighter.MoveId is null)
+                continue;
+
+            MoveDefinition? move = roster.Fighter(i).FindMoveById(fighter.MoveId);
+            if (move is null || move.Attacks.Count == 0)
+                continue;
+
+            int elapsed = move.ActiveFrames - fighter.PhaseRemainingFrames;
+
+            int firstActive = int.MaxValue;
+            for (int a = 0; a < move.Attacks.Count; a++)
+            {
+                int first = move.Attacks[a].FirstActiveFrame;
+                if (first < firstActive)
+                    firstActive = first;
+            }
+
+            flags[i] = elapsed == firstActive;
+        }
+
+        return flags;
+    }
+
+    /// <summary>
     /// 收集本帧战斗事件（D82）：帧内顺序按权威阶段固定——
     /// ① MoveStarted（攻击者 ID 升序）；② AttackActive（攻击者 ID 升序，每次发动仅首个生效帧）；
     /// ③ 逐被击者（ID 升序）：Hit → HitstunStarted 或 Blocked → BlockstunStarted。
-    /// EventId = Frame × 16 + 帧内序号（超上限显式失败）。
+    /// EventId = Frame × 16 + 帧内序号（帧号或帧内事件数超上限时显式失败）。
     /// </summary>
+    /// <param name="attackActive">结算前视图算出的 AttackActive 标记（见 <see cref="CollectAttackActive"/>）。</param>
     private static IReadOnlyList<BattleEvent> CollectEvents(
         int frame,
         FighterState[] fighters,
         FighterCandidate[] candidates,
         CombatSettlement?[] outcomes,
-        FightRoster roster)
+        bool[] attackActive)
     {
         List<BattleEvent>? events = null;
         int seq = 0;
 
         void Add(BattleEventType type, int source, int target, string? moveId, int amount)
         {
+            if (frame > BattleEvent.MaxFrameForEventIds)
+                throw new InvalidOperationException(
+                    $"帧 {frame} 超过 EventId 可用上限 {BattleEvent.MaxFrameForEventIds}" +
+                    $"（Frame × {BattleEvent.MaxEventsPerFrame} 会溢出 int）。");
             if (seq >= BattleEvent.MaxEventsPerFrame)
                 throw new InvalidOperationException(
                     $"帧 {frame} 的事件数超过每帧上限 {BattleEvent.MaxEventsPerFrame}（EventId 空间不足）。");
@@ -446,30 +501,11 @@ public sealed class BattleSimulation
                 Add(BattleEventType.MoveStarted, i, i, candidates[i].MoveId, 0);
         }
 
-        // ② AttackActive（每次发动的首个生效帧；被命中打断者已无攻击框）。
+        // ② AttackActive（每次发动的首个生效帧；标记来自结算前视图，同帧被打断也不丢）。
         for (int i = 0; i < fighters.Length; i++)
         {
-            FighterState fighter = fighters[i];
-            if (fighter.LogicState != FighterLogicState.Active || fighter.MoveId is null)
-                continue;
-
-            MoveDefinition? move = roster.Fighter(i).FindMoveById(fighter.MoveId);
-            if (move is null)
-                continue;
-
-            int elapsed = move.ActiveFrames - fighter.PhaseRemainingFrames;
-            bool firstActive = false;
-            for (int a = 0; a < move.Attacks.Count; a++)
-            {
-                if (move.Attacks[a].FirstActiveFrame == elapsed)
-                {
-                    firstActive = true;
-                    break;
-                }
-            }
-
-            if (firstActive)
-                Add(BattleEventType.AttackActive, i, i, fighter.MoveId, 0);
+            if (attackActive[i])
+                Add(BattleEventType.AttackActive, i, i, fighters[i].MoveId, 0);
         }
 
         // ③ 逐被击者：命中/防御 + 硬直开始。
@@ -498,7 +534,8 @@ public sealed class BattleSimulation
 
     /// <summary>单次命中的结算结果（不可变）。</summary>
     /// <param name="Blocked">是否被防御（true = Blockstun 不掉血；false = 命中扣血 + Hitstun）。</param>
-    /// <param name="Damage">伤害（被防御时为 0）。</param>
+    /// <param name="Damage">本次<b>实扣</b>伤害（已应用 max(0, …) 钳制；被防御时为 0）。
+    /// 事件流直接使用该值，绝不再用配置伤害重新计算。</param>
     /// <param name="StunFrames">硬直帧数（命中硬直或防御硬直）。</param>
     /// <param name="MoveId">攻击招式 ID。</param>
     /// <param name="AttackStartFrame">攻击实例的发动帧（D81；写入被击者的已结算记录）。</param>
