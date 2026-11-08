@@ -116,6 +116,7 @@ public partial class BattleScene : Node2D
         CreateDuelSession();
         CreateTeamSession();
         _stage = Stage.ModeSelect;
+        ConfigureAiFromArgs();
         SyncViewFromState();
     }
 
@@ -185,6 +186,7 @@ public partial class BattleScene : Node2D
         _inputMap = new KeyboardInputMap(buffer);
         _tracedSource = _diagnostics ? new TracingInputSource(buffer, _trace) : buffer;
         _paused = false;
+        _aiSource = null;
     }
 
     /// <summary>1v1 每回合初态（<c>--hp</c> / <c>--duel</c> 只影响命令行调试）。</summary>
@@ -358,6 +360,7 @@ public partial class BattleScene : Node2D
             return;
         }
 
+        if (_stage is Stage.ModeSelect or Stage.DuelSelect or Stage.TeamSelect && HandleAiSelectionKey(pressed.Keycode)) return;
         switch (_stage)
         {
             case Stage.ModeSelect:
@@ -449,6 +452,10 @@ public partial class BattleScene : Node2D
 
     private void HandleTeamSelectKey(Key code)
     {
+        if(code is Key.A or Key.D or Key.Left or Key.Right) {
+            if(_aiSeededTeams) _teamSelect.ClearReady();
+            _aiSeededTeams=false;
+        }
         switch (code)
         {
             case Key.W:
@@ -624,8 +631,8 @@ public partial class BattleScene : Node2D
     private void StartTeamMatch()
     {
         _team.SelectTeams(
-            _teamSelect.BuildTeam(TeamSelectionModel.Player1, "P1"),
-            _teamSelect.BuildTeam(TeamSelectionModel.Player2, "P2"));
+            _aiSeededTeams && _aiP1 ? NewKOF.BattleCore.AI.AiTeamBuilder.Create("P1",_catalog.Entries.Select(e=>e.FighterId),_aiSeed) : _teamSelect.BuildTeam(TeamSelectionModel.Player1, "P1"),
+            _aiSeededTeams && _aiP2 ? NewKOF.BattleCore.AI.AiTeamBuilder.Create("P2",_catalog.Entries.Select(e=>e.FighterId),_aiSeed ^ 0xA511E9B3u) : _teamSelect.BuildTeam(TeamSelectionModel.Player2, "P2"));
         _team.StartMatch();
         _stage = Stage.TeamBattle;
         BindTeamBout();
@@ -638,6 +645,7 @@ public partial class BattleScene : Node2D
         if (_match.CurrentRound is BattleSession round
             && _match.State.P1FighterId is string p1 && _match.State.P2FighterId is string p2)
         {
+            BindAiInput(_match.RoundInputBuffer,()=>_match.CurrentBattleState!,BuildRoster(p1,p2),_match.State.RoundNumber,0,"1v1");
             _debugBoxes.Bind(round, BuildRoster(p1, p2));
             _visual1?.SetAnimationSet(SetFor(p1));
             _visual2?.SetAnimationSet(SetFor(p2));
@@ -656,6 +664,8 @@ public partial class BattleScene : Node2D
         TeamSideState? p2 = _team.State.P2;
         if (_team.CurrentBout is BattleSession bout && p1 is not null && p2 is not null)
         {
+            BindAiInput(_team.BoutInputBuffer,()=>_team.CurrentBattleState!,BuildRoster(p1.ActiveFighterId,p2.ActiveFighterId),
+                _team.State.BoutNumber,p1.ActiveSlot*3+p2.ActiveSlot,"3v3");
             _debugBoxes.Bind(bout, BuildRoster(p1.ActiveFighterId, p2.ActiveFighterId));
             _visual1?.SetAnimationSet(SetFor(p1.ActiveFighterId));
             _visual2?.SetAnimationSet(SetFor(p2.ActiveFighterId));
@@ -675,6 +685,7 @@ public partial class BattleScene : Node2D
 
     public override void _Process(double delta)
     {
+        AdvanceAiBoutIfRequested();
         _shakeOffset = _shake.Tick();
 
         int steps = TeamActive
@@ -821,6 +832,7 @@ public partial class BattleScene
             $"A / D or LEFT / RIGHT : switch mode\n" +
             $"J / ENTER : confirm     1 / 2 : quick select\n" +
             $"Catalog: {string.Join(", ", _catalog.Entries.Select(e => e.FighterId))}\n" +
+            AiHud()+"F6 P1 Human/AI | F7 P2 Human/AI | F8 difficulty | F9 tactic | F10 seeded teams\n"+
             $"F1 pause  F2 hitboxes  F5 restart  ESC back\n" +
             (_diagnostics ? "Diagnostics: ON (F3 dumps input trace)\n" : string.Empty);
     }
@@ -832,7 +844,7 @@ public partial class BattleScene
         string p1Tag = _p1Confirmed ? "[CONFIRMED]" : "[choose]";
         string p2Tag = _p2Confirmed ? "[CONFIRMED]" : "[choose]";
 
-        return $"=== CHARACTER SELECT (1v1) ===\n" +
+        return $"=== CHARACTER SELECT (1v1) ===\n" + AiHud()+
             $"P1: < {p1Name} >  {p1Tag}\n" +
             $"P2: < {p2Name} >  {p2Tag}\n" +
             $"Rules: first to {_rules.RoundsToWin} wins / max {_rules.MaxRounds} rounds / " +
@@ -848,9 +860,9 @@ public partial class BattleScene
         string p1Tag = _teamSelect.P1Ready ? "[READY]" : "[choose]";
         string p2Tag = _teamSelect.P2Ready ? "[READY]" : "[choose]";
 
-        return $"=== 3v3 TEAM SELECT ===\n" +
-            $"P1: {_teamSelect.DescribeLine(TeamSelectionModel.Player1)}  {p1Tag}\n" +
-            $"P2: {_teamSelect.DescribeLine(TeamSelectionModel.Player2)}  {p2Tag}\n" +
+        return $"=== 3v3 TEAM SELECT ===\n" + AiHud()+
+            $"P1: {AiTeamPreview(TeamSelectionModel.Player1)}  {p1Tag}\n" +
+            $"P2: {AiTeamPreview(TeamSelectionModel.Player2)}  {p2Tag}\n" +
             $"Rules: {_teamRules.RoundTimeSeconds}s per bout / last fighter standing\n" +
             $"P1: W/S slot  A/D fighter  J ready\n" +
             $"P2: UP/DOWN slot  LEFT/RIGHT fighter  , ready\n" +
@@ -867,7 +879,7 @@ public partial class BattleScene
 
         string p1Name = m.P1FighterId is null ? "-" : _catalog.DisplayName(m.P1FighterId);
         string p2Name = m.P2FighterId is null ? "-" : _catalog.DisplayName(m.P2FighterId);
-        FrameInput last = _match.RoundInputBuffer.LastInput ?? FrameInput.Empty(state?.Frame ?? 0);
+        FrameInput last = _aiSource?.LastInput ?? _match.RoundInputBuffer.LastInput ?? FrameInput.Empty(state?.Frame ?? 0);
         int seconds = (m.RemainingTimeFrames + BattleCoreInfo.LogicFrameRate - 1)
             / BattleCoreInfo.LogicFrameRate;
 
@@ -878,6 +890,7 @@ public partial class BattleScene
         text.Append($"Round Result: {DescribeRoundResult(m)}\n");
         if (m.Phase == MatchPhase.MatchFinished)
             text.Append($"Match Result: {DescribeMatchResult(m)}\n");
+        text.Append(AiHud());
         text.Append($"Logic Frame: {state?.Frame ?? 0}{(_paused ? "  [PAUSED · F1]" : string.Empty)}\n");
         text.Append($"P1: {Describe(last.Player1)}  P2: {Describe(last.Player2)}\n");
         text.Append($"P1 Pos: {DescribePosition(p1)}   P2 Pos: {DescribePosition(p2)}\n");
@@ -898,7 +911,7 @@ public partial class BattleScene
         BattleState? state = _team.CurrentBattleState;
         FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
         FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
-        FrameInput last = _team.BoutInputBuffer.LastInput ?? FrameInput.Empty(state?.Frame ?? 0);
+        FrameInput last = _aiSource?.LastInput ?? _team.BoutInputBuffer.LastInput ?? FrameInput.Empty(state?.Frame ?? 0);
         int seconds = (m.RemainingTimeFrames + BattleCoreInfo.LogicFrameRate - 1)
             / BattleCoreInfo.LogicFrameRate;
 
@@ -917,6 +930,7 @@ public partial class BattleScene
         text.Append($"Last Bout: {DescribeBoutResult(m)}\n");
         if (m.Phase == TeamMatchPhase.MatchFinished)
             text.Append($"Team Result: {DescribeTeamOutcome(m.Outcome)}\n");
+        text.Append(AiHud());
         text.Append($"Logic Frame: {state?.Frame ?? 0}{(_paused ? "  [PAUSED · F1]" : string.Empty)}\n");
         text.Append($"P1: {Describe(last.Player1)}  P2: {Describe(last.Player2)}\n");
         text.Append($"P1 State: {DescribeState(p1)}   P2 State: {DescribeState(p2)}\n");

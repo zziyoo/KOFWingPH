@@ -18,6 +18,15 @@ public class AiInputSourceTests
             new[]{new MoveDefinition("Jab","A",1,1,1)});
         return new(Fighter("Kai"),Fighter("Rei"));
     }
+    private sealed class WrongSeatPolicy : IAiPolicy {
+        public AiDecision Decide(AiObservation o,AiPolicyState s)=>new(InputBits.None,s with { NextFrame=o.Frame+1, Player=1-s.Player });
+    }
+    [Fact] public void BadPolicyCandidateCannotCorruptSeatOrCommitHuman() {
+        var state=BattleState.CreateDefault(); var human=new InputBuffer();
+        var source=new AiInputSource(()=>state,Roster(),human,new WrongSeatPolicy());
+        Assert.Throws<InvalidOperationException>(()=>source.Prepare(0));
+        Assert.Empty(human.History); Assert.Equal(0,source.PolicyState(0)!.NextFrame); Assert.Equal(0,source.PolicyState(0)!.Player);
+    }
     [Theory] [InlineData(0)] [InlineData(1)]
     public void PrepareIsPureCommitOwnsBothSeats(int ai) {
         var state=BattleState.CreateDefault(); var roster=Roster(); var human=new InputBuffer();
@@ -39,6 +48,9 @@ public class AiInputSourceTests
         human.Sample(InputBits.Left,InputBits.None);
         Assert.Throws<InvalidOperationException>(()=>source.Commit(prepared));
         Assert.Empty(human.History); Assert.Equal(0,source.PolicyState(0)!.NextFrame); Assert.Equal(0,source.PolicyState(1)!.NextFrame);
+        source.DiscardPrepared();
+        source.Commit(source.Prepare(0));
+        Assert.Single(human.History); Assert.Equal(1,source.PolicyState(0)!.NextFrame);
     }
     [Fact] public void SimulationFailureRetainsSameCandidateAndSeed() {
         int frame=BattleEvent.MaxFrameForEventIds+1;

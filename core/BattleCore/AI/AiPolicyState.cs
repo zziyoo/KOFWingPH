@@ -30,6 +30,8 @@ public sealed record AiObservation(BattleState State, FightRoster Roster, int Pl
 public sealed record AiPolicyState
 {
     public const int FormatVersion = 1;
+    public int Player { get; init; } = -1;
+    public int Scope { get; init; } = 1;
     public int NextFrame { get; init; }
     public uint RandomState { get; init; }
     public string FighterId { get; init; }
@@ -49,7 +51,7 @@ public sealed record AiPolicyState
         Observations=Array.AsReadOnly((observations ?? Array.Empty<AiObservation>()).ToArray());
     }
     public bool ContentEquals(AiPolicyState other) =>
-        NextFrame==other.NextFrame && RandomState==other.RandomState && FighterId==other.FighterId &&
+        Player==other.Player && Scope==other.Scope && NextFrame==other.NextFrame && RandomState==other.RandomState && FighterId==other.FighterId &&
         NextDecisionFrame==other.NextDecisionFrame && ThreatSinceFrame==other.ThreatSinceFrame &&
         PlanIndex==other.PlanIndex && Action==other.Action && TargetMove==other.TargetMove && Plan.SequenceEqual(other.Plan) &&
         Observations.Count==other.Observations.Count && Observations.Zip(other.Observations).All(pair =>
@@ -57,6 +59,7 @@ public sealed record AiPolicyState
             pair.First.State.Fighters.SequenceEqual(pair.Second.State.Fighters) &&
             pair.First.State.Projectiles.SequenceEqual(pair.Second.State.Projectiles) &&
             pair.First.State.NextProjectileId==pair.Second.State.NextProjectileId &&
+            pair.First.State.StateVersion==pair.Second.State.StateVersion &&
             pair.First.State.PendingThrow==pair.Second.State.PendingThrow &&
             pair.First.State.Round==pair.Second.State.Round && pair.First.Timer==pair.Second.Timer);
 

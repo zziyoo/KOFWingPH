@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-08（阶段 11，D129–D139；Debug/Release 各 1078 项通过，StateVersion 15 / CoreVersion 16）
+> 最后更新：2026-11-08（阶段12确定性AI；Debug/Release各1172项通过；StateVersion15/CoreVersion16保持）
 
 ---
 
@@ -1527,3 +1527,23 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - D147：固定整数xorshift32；种子按玩家/回合或交锋/槽位稳定派生，独立席位不共享随机状态。Prepare仅计算候选种子，Commit才落定。无系统时间、线程调度、Guid或Random.Shared。
 - D148：进攻型提高攻投与贴身倾向；防守型更重防御、远程与距离；均衡型在落后或时间紧时加压。所有调整仅选择输入，不改HP/伤害/硬直/判定。固定300帧实测三种战术输入日志两两不同，Easy与Expert不同，同配置同种子重复一致。当前配置/控制器/指令关联专项66项通过。
 - Git网络状态：12A `bd74407`、12B `bcbb500` 已本地提交；GitHub HTTPS多次连接超时/重置，推送未成功，不把缓存origin/main当作已同步证据。后续仍需核实远程。
+
+
+## 阶段12D：宿主接入与验收（D149–D152）
+- D149：比赛规则仍为1v1/3v3，控制方式独立配置。模式/选人/选队页F6切P1、F7切P2 Human/AI，F8循环难度，F9循环战术，F10切固定种子队伍。角色与阵容可手选；任意手动修改队员会覆盖种子阵容。种子阵容从实际Catalog ID排序选择3槽，允许重复，界面显示预览。CLI `--p1=ai --p2=ai --ai-difficulty=Expert --ai-tactic=Offensive --ai-seed=12345 --ai-seeded-teams` 可指定演示配置；`--ai-auto-next`仅演示时自动进入下个回合/交锋。
+- D150：BindDuelRound/BindTeamBout按当前角色、回合/交锋和槽位新建输入组合器与策略。重开清空脚本和观察历史，配置保持且种子稳定重建；返回选择清空旧源。暂停由原Scheduler控制，不调用Prepare/Commit。HUD读取组合后的LastInput、控制类型、难度、角色、战术、Action/TargetMove。原键盘InputBuffer的电平/边沿与历史语义未改。
+- D151：观察历史最多121帧，配置延迟超过121构造即拒绝。快照带Player/Scope，恢复及候选都检查席位/回合与角色/帧；拒绝错位。外部非法修改真人采样导致Commit拒绝后可显式DiscardPrepared再重备，不消费策略或随机数。含上方向且当前地面规则会优先起跳的招式计划不被控制器选择，回退至其他招式或接近；不修改起跳/招式规则。远距离加入有限接近决策，避免双AI无限飞行道具相消。
+- D152：10000帧高HP持续战斗中，每条执行路径重新运行AI决策，比较单帧/7帧StepExact及30/60/144fps Advance逐帧输入、策略内容、角色和事件；独立恢复策略快照、离线不运行AI重放输入。完整1v1/3v3另逐提交帧比较比赛状态、BattleState全部权威内容与事件/策略/最终结果。没有拿预录输入替代实时AI跨帧率验证。
+- Godot真实Vulkan/RTX3060截图：`shots/p12_ai_duel.png` Expert/Offensive AI双方，真实攻击KO至P2 MATCH WIN；`p12_ai_team.png` Hard/Balanced双方种子阵容，5场交锋后P2 TEAM WIN（最后队员900HP）；`p12_human_ai.png` P1真人输入vsEasy P2，`p12_ai_human.png` Normal P1vs真人P2，均真实KO并MatchFinished。全部满血1000开始，未用改伤害或强制KO；验收时钟用既有`--match-time=15`。
+- 真实图形首次暴露双远程AI满血相消至TimeOver，已修复主动接近并以原种子回归；正常TimeOver仍保留。独立复核发现并修复观察延迟超历史永久等待、事务失败恢复、候选身份与上方向地面招式循环问题。
+- 权威StateVersion15/CoreVersion16保持，AI策略格式v1；不宣称正式跨进程序列化/录像/联机回滚。未来回滚必须同时恢复BattleState、两席AiPolicyState、相同Profile/Tactic和角色定义，以及外部输入记录游标。阶段13未开始。
+
+### 阶段12最终验收记录
+- Debug **1172/1172**、Release **1172/1172**，失败0/跳过0；原1078项测试文件与断言均保留，新增94项。核心Debug/Release、宿主Debug/Release四构建通过，0警告0错误；测试编译仍有原两条CS8600/xUnit2029告警。
+- Godot无头导入成功；真实图形除上列完整对局外，还验证 `shots/p12_human_team_ai.png` 真人vs电脑三人队伍至TEAM WIN；`p12_restart_return.png` 暂停60个渲染帧逻辑帧保持91，恢复后继续；F5重置至帧1，ESC返回选人帧0，重新确认后AI继续新比赛。
+- `shots/p12_team_reconfirm.png` 验证双方READY后F10改变种子阵容，双方确认被清除。F6/F7在种子阵容下切控制、手动编辑覆盖种子阵容也会清除受影响的确认，避免未经重新确认开赛。
+- 最终完整实时AI确定性：每帧输入、两席策略内容、BattleState、事件、MatchState/TeamMatchState、终局结果均在单帧/7帧StepExact与30/60/144fps Advance之间比较；各路径重新决策。10000帧持续战斗、种子复现、策略中途恢复及不运行AI的输入重放分别验收。
+- 单帧成本有界：最多121帧历史、最多4096帧脚本、仅对当前角色已缓存配置进行稳定顺序评分；没有未来战斗分支模拟、每帧JSON解析、线程或ML。未给出脱离环境噪声的微基准数字。
+- 本阶段未修改FighterState/BattleState/BattleSimulation/伤害与比赛计分规则，StateVersion15/CoreVersion16不变；AI策略v1。后续恢复仍要求相同不可变角色定义和Profile/Tactic，比较策略内容使用ContentEquals。
+- GitHub中途网络超时曾阻塞推送，随后网络恢复，12A `bd744078f4c193624fbfe1e3d86e32ca3b33367c`、12B `bcbb500f3bf7a64a379e00eec390d4fa3bc1649f`、12C `9eea512e132ea1b5e2438294d65927818870736f` 已成功推送。12D最终提交用git log核实，交付时再次检查本地/远程HEAD。
+- 阶段12开发与本地验收完成；没有已知重大回归。阶段13未启动，已有统一输入接口与独立策略快照可供后续需求使用；不提前假设其范围。

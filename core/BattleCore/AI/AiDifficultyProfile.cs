@@ -33,7 +33,7 @@ public sealed record AiDifficultyProfile
         int techChance, int mistakeChance, int actionCooldownFrames,
         FixedPoint preferredDistance, int counterChance, int techReactionFrames = 2)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(observationDelayFrames);
+        if(observationDelayFrames is < 0 or > 121) throw new ArgumentOutOfRangeException(nameof(observationDelayFrames));
         ArgumentOutOfRangeException.ThrowIfNegative(reactionDelayFrames);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(decisionIntervalFrames);
         ArgumentOutOfRangeException.ThrowIfNegative(actionCooldownFrames);

@@ -7,6 +7,10 @@ namespace NewKOF.BattleCore.Tests;
 public class AiProfileTests
 {
     [Fact]
+    public void ObservationBeyondRetainedHistoryIsRejected() =>
+        Assert.Throws<ArgumentOutOfRangeException>(()=>new AiDifficultyProfile(122,4,2,500,500,200,500,25,5,75,500));
+
+    [Fact]
     public void IncreasingDifficultyReducesLatencyAndMistakesWithoutPerfectDefense()
     {
         AiDifficultyProfile? previous = null;

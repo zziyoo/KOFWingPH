@@ -138,6 +138,14 @@ public sealed class AiController : IAiPolicy
         bool punish = seen.Opponent.LogicState == FighterLogicState.Recovery && Roll(_profile.CounterChance);
         bool throwAttempt = Roll(tuning.ThrowChance);
         bool attack = punish || Roll(tuning.AttackChance);
+        // Long-range trades must not pin both agents in a projectile-clash loop.
+        // Commit to approach for one decision interval before reconsidering a ranged attack.
+        if (seen.Distance > tuning.PreferredDistance + FixedPoint.FromInt(40) &&
+            Roll(_tactic == AiTactic.Offensive ? 750 : 450))
+        {
+            attack = false;
+            throwAttempt = false;
+        }
         MoveDefinition? best = null;
         int bestScore = int.MinValue;
         if (attack || throwAttempt)
@@ -145,7 +153,9 @@ public sealed class AiController : IAiPolicy
             foreach (var move in current.Definition.Moves.OrderBy(m => m.MoveId, StringComparer.Ordinal))
             {
                 var definition = current.Definition.Commands.Single(c => c.CommandId == move.CommandId);
-                if (AiCommandPlanner.Plan(definition).Count == 0) continue;
+                if (AiCommandPlanner.Plan(definition).Count == 0 || definition.DirectionSequence.Any(d =>
+                    d is CommandDirection.Up or CommandDirection.UpForward or CommandDirection.UpBack)) continue;
+                // Ground-only moves cannot consume a gesture that initiates PreJump first.
                 bool isThrow = move.Throws.Any(t => t.AllowsTarget(seen.Opponent.LogicState) && seen.Distance <= t.Range);
                 if (move.Throws.Count > 0 && (!throwAttempt || !isThrow)) continue;
                 if (move.Throws.Count == 0 && !attack) continue;

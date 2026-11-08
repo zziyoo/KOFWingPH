@@ -30,6 +30,21 @@ public class AiControllerTests
         new[] { FighterState.Create(0, 1000, -distance, Facing.Right), FighterState.Create(1, 1000, 0, Facing.Left) },
         BattleState.CreateDefault().StateVersion);
 
+    [Fact]
+    public void GroundOnlyVerticalChargeFallsBackWithoutJumpLoop()
+    {
+        var command=new CommandDefinition("Charge",new[]{CommandDirection.Down,CommandDirection.Up},InputBits.LightPunch,chargeHoldFrames:8);
+        var fighter=new FighterDefinition("Custom",new[]{command},new[]{new MoveDefinition("Vertical","Charge",1,1,1,
+            attacks:new[]{new AttackDefinition(40,60,25,25,damage:20)})});
+        var roster=new FightRoster(fighter,Load("Kai"));
+        var session=new BattleSession(Duel(60),simulation:new BattleSimulation(roster));
+        var source=new AiInputSource(()=>session.CurrentState,roster,new InputBuffer(),new AiController(Profile()));
+        session.StepExact(300,inputSource:source);
+        Assert.DoesNotContain(source.History,f=>(f.Player1 & InputBits.Up)!=0);
+        Assert.Null(source.PolicyState(0)!.TargetMove);
+        Assert.Equal(FighterLogicState.Standing,session.CurrentState.Fighter(0).LogicState);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
