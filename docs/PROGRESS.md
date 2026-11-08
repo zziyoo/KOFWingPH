@@ -1,6 +1,6 @@
 ﻿# PROGRESS.md — NewKOF 开发进度
 
-> 最后更新：2026-11-08（阶段 08D：飞行道具——D99——**722** 项测试——阶段 08 结项）
+> 最后更新：2026-11-08（阶段 10 最终表现层补修——D127/D128——**1031** 项测试——阶段 10 最终结项）
 
 ---
 
@@ -2374,3 +2374,102 @@ state: f11 P1=Hitstun/-/0             P2=Hitstun/-/0
 JSON 只提供不可变配置。旧单回合 API（`BattleSimulation.Step` / `BattleSession`）语义未变。
 
 **仍不支持**：正式 KOF 3v3 队伍赛、空中防御/拆投、AI、联机回滚与 `BattleState` 序列化。
+
+---
+
+## 阶段 10 最终表现层补修（逐帧事件传递与 Hitstop 动画时钟，2026-11-08）—— D127/D128 —— 阶段 10 最终结项
+
+### 修复前的两个根因（先复现，再改）
+
+**P1：一次 `Advance` 提交多个逻辑帧时，表现层只读 `LastEvents`。**
+
+复现（真实 Kai/Rei JSON、±30 站位、第 0 帧按 5A、一次推进 5 帧）：
+
+| 观测项 | 修复前实测 |
+|---|---|
+| `Advance` 返回 | `steps=5`，最终 `frame=5` |
+| 权威结果 | P2 HP **1000 → 970**（伤害已结算） |
+| `MatchSession.LastEvents` | **0 条**（最后一帧 frame 5 没有事件） |
+| 事件实际位置 | 命中帧 3 提交后 P2 `x=30`；frame 9 时已被击退到 `x=33.5` |
+
+即：命中发生在第 3 帧、后两帧无事件，表现层读到的是最后一个空列表——伤害生效但火花丢失；
+即便读到事件，用最终状态取坐标也会把火花画在击退之后的位置。
+
+**P2：`FighterVisualClock` 只在批次末状态同步，且用「帧结束」的 Hitstop 判冻结。**
+
+追踪 `BattleSimulation.Step` 的真实顺序：命中帧 N 本身不冻结（正常推进、结算末尾把计数器写成 4）；
+N+1…N+4 四帧冻结（帧开始时 4→3→2→1，提交时 −1）；N+5 恢复。
+**计数器 1→0 的那一帧仍是冻结帧**，但它的结束值已经是 0——旧判据 `hitstopRemaining <= 0` 必然多算一帧。
+再加上「一次 Advance 只看末状态」，中间四个冻结帧完全不可见。
+
+复现实测：命中后状态 frame=4 / hitstop=4 时 `VisualFrame=0`；再推进 5 帧到 frame=9 / hitstop=0，
+旧时钟算出 **`v1=5`**（正确应为 **+1**，即 4 帧冻结 + 1 帧恢复）。
+
+### 修复方案
+
+- **逐逻辑帧快照**：`MatchSession` / `TeamMatchSession` 新增可选 `framePresented` 观察者，
+  每个已提交帧（**含无事件帧**）投递 `PresentationFrame(Scope, LogicFrame, StateBefore, StateAfter, Events)`。
+  `Scope` = 回合号 / 交锋号；`LogicFrame` = 被推进帧（= 事件 `Frame` = `StateBefore.Frame`）。
+- **有序队列**：`PresentationFrameBuffer` 按提交顺序缓存，表现层每渲染帧整批 `Drain()` 并清空；
+  容量 240 仅作防御（超出丢最旧帧），正常运行时 `DroppedCount == 0`，事件不会无限积累。
+- **位置取事件发生帧**：`FeedbackGeometry.Anchor(cue, frame.StateAfter)`——相杀/投技冲突/道具对撞取双方中点，
+  其余取被击者胸口；坐标来自**该帧提交后的权威状态**（击退尚未发生、投技位移已应用，与画面一致）。
+- **去重不变**：`FeedbackDirector` 仍按 `(scope, EventId)` 去重；跨交锋同号 `EventId` 因 scope 不同各自生效。
+- **时钟逐帧观察**：`FighterVisualClock.Observe(logicFrame, state, moveId, frozenThisFrame)`，
+  `frozenThisFrame` 取 `StateBefore.HitstopRemainingFrames > 0`；`FighterVisual.ObserveFrame(frame, index)` 驱动。
+  `Apply()` 不再推进时钟（同一逻辑帧重复渲染、按键触发的重绘都不会改变动画时间线）。
+- **事件位置/特效开关**：F4 关闭特效时只跳过火花/抖动/闪白，动画时钟照常推进；队列照常清空。
+- **生命周期**：新回合 / 换人 / 返回选人时 `ResetFeedbackLayer()` 清空队列与瞬时表现；
+  1v1 与 3v3 共用同一条管线（`Scope` 不同）。
+
+### 修改文件
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Presentation/PresentationFrame.cs` | **新增**：逐帧快照（含帧号/前后状态/事件，构造期校验帧号一致） |
+| `core/BattleCore/Presentation/PresentationFrameBuffer.cs` | **新增**：有序队列 + `Drain()` + 容量上限 |
+| `core/BattleCore/Presentation/AnimationResolver.cs` | `FighterVisualClock.Observe(...)`；`Sync(...)` 保留为单帧便捷入口并明确参数语义 |
+| `core/BattleCore/Presentation/CombatFeedback.cs` | **新增** `FeedbackGeometry.Anchor`（纯函数，事件帧坐标） |
+| `core/BattleCore/Match/MatchSession.cs` / `Team/TeamMatchSession.cs` | 新增 `framePresented` 观察者（无事件帧也投递），其余顺序与 D118 不变 |
+| `scripts/FighterVisual.cs` | `ObserveFrame(PresentationFrame, index)`；`Apply` 只读 `VisualFrame` |
+| `scripts/BattleScene.cs` | `PresentationFrameBuffer` 接线；`DrainPresentationFrames()` 逐帧消费；删除 `ConsumeFeedback(LastEvents)` |
+| `tests/BattleCore.Tests/Stage10PresentationTests.cs` | **新增 19 项**（见下） |
+
+### 测试与验收
+
+新增 `Stage10PresentationTests` **19 项**：逐帧顺序/帧号不变量、早期命中不被空帧覆盖、同帧多事件顺序、
+重复消费去重、跨交锋同号 EventId 各自生效、火花用事件帧坐标（30 vs 33.5）、相杀中点、
+队列容量与不残留、快照装配校验、时钟正常推进/完整 4→3→2→1 递减/最后冻结帧不推进/重复观察不推进/
+状态与招式切换归零/双时钟独立、真实 1v1 命中→Hitstop→恢复、真实 3v3 交锋命中（scope=1）、
+真实 Double KO 双方反馈（2 Hit + 1 DoubleKnockout）、30/60/144 FPS 权威状态与事件/坐标/动画一致。
+
+| 项 | 实际结果 |
+|---|---|
+| `dotnet test`（Debug） | **1031/1031**（1012 基线 + 19 新增，原测试零改动） |
+| `dotnet test`（Release） | **1031/1031** |
+| 四构建（Core/表现层 × Debug/Release） | 0 警告 0 错误 |
+| Godot 无头导入 | `[ DONE ] update_scripts_classes` / `loading_editor_layout` |
+| Godot 无头冒烟 | `--quit-after 900` 退出码 0 |
+| 版本 | StateVersion 13 / CoreVersion 14 不变（未改任何战斗快照字段） |
+
+**图形证据（真实 Godot，`--maxfps=10` 即每个渲染帧推进 5 个逻辑帧）**：
+
+| 截图 | 内容 |
+|---|---|
+| `p10e_hit_flash_10fps.png` | 1v1 命中帧：P2 `Hitstun(12) HITSTOP(3)`、`970/1000`、`Pos (30, 0)`、闪白 + 火花；HUD `Event: -`（最后一帧无事件）却被正确渲染 |
+| `p10e_hit_10fps.png` | 稍后（逻辑帧 22）：P2 已击退到 `(33.5, 0)`，火花仍停在命中位置（不是最终位置） |
+| `p10e_team_hit_10fps.png` | 3v3 `Bout 1/5`：`P2 Rei 970/1000`、`HITSTOP(3)`、火花 + 闪白 |
+| `p10e_doubleko_10fps.png` | 1v1 镜像（Kai vs Kai，`--hp=30`）真实 Double KO：双方 `0/1000`、`HITSTOP(4)`、双方闪白 + 两个火花、`DOUBLE KO (DOUBLE KO)` 横幅 |
+| `p10e_duel_60fps.png` | 60 FPS 回归：命中火花 + 闪白 + `970/1000` + `HITSTOP(1)` |
+
+**变异验证（逐项捕获后按 SHA-256 逐字节恢复）**：
+
+| 变异 | 被捕获的测试 |
+|---|---|
+| 时钟忽略 `frozenThisFrame` | 4 项（完整递减、最后冻结帧、双时钟、真实宿主恢复） |
+| 只投递有事件的帧 | 3 项（逐帧顺序、真实宿主恢复、30/60/144 一致） |
+| 锚点忽略被击者（总取 P1） | 2 项（事件帧坐标、3v3 命中坐标） |
+
+**已知限制**：快照只存在于进程内，不是 `BattleState` 序列化格式；未做跨进程重放/回滚。
+HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本，与特效数据源无关），
+低帧率下可能显示 `-` 而画面已有火花——这是两条不同路径的预期差异。

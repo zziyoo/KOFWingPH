@@ -62,6 +62,7 @@ public partial class BattleScene : Node2D
 
     private readonly FeedbackDirector _feedback = new();
     private readonly HitShake _shake = new();
+    private readonly PresentationFrameBuffer _frameBuffer = new();
     private CombatFeedbackLayer _fx = null!;
     private bool _fxEnabled = true;
     private (int X, int Y) _shakeOffset;
@@ -157,7 +158,8 @@ public partial class BattleScene : Node2D
                 p1 ?? _catalog.Entries[0].FighterId,
                 p2 ?? _catalog.Entries[^1].FighterId),
             initialStateFactory: CreateDuelInitialState,
-            maxStepsPerAdvance: MaxStepsPerAdvance);
+            maxStepsPerAdvance: MaxStepsPerAdvance,
+            framePresented: _frameBuffer.Enqueue);
         RebindInput(_match.RoundInputBuffer);
     }
 
@@ -167,7 +169,8 @@ public partial class BattleScene : Node2D
             _teamRules,
             BuildRoster,
             CreateBoutInitialState,
-            maxStepsPerAdvance: MaxStepsPerAdvance);
+            maxStepsPerAdvance: MaxStepsPerAdvance,
+            framePresented: _frameBuffer.Enqueue);
     }
 
     private FightRoster BuildRoster(string p1FighterId, string p2FighterId) =>
@@ -490,6 +493,7 @@ public partial class BattleScene : Node2D
             case Key.Escape:
                 _match.ReturnToSelection();
                 _feedback.Reset();
+                ResetFeedbackLayer();
                 _p1Confirmed = false;
                 _p2Confirmed = false;
                 RebindInput(_match.RoundInputBuffer);
@@ -536,6 +540,7 @@ public partial class BattleScene : Node2D
             case Key.Escape:
                 _team.ReturnToSelection();
                 _feedback.Reset();
+                ResetFeedbackLayer();
                 _teamSelect.ClearReady();
                 RebindInput(_team.BoutInputBuffer);
                 _stage = Stage.TeamSelect;
@@ -675,6 +680,11 @@ public partial class BattleScene : Node2D
         int steps = TeamActive
             ? _team.Advance(delta, _tracedSource)
             : _match.Advance(delta, _tracedSource);
+
+        // 逐逻辑帧消费（D127/D128）：先按时间顺序推进两个动画时钟并生成命中特效，
+        // 再渲染最终权威状态。一次 Advance 提交几帧就消费几帧，绝不只看最后一帧。
+        DrainPresentationFrames();
+
         if (steps > 0)
         {
             if (_diagnostics)
@@ -752,8 +762,6 @@ public partial class BattleScene : Node2D
 
     private void RenderBattle(BattleState? state)
     {
-        ConsumeFeedback(state);
-
         FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
         FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
         PlaceFighters(p1, p2, state?.Frame ?? 0);
@@ -1233,51 +1241,70 @@ public partial class BattleScene
     }
 }
 
-// ── 打击反馈（阶段 10D，D126）─────────────────────────────────────
+// ── 打击反馈（阶段 10D，D126；阶段 10 最终补修，D127/D128）──────────
 
 public partial class BattleScene
 {
-    /// <summary>消费本帧权威事件并生成至多一次反馈（去重由 <see cref="FeedbackDirector"/> 保证）。</summary>
-    private void ConsumeFeedback(BattleState? state)
+    /// <summary>
+    /// 逐逻辑帧消费表现快照：先推进动画时钟（每个已提交帧一次），再生成反馈。
+    ///
+    /// <para><b>为什么不能只读 LastEvents</b>：一次 <see cref="_Process"/> 可能推进多个逻辑帧，
+    /// 命中可能发生在其中较早的一帧；只读最后一帧会丢掉事件，用最终状态取坐标会把火花
+    /// 画在击退之后的位置。</para>
+    ///
+    /// <para>反馈身份 = <c>(scope, EventId)</c>；位置取事件帧提交后的权威状态。
+    /// 队列每渲染帧整批取走并清空，不会跨帧残留。</para>
+    /// </summary>
+    private void DrainPresentationFrames()
     {
-        if (!_fxEnabled)
+        IReadOnlyList<PresentationFrame> frames = _frameBuffer.Drain();
+        if (frames.Count == 0)
             return;
 
-        if (TeamActive)
+        // ① 动画时钟：无论本帧有没有事件都要观察（冻结/恢复信息在无事件帧里）。
+        for (int i = 0; i < frames.Count; i++)
         {
-            foreach (TeamMatchEvent e in _team.LastEvents)
-            {
-                if (!_feedback.TryConsume(e.BoutNumber, e.BoutEvent, out FeedbackCue cue))
-                    continue;
-                ApplyCue(cue, state);
-            }
+            _visual1?.ObserveFrame(frames[i], 0);
+            _visual2?.ObserveFrame(frames[i], 1);
         }
-        else
+
+        if (!_fxEnabled)
+            return; // F4 关闭特效：只推进时钟，不生成火花/抖动/闪白（权威状态不受影响）。
+
+        // ② 反馈：同一帧的多个事件全部消费；同一事件只出一次特效。
+        for (int i = 0; i < frames.Count; i++)
         {
-            foreach (MatchEvent e in _match.LastEvents)
+            PresentationFrame frame = frames[i];
+            for (int e = 0; e < frame.Events.Count; e++)
             {
-                if (!_feedback.TryConsume(e.RoundNumber, e.RoundEvent, out FeedbackCue cue))
+                if (!_feedback.TryConsume(frame.Scope, frame.Events[e], out FeedbackCue cue))
                     continue;
-                ApplyCue(cue, state);
+                ApplyCue(cue, frame);
             }
         }
     }
 
-    private void ApplyCue(FeedbackCue cue, BattleState? state)
+    private void ApplyCue(FeedbackCue cue, in PresentationFrame frame)
     {
         (Color color, int size, int shake) = CueStyle(cue.Kind);
         if (size > 0)
         {
+            // 位置来自事件帧的权威状态（不是当前渲染帧的最终位置）。
+            (double x, double y) = FeedbackGeometry.Anchor(cue, frame.StateAfter);
+            var position = new Vector2(640f + (float)x, 560f - (float)y);
+
             // 固定方向序列（身份 → 角度），保证同一回放产生同样画面。
             float angle = (cue.Identity % 6) * (Mathf.Pi / 3f);
             var velocity = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * 1.6f;
-            _fx.Spawn(CuePosition(cue, state), color, size, velocity);
+            _fx.Spawn(position, color, size, velocity);
         }
 
         _shake.Trigger(shake);
 
+        // 闪白按逻辑帧计时；取「事件帧 / 当前渲染帧」较大值，低帧率下也不会整段跳过。
         if (cue.Kind is FeedbackKind.Hit or FeedbackKind.ThrowImpact)
-            TargetVisual(cue.TargetFighterId)?.FlashUntil(CurrentLogicFrame + 5);
+            TargetVisual(cue.TargetFighterId)?.FlashUntil(
+                Math.Max(frame.LogicFrame, CurrentLogicFrame) + 5);
     }
 
     private FighterVisual? TargetVisual(int fighterId) => fighterId switch
@@ -1304,35 +1331,10 @@ public partial class BattleScene
         _ => (Colors.Transparent, 0, 0),
     };
 
-    /// <summary>火花位置：相杀/对撞取双方中点，其余取被击者胸口。</summary>
-    private static Vector2 CuePosition(FeedbackCue cue, BattleState? state)
-    {
-        if (state is null)
-            return new Vector2(640f, 480f);
-
-        bool clash = cue.Kind is FeedbackKind.StrikeClash or FeedbackKind.ThrowClash
-            or FeedbackKind.ProjectileClash;
-        if (clash)
-        {
-            Vector2 a = FighterWorld(state.Fighter(0));
-            Vector2 b = FighterWorld(state.Fighter(1));
-            return (a + b) / 2f;
-        }
-
-        int target = cue.TargetFighterId is 0 or 1 ? cue.TargetFighterId : cue.SourceFighterId;
-        if (target is not (0 or 1))
-            return new Vector2(640f, 480f);
-        return FighterWorld(state.Fighter(target));
-    }
-
-    /// <summary>权威坐标 → 屏幕坐标（与角色节点使用同一变换；胸口高度 -60）。</summary>
-    private static Vector2 FighterWorld(FighterState fighter) => new(
-        640f + (float)fighter.PositionX.ToDouble(),
-        560f - (float)fighter.PositionY.ToDouble() - 60f);
-
     /// <summary>清空瞬时表现（新回合/换人/关闭特效）：不动权威状态，也不清事件去重。</summary>
     private void ResetFeedbackLayer()
     {
+        _frameBuffer.Clear();
         _fx.Clear();
         _shake.Reset();
         _shakeOffset = (0, 0);

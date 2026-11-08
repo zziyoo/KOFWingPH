@@ -59,11 +59,28 @@ public sealed class FighterVisual
     public void FlashUntil(int logicFrame) =>
         _flashUntilFrame = System.Math.Max(_flashUntilFrame, logicFrame);
 
-    /// <summary>按权威状态刷新一次画面（只读投影）。</summary>
+    /// <summary>
+    /// 观察一个已提交逻辑帧（阶段 10 最终补修，D127/D128）：推进动画时钟。
+    ///
+    /// <para>必须按时间顺序、<b>每个逻辑帧调用一次</b>（不管该帧有没有事件）。冻结判据取
+    /// <b>帧开始状态</b>的 <c>HitstopRemainingFrames</c>——递减到 0 的那一帧仍是冻结帧。</para>
+    /// </summary>
+    public void ObserveFrame(in PresentationFrame frame, int fighterIndex)
+    {
+        FighterState before = frame.StateBefore.Fighter(fighterIndex);
+        FighterState after = frame.StateAfter.Fighter(fighterIndex);
+        _clock.Observe(
+            frame.LogicFrame,
+            after.LogicState,
+            after.MoveId,
+            before.HitstopRemainingFrames > 0);
+    }
+
+    /// <summary>按权威状态刷新一次画面（只读投影；不再自行推进时钟）。</summary>
     public void Apply(FighterState fighter, int logicFrame)
     {
-        int visualFrame = _clock.Sync(
-            logicFrame, fighter.LogicState, fighter.MoveId, fighter.HitstopRemainingFrames);
+        // 时钟只由 ObserveFrame 推进：渲染频率、重复渲染都不会改变动画时间线。
+        int visualFrame = _clock.VisualFrame;
 
         ResolvedPose pose = AnimationResolver.Resolve(fighter, _set, visualFrame);
         PoseFrame frame = pose.Frame;

@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-08（阶段 09C：选人与比赛流程 D110–D112，821 项测试）
+> 最后更新：2026-11-08（阶段 10 最终表现层补修 D127/D128，1031 项测试）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 1012，已跳过: 0，总计: 1012`
+期望：`失败: 0，通过: 1031，已跳过: 0，总计: 1031`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -1016,12 +1016,18 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K86 | **表现配置独立于战斗 JSON（D125）** | fighter schema 已声明未知字段拒绝，往里加动画字段会直接破坏已发布格式 | 放 `data/presentation/*.json`；缺素材允许降级（`CreateFallback`），格式非法必须带路径报错 |
 | K87 | **特效只能由权威事件触发并按身份去重（D126）** | 自己判断「靠得近就是命中」会在相杀/被防御/投技冲突时出现假特效；不去重会每渲染帧重放 | 只用 `FeedbackDirector.TryConsume(scope, event)`；重开/返回选人要 `Reset()`（回合号会重用） |
 | K88 | **抖动用固定序列，别用随机数（D126）** | `Random` 会让同一段回放的截图不可复现，也难写回归测试 | 固定偏移表 + 线性衰减 + 取最大值不叠加；只叠加在角色节点，不写回权威坐标 |
+| K89 | **一次 `Advance` 可能提交多帧，表现层必须逐帧消费快照（D127）** | 只读 `LastEvents` 会丢掉较早帧的命中：实测 5 帧批次里第 3 帧命中、末帧为空，`LastEvents` 为 0 条而 HP 已掉；用最终状态取坐标还会把火花画在击退之后（30 → 33.5） | 用 `MatchSession/TeamMatchSession.framePresented` + `PresentationFrameBuffer`，每渲染帧 `Drain()`；位置用 `FeedbackGeometry.Anchor(cue, frame.StateAfter)` |
+| K90 | **Hitstop 冻结判据取「帧开始」值，且要逐帧观察（D128）** | 计数器 1→0 的那一帧仍是冻结帧（结束值已是 0）；只在批次末同步会把 4 个冻结帧 + 1 个恢复帧算成 +5（正确 +1） | `FighterVisualClock.Observe(..., frozenThisFrame: stateBefore.HitstopRemainingFrames > 0)`；`FighterVisual.Apply()` 不再推进时钟 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10 结项验收时 **1012/1012** 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10 最终表现层补修后 **1031/1031** 测试通过，可正常启动运行。
 
 阶段 10 新增验收测试 `Stage10AcceptanceTests`（8 项）：一人连挑三人、交替淘汰、跨交锋事件身份、
 同输入逐位一致、3v3 10000 帧确定性、30/60/144fps 一致、StepExact/Advance 等价、
 动画与反馈不改变比赛结果。
+
+阶段 10 最终补修新增 `Stage10PresentationTests`（19 项）：逐帧事件顺序与帧号不变量、早期命中不被空帧覆盖、
+同帧多事件、重复消费去重、跨交锋同号 EventId、事件帧坐标、队列不残留、时钟完整递减与恢复、
+真实 1v1/3v3/DoubleKO 宿主、30/60/144 FPS 一致。
 
 **注意**：`Rei` 的 JSON 只有 236A / 214B / 5D / 5C，**没有裸 5A**——写测试或做图形验收时
 让 P2 按轻拳不会出招（这是配置事实，不是输入缺陷，见 K84）。3v3 图形验收请用 Kai 镜像。

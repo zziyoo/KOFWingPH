@@ -5,12 +5,24 @@ using NewKOF.BattleCore.State;
 namespace NewKOF.BattleCore.Presentation;
 
 /// <summary>
-/// <b>表现时钟</b>（阶段 10C，D125）：把权威逻辑帧换算成「动画已经过帧数」，
-/// 并在 <b>Hitstop 期间停止推进</b>。
+/// <b>表现时钟</b>（阶段 10C，D125；阶段 10 最终补修，D128）：把权威逻辑帧换算成
+/// 「动画已经过帧数」，并在 <b>Hitstop 期间停止推进</b>。
 ///
 /// <para><b>只读投影</b>：本类不写入任何战斗状态，也不参与判定；它只是把
 /// <c>Frame</c> / <c>HitstopRemainingFrames</c> 解释成动画时间。状态或招式发生变化时
 /// 时钟归零，保证新动画从第一帧开始播放，而不是接着上一个动作的相位。</para>
+///
+/// <para><b>Hitstop 的真实执行顺序（D96 / 本轮复核）</b>：</para>
+/// <list type="number">
+/// <item>命中帧 N 本身<b>不冻结</b>：角色照常推进动作与运动，结算末尾把计数器写成配置值（如 4）。</item>
+/// <item>N+1 … N+4 是<b>冻结帧</b>：每帧开始时计数器 &gt; 0 → 整帧不推进动作/运动，
+///       只在提交时把计数器 −1（4→3→2→1→0）。</item>
+/// <item>N+5 是恢复后的第一帧：帧开始时计数器已为 0 → 正常推进。</item>
+/// </list>
+///
+/// <para><b>因此「本帧是否冻结」必须取帧开始状态的 <c>HitstopRemainingFrames &gt; 0</c></b>，
+/// 不能用帧结束状态：计数器从 1 递减到 0 的那一帧<b>仍然是冻结帧</b>，
+/// 但它的结束值已经是 0。这正是旧实现（只按 Advance 后的末状态同步）会多算一帧的原因。</para>
 /// </summary>
 public sealed class FighterVisualClock
 {
@@ -24,29 +36,54 @@ public sealed class FighterVisualClock
     public int LastLogicFrame { get; private set; } = -1;
 
     /// <summary>
-    /// 与权威状态同步一次，返回可用于取动画帧的「已经过帧数」。
-    /// 同一逻辑帧重复调用不会推进（渲染帧率高于逻辑帧率时安全）。
+    /// 观察一个<b>已提交逻辑帧</b>并返回可用于取动画帧的「已经过帧数」。
+    ///
+    /// <para>必须按时间顺序、<b>每个逻辑帧调用一次</b>（渲染帧率无关）；同一逻辑帧重复调用
+    /// 不会推进。一次 <c>Advance</c> 提交了多个逻辑帧时，应逐帧调用本方法，
+    /// 而不是只在批次结束时用末状态调用一次——否则中间的冻结/恢复信息不可见。</para>
     /// </summary>
-    public int Sync(int logicFrame, FighterLogicState state, string? moveId, int hitstopRemaining)
+    /// <param name="logicFrame">被观察的逻辑帧号（= 帧开始状态帧号）。</param>
+    /// <param name="state">该帧<b>结束</b>时的逻辑状态（决定当前动画段）。</param>
+    /// <param name="moveId">该帧结束时的招式 ID（null = 无招式）。</param>
+    /// <param name="frozenThisFrame">
+    /// 该帧是否整体冻结——取<b>帧开始状态</b>的 <c>HitstopRemainingFrames &gt; 0</c>
+    /// （见类型注释：递减到 0 的那一帧仍是冻结帧）。
+    /// </param>
+    public int Observe(int logicFrame, FighterLogicState state, string? moveId, bool frozenThisFrame)
     {
+        if (logicFrame < 0)
+            throw new ArgumentOutOfRangeException(nameof(logicFrame), logicFrame, "逻辑帧号不能为负。");
+
         string stateKey = state.ToString();
         string moveKey = moveId ?? string.Empty;
         if (stateKey != _lastState || moveKey != _lastMove)
         {
-            // 状态/招式切换：新动画从第 0 帧开始。
+            // 状态/招式切换：新动画从第 0 帧开始（即使在冻结帧里切换也一样）。
             VisualFrame = 0;
             _lastState = stateKey;
             _lastMove = moveKey;
         }
-        else if (hitstopRemaining <= 0 && LastLogicFrame >= 0 && logicFrame > LastLogicFrame)
+        else if (!frozenThisFrame && LastLogicFrame >= 0 && logicFrame > LastLogicFrame)
         {
-            // 只在非冻结且逻辑帧真的前进时推进；渲染帧率无关。
+            // 只在「本帧未冻结」且逻辑帧真的前进时推进；渲染帧率无关。
             VisualFrame += logicFrame - LastLogicFrame;
         }
 
-        LastLogicFrame = logicFrame;
+        // 乱序/重复观察不回退帧号：回退会让同一段时间被重复计入动画时间。
+        if (logicFrame > LastLogicFrame)
+            LastLogicFrame = logicFrame;
         return VisualFrame;
     }
+
+    /// <summary>
+    /// 单帧便捷入口（阶段 10C 的旧调用方）。<paramref name="hitstopRemaining"/> 必须是
+    /// <b>该逻辑帧生效中的停顿剩余帧数</b>（帧开始值），不是帧结束值。
+    ///
+    /// <para>只拿得到「批次末状态」的调用方无法用它还原中间帧：那种场景必须改用
+    /// <see cref="Observe"/> 逐帧观察（见 D127/D128）。</para>
+    /// </summary>
+    public int Sync(int logicFrame, FighterLogicState state, string? moveId, int hitstopRemaining) =>
+        Observe(logicFrame, state, moveId, hitstopRemaining > 0);
 
     /// <summary>重置（新回合/换人时用）。</summary>
     public void Reset()

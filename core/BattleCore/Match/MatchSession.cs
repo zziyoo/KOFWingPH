@@ -1,5 +1,6 @@
 using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Input;
+using NewKOF.BattleCore.Presentation;
 using NewKOF.BattleCore.Simulation;
 using NewKOF.BattleCore.State;
 
@@ -31,6 +32,7 @@ public sealed class MatchSession
     private readonly RosterFactory _rosterFactory;
     private readonly Func<MatchRules, BattleState> _initialStateFactory;
     private readonly Action<MatchEvent>? _eventsCommitted;
+    private readonly Action<PresentationFrame>? _framePresented;
     private readonly int _maxStepsPerAdvance;
 
     private BattleSession? _roundSession;
@@ -50,12 +52,20 @@ public sealed class MatchSession
     /// （09B 起由内核权威时钟承载）。</param>
     /// <param name="eventsCommitted">比赛级事件观察者（帧完整提交后投递，D83）。</param>
     /// <param name="maxStepsPerAdvance">单次 Advance 最多补的逻辑帧数。</param>
+    /// <param name="framePresented">
+    /// 逐逻辑帧表现快照观察者（阶段 10 最终补修，D127）：<b>每个已提交帧调用一次</b>
+    /// （即使该帧没有任何事件），入参携带该帧开始/结束的权威状态与该帧全部事件。
+    /// 表现层据此逐帧推进动画时钟并按事件发生帧的坐标生成特效；
+    /// 只读用途，不得写回战斗状态。在计分与 <see cref="MatchState"/> 校验之后调用，
+    /// 异常语义与 <paramref name="eventsCommitted"/> 相同（原样上抛并进入故障封闭）。
+    /// </param>
     public MatchSession(
         MatchRules rules,
         RosterFactory rosterFactory,
         Func<MatchRules, BattleState>? initialStateFactory = null,
         Action<MatchEvent>? eventsCommitted = null,
-        int maxStepsPerAdvance = 5)
+        int maxStepsPerAdvance = 5,
+        Action<PresentationFrame>? framePresented = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(rosterFactory);
@@ -67,6 +77,7 @@ public sealed class MatchSession
         _rosterFactory = rosterFactory;
         _initialStateFactory = initialStateFactory ?? DefaultInitialState;
         _eventsCommitted = eventsCommitted;
+        _framePresented = framePresented;
         _maxStepsPerAdvance = maxStepsPerAdvance;
         State = MatchState.NotStarted(rules);
         State.Validate();
@@ -277,6 +288,12 @@ public sealed class MatchSession
         for (int i = 0; i < events.Count; i++)
             wrapped[i] = new MatchEvent(roundNumber, events[i]);
         _lastEvents = Array.AsReadOnly(wrapped);
+
+        // ⑤ 逐逻辑帧表现快照（D127）：无事件的帧同样要发布——表现时钟必须看到
+        //    每一个已提交帧的冻结/恢复；事件位置取「本帧提交后」的状态。
+        //    先于逐事件观察者投递：即使后者抛异常，本帧的权威状态与快照也已经落定。
+        _framePresented?.Invoke(new PresentationFrame(
+            roundNumber, stateBefore.Frame, stateBefore, current, events));
 
         if (_eventsCommitted is null || wrapped.Length == 0)
             return;

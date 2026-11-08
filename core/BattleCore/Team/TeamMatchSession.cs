@@ -1,6 +1,7 @@
 using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Numerics;
+using NewKOF.BattleCore.Presentation;
 using NewKOF.BattleCore.Simulation;
 using NewKOF.BattleCore.State;
 
@@ -33,6 +34,7 @@ public sealed class TeamMatchSession
     private readonly TeamRosterFactory _rosterFactory;
     private readonly TeamBoutStateFactory _initialStateFactory;
     private readonly Action<TeamMatchEvent>? _eventsCommitted;
+    private readonly Action<PresentationFrame>? _framePresented;
     private readonly int _maxStepsPerAdvance;
 
     private BattleSession? _boutSession;
@@ -46,7 +48,8 @@ public sealed class TeamMatchSession
         TeamRosterFactory rosterFactory,
         TeamBoutStateFactory? initialStateFactory = null,
         Action<TeamMatchEvent>? eventsCommitted = null,
-        int maxStepsPerAdvance = 5)
+        int maxStepsPerAdvance = 5,
+        Action<PresentationFrame>? framePresented = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(rosterFactory);
@@ -58,6 +61,7 @@ public sealed class TeamMatchSession
         _rosterFactory = rosterFactory;
         _initialStateFactory = initialStateFactory ?? DefaultInitialState;
         _eventsCommitted = eventsCommitted;
+        _framePresented = framePresented;
         _maxStepsPerAdvance = maxStepsPerAdvance;
         State = TeamMatchState.NotStarted(rules);
         State.Validate();
@@ -249,6 +253,11 @@ public sealed class TeamMatchSession
         for (int i = 0; i < events.Count; i++)
             wrapped[i] = new TeamMatchEvent(boutNumber, events[i]);
         _lastEvents = Array.AsReadOnly(wrapped);
+
+        // 逐逻辑帧表现快照（D127 同构）：Scope = 交锋号，无事件帧同样发布。
+        // 先于逐事件观察者投递，且此时本场交锋的淘汰/体力已落定。
+        _framePresented?.Invoke(new PresentationFrame(
+            boutNumber, stateBefore.Frame, stateBefore, current, events));
 
         if (_eventsCommitted is null || wrapped.Length == 0)
             return;

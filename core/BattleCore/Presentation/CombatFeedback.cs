@@ -1,4 +1,5 @@
 using NewKOF.BattleCore.Simulation;
+using NewKOF.BattleCore.State;
 
 namespace NewKOF.BattleCore.Presentation;
 
@@ -125,6 +126,47 @@ public sealed class FeedbackDirector
         BattleEventType.TimeOver => FeedbackKind.TimeOver,
         _ => FeedbackKind.None,
     };
+}
+
+/// <summary>
+/// <b>反馈锚点几何</b>（阶段 10 最终补修，D127）：把 <see cref="FeedbackCue"/> 解析成
+/// <b>事件发生那一帧</b>的战场坐标（X 右为正、Y 向上为正，原点 = 地面中心）。
+///
+/// <para><b>为什么单独成类</b>：位置必须来自 <see cref="PresentationFrame.StateAfter"/>
+/// （事件帧的权威状态），而不是渲染时的最终状态。抽成纯函数后可以直接用真实战斗数据
+/// 断言「火花在命中帧的位置，而不是击退之后的位置」，不必依赖 Godot。</para>
+///
+/// <para><b>规则</b>：相杀 / 投技冲突 / 飞行道具对撞取双方中点；其余取被击者胸口
+/// （无有效被击者时退回发起者）。返回的 Y 已包含胸口高度，调用方只需做屏幕变换。</para>
+/// </summary>
+public static class FeedbackGeometry
+{
+    /// <summary>胸口相对脚底的高度（世界单位）。</summary>
+    public const double ChestHeight = 60d;
+
+    /// <summary>解析反馈锚点（战场坐标）。</summary>
+    /// <param name="cue">反馈指令（含双方 ID）。</param>
+    /// <param name="state">事件帧的权威状态（<see cref="PresentationFrame.StateAfter"/>）。</param>
+    public static (double X, double Y) Anchor(FeedbackCue cue, BattleState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        if (cue.Kind is FeedbackKind.StrikeClash or FeedbackKind.ThrowClash
+            or FeedbackKind.ProjectileClash)
+        {
+            (double ax, double ay) = AnchorOf(state.Fighter(0));
+            (double bx, double by) = AnchorOf(state.Fighter(1));
+            return ((ax + bx) / 2d, (ay + by) / 2d);
+        }
+
+        int target = cue.TargetFighterId is 0 or 1 ? cue.TargetFighterId : cue.SourceFighterId;
+        return target is 0 or 1
+            ? AnchorOf(state.Fighter(target))
+            : (0d, ChestHeight);
+    }
+
+    private static (double X, double Y) AnchorOf(FighterState fighter) =>
+        (fighter.PositionX.ToDouble(), fighter.PositionY.ToDouble() + ChestHeight);
 }
 
 /// <summary>
