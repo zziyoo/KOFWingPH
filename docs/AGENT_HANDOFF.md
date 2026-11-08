@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 908，已跳过: 0，总计: 908`
+期望：`失败: 0，通过: 938，已跳过: 0，总计: 938`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,20 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 10A（2026-11-08）3v3 队伍赛核心（D120–D122）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Team/TeamDefinition.cs` | **新增**：`TeamMemberDefinition` / `TeamDefinition`（有序三人、满血值）/ `TeamSlot` |
+| `core/BattleCore/Team/TeamMatchRules.cs` | **新增**：交锋计时规则（默认 99 秒，可关闭） |
+| `core/BattleCore/Team/TeamMatchState.cs` | **新增**：`TeamSideState`（独立淘汰判据 + 逐槽体力）与队伍赛权威状态 |
+| `core/BattleCore/Team/TeamMatchEvent.cs` | **新增**：`(BoutNumber, EventId)` 组合身份 |
+| `core/BattleCore/Team/TeamMatchSession.cs` | **新增**：每场交锋一个 `BattleSession`，接替/终局/重开 |
+| `core/BattleCore/Match/FighterCatalog.cs` | `FighterCatalogEntry.MaxHealth` + `CreateTeam(teamId, ids)` |
+| `tests/BattleCore.Tests/TeamMatchTests.cs` | **新增 30 项** |
+
+**验收**：938/938（Debug）、表现层 0 警告 0 错误。**StateVersion 13 / CoreVersion 14 不变**。
 
 ### 阶段 09 最终专项补修（2026-11-08）批量推进 / 事件时序 / 结果原因一致性（D117–D119）
 
@@ -948,8 +962,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K77 | **批量 Advance 的终止点在「提交之后」，不在「预算之前」（D117）** | 只在批次入口检查一次比赛阶段，会让 KO 之后继续提交终局冻结帧：返回帧数虚高、`StepExact` 与 `Advance` 不一致、`LastEvents` 被空事件覆盖 | 用 `stopAfterCommit` 谓词在整帧落定后判定；剩余整帧预算记 `RecordDroppedSteps`，**不要**回滚累加器（会重复计费），也**不要**循环调 `StepExact` 绕开预算 |
 | K78 | **先落定权威 `MatchState`，再发布比赛事件（D118）** | 先发事件后计分会让 `RoundEnded` 观察者读到 `RoundInProgress`/旧胜场；观察者抛异常还会把唯一一次计分吞掉 | `OnFrameCommitted` 顺序固定为「计时投影 → `RecordRoundResult` → `Validate` → 发布」；观察者异常不回滚、不重发、原样上抛；回调里禁止重入修改比赛会话（`_publishing` 显式拒绝） |
 | K79 | **结果/原因组合只允许一份实现（D119）** | 比赛层自己写 switch 必然与 `RoundState` 分叉，`DoubleKO + Knockout`、`Draw + Knockout` 会被接受 | 一律调用 `RoundState.IsValidOutcomeReasonPair` / `ValidateOutcomeReasonPair`；新增结果或原因时**只改这一处**，并同步 `MatchState.Validate` |
+| K80 | **3v3 不要塞进 BattleState（D120）** | 六人同场会让推挤/相杀/投技/飞行道具与 D89 终局语义全部失效，且所有旧测试要重写 | 队伍赛是比赛层组织多个 1v1 交锋；`BattleSimulation` 一行不改；新回合重建 BattleSession |
+| K81 | **淘汰不是 `Health == 0`（D121）** | Time Over 败者可能仍有正体力，用 HP 判存活会让它重新登场、剩余人数算错 | 一律读 `TeamSideState.Eliminated[]`；体力只用于继承与显示；新上场队员用自身 `MaxHealth` |
+| K82 | **跨交锋事件必须带交锋号（D122）** | 每场 Frame 从 0 开始，裸 EventId 必然重号，特效去重/回放会把旧事件当新事件 | 用 `TeamMatchEventId(BoutNumber, EventId)`；不要假设裸 EventId 全场唯一 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 09 最终补修验收时 **908/908** 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10A 验收时 **938/938** 测试通过，可正常启动运行。
 
 ---
 

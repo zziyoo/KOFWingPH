@@ -2175,6 +2175,41 @@ Draw + TimeOverDraw）保持可用；未定义枚举仍抛 `ArgumentOutOfRangeEx
 
 ---
 
+## 阶段 10A 成果（3v3 队伍赛核心，2026-11-08）—— D120–D122
+
+### 核心规则
+
+- **结构**：`TeamDefinition`（有序三人 + 每人 `MaxHealth`）+ `TeamMatchRules` + `TeamMatchState`
+  + `TeamMatchSession`；场上始终 1v1，`BattleSimulation` / `BattleState` / `BattleSession` 一行未改。
+- **队员身份**=`(TeamId, SlotIndex)`：允许 Kai / Rei / Kai 同名占位；`FighterCatalog.CreateTeam`
+  逐 ID 解析并带出满血值（不假定 1000）。
+- **淘汰**：`Eliminated[]` 是唯一存活判据（Time Over 败者 HP > 0 也算淘汰）；KO/TimeOver 淘汰败方，
+  DoubleKO/TimeOverDraw 双方各淘汰一名；一方耗尽即定胜负，双方同时耗尽 `TeamDraw`。
+- **体力继承**：胜方保留本场实际 HP，新登场队员满血；每场交锋重建 BattleState / InputBuffer /
+  Scheduler，招式、硬直、击飞、投技、飞行道具、输入历史一律不继承。
+- **事件身份**：`(BoutNumber, EventId)`；`Advance` 沿用 D117 的提交后终止谓词，D118 的
+  「先计分 Validate 再发布」顺序与重入拒绝。
+- **1v1 兼容**：`MatchSession` / `MatchState` / `MatchRules` 与阶段 09 语义完全不变。
+
+### 测试与验收
+
+新增 **30 项** `TeamMatchTests`：建队与非法配置、槽位身份、KO 接替、体力继承、新队员满血、
+一人连挑三人、交替淘汰、DoubleKO、最后一名 DoubleKO → TeamDraw、Time Over 淘汰正 HP 败者、
+计时重置、TimeOverDraw 消耗双方、飞行道具不跨场、输入历史不跨场、事件组合身份唯一、
+批次边界、观察者看到已计分状态、状态不可变、终局只判一次、镜像对称、同输入逐位一致、
+镜像同角色独立状态、重开/返回选队、帧同步不变。
+
+| 项 | 实际结果 |
+|---|---|
+| `dotnet test`（Debug） | **938/938**（908 基线零改动 + 30 新增） |
+| 表现层构建 | 0 警告 0 错误 |
+| 版本 | StateVersion 13 / CoreVersion 14 不变（未改任何战斗快照字段） |
+
+**已知限制**：本阶段只有核心与测试，Godot 侧仍是 1v1；队伍选择、接替演出与模式切换在 10B。
+导出模板仍未安装，未做导出包实测。
+
+---
+
 ## 阶段 09 总结（2026-11-08）—— 正式结项
 
 | 子阶段 | 内容 | 决策 | 测试 | Commit |

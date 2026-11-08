@@ -6,17 +6,22 @@ namespace NewKOF.BattleCore.Match;
 public sealed class FighterCatalogEntry
 {
     public FighterCatalogEntry(
-        string fighterId, string displayName, string source, FighterDefinition definition)
+        string fighterId, string displayName, string source, FighterDefinition definition,
+        int maxHealth = 1000)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
         if (string.IsNullOrWhiteSpace(displayName))
             throw new ArgumentException("角色显示名称不能为空。", nameof(displayName));
+        if (maxHealth <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxHealth), maxHealth,
+                "角色最大体力必须为正。");
 
         FighterId = fighterId;
         DisplayName = displayName;
         Source = source ?? string.Empty;
         Definition = definition ?? throw new ArgumentNullException(nameof(definition));
+        MaxHealth = maxHealth;
     }
 
     /// <summary>唯一角色 ID（用于选人与权威状态标识）。</summary>
@@ -30,6 +35,12 @@ public sealed class FighterCatalogEntry
 
     /// <summary>权威角色配置（不可变，构造期校验过）。</summary>
     public FighterDefinition Definition { get; }
+
+    /// <summary>
+    /// 该角色的权威满血值（阶段 10A，D120）。队伍赛用它给新上场队员注入初始体力、
+    /// 并用它做体力继承的上界——<b>不假定所有角色恒为 1000</b>。
+    /// </summary>
+    public int MaxHealth { get; }
 }
 
 /// <summary>
@@ -84,6 +95,27 @@ public sealed class FighterCatalog
     /// <summary>按双方选人生成对局配置；镜像角色允许。</summary>
     public FightRoster CreateRoster(string p1FighterId, string p2FighterId) =>
         new(Get(p1FighterId).Definition, Get(p2FighterId).Definition);
+
+    /// <summary>
+    /// 按角色 ID 顺序构建一支队伍（阶段 10A，D120）：逐个解析 ID 并取该角色的
+    /// <b>权威满血值</b>。未知 ID 立即拒绝；同一角色允许占据多个槽位（槽位才是队员身份）。
+    /// </summary>
+    public Team.TeamDefinition CreateTeam(string teamId, IEnumerable<string> fighterIds)
+    {
+        ArgumentNullException.ThrowIfNull(fighterIds);
+        string[] ids = fighterIds.ToArray();
+        if (ids.Length == 0)
+            throw new ArgumentException("队伍不能为空。", nameof(fighterIds));
+
+        var members = new Team.TeamMemberDefinition[ids.Length];
+        for (int i = 0; i < ids.Length; i++)
+        {
+            var entry = Get(ids[i]);
+            members[i] = new Team.TeamMemberDefinition(entry.FighterId, entry.MaxHealth);
+        }
+
+        return new Team.TeamDefinition(teamId, members);
+    }
 
     /// <summary>
     /// 09C 的演示目录：Kai / Rei 来自既有 <see cref="DemoRoster"/>（测试夹具与明确回退路径）。
