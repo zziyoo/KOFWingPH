@@ -438,6 +438,19 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 |---|---|---|
 | **D99** | **飞行道具是 <see cref="ProjectileState"/> 形式的权威实体，住在 `BattleState.Projectiles` 里；ID 由快照内的 `NextProjectileId` 单调分配（溢出显式失败）。数据在 `MoveDefinition.Projectiles` → `ProjectileDefinition`：<b>命中载荷直接复用 `AttackDefinition`</b>（`OffsetForward/Up` 解释为出生偏移、`HalfWidth/Height` 解释为碰撞盒尺寸、`Height` 走 D77 防御表、伤害/硬直/击退/击飞/停顿与近战同源；生效帧字段不适用）。<b>时间线</b>：招式 Active 阶段经过帧 == 出生帧的那一帧<b>只建立实体</b>（不运动、不判定），下一逻辑帧才开始移动与命中。阶段顺序：近战结算 → 投技 → <b>飞行道具</b> → KO。每帧顺序：已有实体运动（寿命 −1、越界删除）→ P×P 对撞（不同发射者、正面积重叠 → 双方消失）→ P×F 命中/防御（命中即消失；每名目标每帧至多一枚，按 ID 升序）→ 新实体入列。| 实体必须能与发射者解耦：发射者进入收招、被击中、被投中都不影响已在场的弹——它们只读自己的位置/速度/寿命/来源身份（`SourceMoveId` + `TypeId`），因此无需「发射者还活着」这类隐式前提，也不会因为发射者动作状态变化而被误删。生成当帧不判定，是为了让「生成 → 下一帧生效」成为可逐帧预测的固定语义（而不是依赖同一帧内的处理顺序）。复用 `AttackDefinition` 作为命中载荷，避免第二套伤害/防御/击退规则（D77/D92/D93 全部自动一致）；`ProjectileSpawnMask` 把「这次发动已经发过」变成显式事实，否则命中停顿冻结动作时间时同一帧会反复生成。每帧每个目标至多被一枚弹命中（ID 升序），保证多来源同帧结算稳定可复现。**本阶段不支持**：飞行道具被普通攻击打掉（P×Hitbox 暂不结算，已显式记录为扩展边界）、追踪/反弹/耐久/等级。事件：`ProjectileHit`（Amount = 实扣伤害）、`ProjectileBlocked`（Amount = 防御硬直）、`ProjectileClash`（每对一次）；生成不单独发事件（实体本身在快照里）。StateVersion 11 → 12，CoreVersion 12 → 13。 |
 
+### 阶段 08 最终专项补修决策（跨系统边界，2026-11-08）
+
+四项疑点经真实失败复现**全部确认成立**，均为最小修复；**StateVersion 12 / CoreVersion 13 不变**
+（快照格式未变，修正的是结算与事件顺序）。D46/D55/D60/D61/D63/D69/D70/D73/D76/D78–D83/D87/D89–D99
+全部保留，722 项既有测试零改动。
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D100** | **`ProjectileSpawnMask` 属于「角色 + 发动帧」这一次攻击实例，不是角色本身。全部结算（近战 / 投技 / 相杀 / 投掷物）完成后，由唯一入口 `NormalizeSpawnMask(fighter, 帧开始 MoveStartedFrame)` 核账：掩码非零且（帧末不在招式中 **或** 发动帧已不同于帧开始）→ 清零；否则保留。同一实例 Active → Recovery 是正常阶段转换，不清零；取消到新实例由候选计算先行置 0，新实例可再次发射。已生成的 `ProjectileState`、`NextProjectileId` 与实体身份（Owner / SourceMoveId / ID）一概不动；`FighterState.Validate` 不放宽。** | 命中结算（Hitstun / AirHitstun / Blockstun）与投技结算（Knockdown）只清 `MoveId` / `MoveStartedFrame` / `MoveElapsedFrames`，掩码残留使 `BattleState` 构造期的 `Validate` 抛异常、整帧失败（实测三条中断路径分别报 `Hitstun` / `AirHitstun` / `Knockdown` 携带掩码 1）。在每个结算分支补一句 `ProjectileSpawnMask = 0` 会继续漏新路径；每帧无条件清零则会破坏 D99「同实例只生成一次」与「取消到新实例后重新发射」。故放在流水线末端按实例身份一次性核账。 |
+| **D101** | **Hitstop 冻结资格优先于 D73 地面最小间距的对称分摊。`ApplySeparation` 显式接收 `frozenThisFrame`：双方都不冻结 → 逐位沿用旧 D73 求解器；只有一方冻结 → 冻结方坐标固定（冻结分支的候选 X 即帧开始 X），缺口全部由未冻结方承担，仍受 D70 边界钳制；双方冻结 → 保持二者已有的合法位置、不推挤。空中状态继续按 D94 `IsAirborneLike()` 完全不参与本求解。** | 冻结分支跳过运动后，旧求解器不知道该角色被冻结，仍按缺口对称分摊：实测 P1 0 → −2、镜像 P2 0 → +2、墙角 580 → 578、冻结末帧 0 → −2。采用「求解器内固定锚点重解」而不是「事后把冻结方坐标恢复」——后者会留下非法的另一方位置。冻结方贴墙且已无空间的人为初态属于约束不可同时满足，只钳到边界、不编造额外位移；正常可达状态（上一帧已满足 D70/D73）不会出现。冻结结束后计数归零，立即恢复既有对称分摊。 |
+| **D102** | **结算前事件快照必须早于任何状态改写：`strikeClash` 仍用结算前状态计算 → 先采集 `AttackActiveSnapshot[]` 与 `ThrowAttempt[]` → 再执行 `ApplyStrikeClash` → 其余结算。事件组装只读快照，绝不回读改写后的状态。** | `ApplyStrikeClash` 会把双方从 `Active` 直接改成 `Recovery`，而 `CollectAttackActive` 只识别 `Active`；首个 Active 帧相杀时两条 `AttackActive` 全部丢失（实测事件集合只剩 `MoveStarted` ×2 + `StrikeClash`，AttackActive 期望 2 实际 0）。不改 D98 相杀资格、D80 互中语义、相杀后进 Recovery 的规则、EventId 公式与 MoveStarted 帧语义；同一实例仍只发一次 AttackActive，冻结帧仍跳过（D96）。 |
+| **D103** | **飞行道具的命中停顿与成功防御停顿共用唯一入口 `ApplyRemoteHitstop(fighters, target, frames)`：只作用于被命中/成功防御的目标，不自动冻结远处发射者（D99 远程语义）；`frames = 0` 不停顿，已有更长停顿用 `Math.Max` 保留，N 帧精确冻结 N 个后续逻辑帧、第 N+1 帧恢复 Blockstun/硬直倒计时。** | 防御分支在写完 `ProjectileBlocked` 事件后提前 `return`，跳过了命中分支末尾才写入的 Hitstop（实测 `HitstopRemainingFrames` 期望 3 实际 0；Blockstun 恢复帧数期望 11 实际 8，提前 3 帧）。把「向目标应用远程停顿」提成私有方法让两个分支共用，避免再次分叉。 |
+
 ### 离线原型限定（重要）
 
 **当前丢帧策略与帧同步保证只适用于当前离线原型。**

@@ -364,7 +364,7 @@ public sealed class BattleSimulation
             !state.Fighters[0].LogicState.IsAirborneLike() &&
             !state.Fighters[1].LogicState.IsAirborneLike();
         ApplySeparation(candidates, bothGroundAtFrameStart,
-            state.Fighters[0].PositionX, state.Fighters[1].PositionX);
+            state.Fighters[0].PositionX, state.Fighters[1].PositionX, frozenThisFrame);
 
         // ── 第 5 阶段：候选 → FighterState（结算前视图；原状态不受影响）。
         var nextFighters = new FighterState[candidates.Length];
@@ -413,16 +413,15 @@ public sealed class BattleSimulation
         bool strikeClash = contacts.Count == 0
             && FighterBoxes.HitboxesOverlap(
                 nextFighters[0], _roster.Fighter(0), nextFighters[1], _roster.Fighter(1));
+
+        // 结算前事件快照必须早于<b>任何</b>状态改写（D87 / D102）：ApplyStrikeClash 会把双方
+        // 从 Active 直接改成 Recovery，若先改写再采集，首个 Active 帧相杀时两条 AttackActive
+        // （以及投技尝试）会全部丢失。事件组装只读这两份快照，绝不回读改写后的状态。
+        AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster, frozenThisFrame);
+        ThrowAttempt[] throwAttempts = CollectThrowAttempts(nextFighters, _roster, frozenThisFrame);
+
         if (strikeClash)
             ApplyStrikeClash(nextFighters, _roster);
-
-        // AttackActive 必须取<b>结算前</b>视图（下方结算会原地改写 nextFighters）：
-        // 本帧确实生效过的攻击不能因为同帧被打断而丢事件——连<b>招式身份</b>一起取，
-        // 因为结算会把被中断者的 MoveId 清空。
-        AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster, frozenThisFrame);
-
-        // 投技尝试必须在结算<b>之前</b>采集（结算会改写状态：被打中就不能再抓）。
-        ThrowAttempt[] throwAttempts = CollectThrowAttempts(nextFighters, _roster, frozenThisFrame);
 
         var outcomes = new CombatSettlement?[2];
         ApplyCombatSettlement(state.Frame, nextFighters, contacts,
@@ -438,6 +437,13 @@ public sealed class BattleSimulation
         //    一枚投掷物命中（按 ID 升序取第一枚）。
         ProjectileStep projectileStep = StepProjectiles(
             state.Frame, nextFighters, state.Projectiles, candidates, state.NextProjectileId);
+
+        // 攻击实例附属状态归一化（D100）：掩码属于「角色 + 发动帧」这一次攻击实例，
+        // 不是角色本身。命中结算/投技结算/相杀会改写状态，必须在全部结算完成后统一核账：
+        // 离开招式或换到新实例就清零，同一实例 Active → Recovery 则原样保留。
+        for (int i = 0; i < nextFighters.Length; i++)
+            nextFighters[i] = NormalizeSpawnMask(
+                nextFighters[i], state.Fighters[i].MoveStartedFrame);
 
         // 连段收尾（D90）：恢复自由行动的角色清空旧记录（命中帧本身不会到这里——命中后必为受击状态）。
         UpdateCombos(nextFighters);
@@ -1118,9 +1124,28 @@ public sealed class BattleSimulation
             $"（来源招式 {projectile.SourceMoveId}）在角色 {projectile.OwnerFighterId} 的配置中不存在。");
     }
 
+    // ── D103：远程命中停顿的唯一入口（命中 / 成功防御共用）────────────────
+    /// <summary>
+    /// 远程命中停顿（阶段 08 最终补修，D103）：飞行道具触发的 Hitstop <b>只作用于被命中或
+    /// 成功防御的目标</b>，绝不自动冻结远处的发射者（D99 的远程停顿语义）。
+    ///
+    /// <para>命中与成功防御共用本方法，避免两个分支再次分叉：<c>frames = 0</c> 不产生停顿；
+    /// 已有更长的停顿用 <see cref="Math.Max(int, int)"/> 保留，不覆盖成更小值；冻结期间
+    /// 不重复消费攻击、Blockstun 不提前计时（由 D96 冻结分支统一保证）。</para>
+    /// </summary>
+    private static void ApplyRemoteHitstop(FighterState[] fighters, int target, int frames)
+    {
+        if (frames <= 0)
+            return;
+        fighters[target] = fighters[target] with
+        {
+            HitstopRemainingFrames = Math.Max(fighters[target].HitstopRemainingFrames, frames),
+        };
+    }
+
     /// <summary>
     /// 投掷物命中/被防御的结算（D99）：与前程打击共用同一套防御表（D77）、击退/击飞（D92/D93）
-    /// 与实扣伤害语义；<b>停顿只作用于被击者</b>（不冻结远处的发射者）。
+    /// 与实扣伤害语义；<b>命中与成功防御都按配置停顿，且只作用于被击者</b>。
     /// </summary>
     private void ApplyProjectileHit(
         int frame,
@@ -1170,6 +1195,8 @@ public sealed class BattleSimulation
 
             events.Add(new ProjectileEvent(BattleEventType.ProjectileBlocked,
                 projectile.OwnerFighterId, target, projectile.TypeId, definition.Hit.BlockstunFrames));
+            // 成功防御与命中走同一个停顿入口（D103）：只冻结目标，不冻结远处发射者。
+            ApplyRemoteHitstop(fighters, target, definition.Hit.HitstopFrames);
             return;
         }
 
@@ -1256,15 +1283,8 @@ public sealed class BattleSimulation
             };
         }
 
-        // 命中停顿只作用于被击者（D96 同一套字段；不冻结发射者）。
-        if (definition.Hit.HitstopFrames > 0)
-        {
-            fighters[target] = fighters[target] with
-            {
-                HitstopRemainingFrames = Math.Max(
-                    fighters[target].HitstopRemainingFrames, definition.Hit.HitstopFrames),
-            };
-        }
+        // 远程停顿只作用于被击者（D96 同一套字段；不冻结发射者）。
+        ApplyRemoteHitstop(fighters, target, definition.Hit.HitstopFrames);
 
         events.Add(new ProjectileEvent(BattleEventType.ProjectileHit,
             projectile.OwnerFighterId, target, projectile.TypeId, appliedDamage));
@@ -1282,6 +1302,31 @@ public sealed class BattleSimulation
             if (fighter.Combo.IsActive && !fighter.LogicState.IsHitReaction())
                 fighters[i] = fighter with { ComboRecord = ComboState.None };
         }
+    }
+
+    // ── D100：攻击实例附属状态的唯一清理入口 ────────────────────────────────
+    /// <summary>
+    /// 攻击实例附属状态归一化（阶段 08 最终补修，D100）。
+    ///
+    /// <para><c>ProjectileSpawnMask</c> 记录的是<b>这一次攻击实例</b>（角色 + 发动帧）已经生成过
+    /// 哪些投掷物。命中结算（Hitstun / AirHitstun / Blockstun）与投技结算（Knockdown）会把角色
+    /// 直接改出招式状态，但只清 <c>MoveId</c> / <c>MoveStartedFrame</c> 并不足以让掩码归零——
+    /// <see cref="FighterState.Validate"/> 明确拒绝「非动作状态携带生成掩码」，整帧会因此失败。</para>
+    ///
+    /// <para>规则（唯一入口，不做每帧无条件清零）：掩码非零时，只要帧末<b>不在招式中</b>，
+    /// 或<b>发动帧已不同于帧开始</b>（取消到新实例），就清零；否则属于同一实例的正常阶段
+    /// 转换（Active → Recovery），必须保留，使尚未触发的生成配置仍可生效且不会重复生成。</para>
+    ///
+    /// <para>本方法只改 <c>FighterState</c> 的掩码：已生成的 <see cref="ProjectileState"/>、
+    /// <c>NextProjectileId</c> 与实体身份（Owner / SourceMoveId / ID）一概不动。</para>
+    /// </summary>
+    private static FighterState NormalizeSpawnMask(FighterState fighter, int instanceStartFrame)
+    {
+        if (fighter.ProjectileSpawnMask == 0)
+            return fighter;
+        if (!fighter.IsInMove || fighter.MoveStartedFrame != instanceStartFrame)
+            return fighter with { ProjectileSpawnMask = 0 };
+        return fighter;
     }
 
     /// <summary>
@@ -1700,11 +1745,18 @@ public sealed class BattleSimulation
     /// <param name="bothGroundAtFrameStart">帧开始双方是否都在地面（决定顺序约束来源）。</param>
     /// <param name="frameStartP1X">帧开始 P1 的 X（顺序约束基准）。</param>
     /// <param name="frameStartP2X">帧开始 P2 的 X（顺序约束基准）。</param>
+    /// <param name="frozenThisFrame">本帧各角色是否处于 Hitstop 冻结（D101 固定锚点资格）。</param>
+    ///
+    /// <para><b>D101（阶段 08 最终补修）</b>：冻结资格优先于对称分摊。两人都不冻结时本求解器
+    /// 逐位沿用旧 D73 行为；只有一方冻结时，冻结方坐标固定，缺口全部由未冻结方承担；
+    /// 双方都冻结时保持二者已有的合法位置。冻结方位置在冻结分支里就是帧开始位置，
+    /// 因此不会因对方移动而滑动，也不会留下非法的另一方坐标。</para>
     private void ApplySeparation(
         Span<FighterCandidate> candidates,
         bool bothGroundAtFrameStart,
         FixedPoint frameStartP1X,
-        FixedPoint frameStartP2X)
+        FixedPoint frameStartP2X,
+        bool[] frozenThisFrame)
     {
         // 仅双方候选都非空中时强制（有一方在空中 → 不推挤，允许越身）。
         // D94：空中状态 = Airborne | AirHitstun（击飞当帧 Y 可能为 0，不能靠高度判断）。
@@ -1727,8 +1779,33 @@ public sealed class BattleSimulation
         FixedPoint hiCand = candidates[hi].PositionX;
         FixedPoint gap = hiCand - loCand;
 
+        // ── D101：Hitstop 固定锚点求解（先于对称分摊）──────────────────────
         if (gap >= separation)
-            return; // 候选已满足顺序与间距。
+            return; // 候选已满足顺序与间距（冻结方本来也没动）。
+
+        bool loFrozen = frozenThisFrame[lo];
+        bool hiFrozen = frozenThisFrame[hi];
+        if (loFrozen || hiFrozen)
+        {
+            if (loFrozen && hiFrozen)
+                return; // 双方都冻结：帧开始位置本已合法，不做任何推挤。
+
+            // 冻结方坐标固定，缺口全部由未冻结方承担；未冻结方仍受 D70 边界钳制。
+            // 若人为注入「冻结方贴墙且已无空间」的非法初态，required 会被钳到边界、
+            // 间距仍可能不足——那是约束本身不可同时满足，不编造额外位移；正常可达
+            // 状态（上一帧已满足 D70/D73）不会出现这种情况。
+            if (loFrozen)
+            {
+                FixedPoint required = loCand + separation;
+                candidates[hi].PositionX = _stage.ClampX(hiCand < required ? required : hiCand);
+            }
+            else
+            {
+                FixedPoint required = hiCand - separation;
+                candidates[lo].PositionX = _stage.ClampX(loCand > required ? required : loCand);
+            }
+            return;
+        }
 
         FixedPoint deficit = separation - gap;
 

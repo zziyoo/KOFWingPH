@@ -1896,6 +1896,75 @@ BattleState 拒绝重复 ID 与非法分配器、定义与招式的构造期校�
 
 ---
 
+## 阶段 08 最终专项补修成果（2026-11-08）—— D100–D103 —— 阶段 08 最终结项
+
+### 开始前检查
+
+- `git status --porcelain` 空、分支 `main`、本地 HEAD = `origin/main` = `6396cf2b83328c720493fcd441c6ed101d8b84d0`。
+- `dotnet test -c Debug` 基线 **722/722**；`git fetch origin` 后远程无新提交，**四项问题远程均未修复**，不存在重复修改或其他开发者的并行改动。
+- 已按要求阅读 `ARCHITECTURE.md` / `PROGRESS.md` / `AGENT_HANDOFF.md` 与全部指定源码、六个相关测试文件。
+
+### 四项疑点：全部真实复现（无「审查疑点但不成立」项）
+
+| 编号 | 复现结论 | 修复前实测 |
+|---|---|---|
+| P1-A | **成立**。普通命中、击飞、被投三条中断路径都残留掩码 | `InvalidOperationException: 角色 0 处于非动作状态 Hitstun / AirHitstun / Knockdown 但携带投掷物生成掩码 1（必须为 0）`，抛出于 `FighterState.Validate` ← `BattleState..ctor` ← `BattleSimulation.Step` |
+| P1-B | **成立**。冻结角色被 D73 对称分摊推动 | 单方冻结 `P1: 0 → −2`；镜像 `P2: 0 → +2`；墙角 `P1: 580 → 578`；击退场景 `0 → −2`；冻结末帧 `0 → −2` |
+| P2-A | **成立**。首个 Active 帧相杀时两条 AttackActive 全丢 | `AttackActive` 期望 2 实际 **0**；实际事件集合 = `[MoveStarted(PokeA), MoveStarted(PokeB), StrikeClash]` |
+| P2-B | **成立**。防御分支跳过停顿写入 | `HitstopRemainingFrames` 期望 3 实际 **0**（n=1/3/8 全为 0）；Blockstun 恢复帧数期望 11 实际 **8**（提前 3 帧）；场景 E 期望 5 实际 0 |
+
+**失败复现**：先写 38 项专项测试并运行，修复前 **21 失败 / 17 通过**（`repro_before.txt`），逐项记录实测值后才改源码。
+
+### 采用的修复（最小改动，均在 `BattleSimulation.cs`）
+
+1. **D100**：新增 `NormalizeSpawnMask(fighter, 帧开始 MoveStartedFrame)`，在 `StepProjectiles` 之后、连段收尾之前统一核账；只改 `FighterState` 的掩码，不碰实体 / ID / 分配器，不放宽 `Validate`。
+2. **D101**：`ApplySeparation` 增加 `frozenThisFrame` 参数与「固定锚点」分支；都不冻结时原求解器逐位不变。
+3. **D102**：把 `CollectAttackActive` / `CollectThrowAttempts` 移到 `ApplyStrikeClash` **之前**，事件组装仍只读快照。
+4. **D103**：新增 `ApplyRemoteHitstop` 私有入口，命中与成功防御两个分支共用；`Math.Max` 保留更长停顿。
+
+**版本**：StateVersion 12 / CoreVersion 13 **不变**（快照格式未变，只修正结算与事件顺序）。
+
+### 测试与验收
+
+新增 **41 项**（722 → **763**），原有 **722 项全部保留、零改动、零跳过**：
+
+| 文件 | 项数 | 覆盖 |
+|---|---|---|
+| `Stage08EdgeCaseTests.cs` | 16 | P1-A 三条中断路径 / Active→Recovery / 回待机 / 取消到新实例 / 新实例重发 / 旧实例不重发 / 实体独立存活 / 中间快照重放 / Validate 未放宽；P1-B 单方冻结 / 镜像 / 双方冻结 / 墙角 / 空中冻结 / 击退 / 冻结结束恢复 / 无冻结回归 |
+| `Stage08EventTests.cs` | 22（含 `BlockedHitstop_ExactlyNFrames` 的 0/1/3/8 四个 case） | P2-A 首帧相杀 / 第二 Active 帧 / 不同 MoveId / 相杀后停顿 / Recovery / 正常互中 / 错开窗口 / 镜像 / 重放 / 事件顺序与 EventId；P2-B 命中与防御停顿 / 0/1/3/8 帧 / 发射者不冻结 / 已有更长停顿 / 输入缓冲 / Blockstun 结束 / 实扣伤害 / 重放；场景 E / F（近战 DoubleKO、飞行道具 DoubleKO、终局冻结、事件提交后投递） |
+| `Stage08AcceptanceTests.cs` | 3 | 不同渲染帧率（60fps ×10 vs 30fps ×5）一致性、`StepExact`/`Advance` 一致性、含相杀+Hitstop 的 **10000 帧确定性长跑**（EventId 全局唯一） |
+
+**变异验证**（临时回退 → 对应专项测试必须失败 → 恢复并逐字节校验）：
+
+| 变异 | 结果 |
+|---|---|
+| M1 冻结锚点改回对称分摊 | `P1B_OneFrozenOneMoving_FrozenKeepsX` 失败 ✅ |
+| M2 相杀改回快照之前 | `P2A_FirstActiveFrameClash_EmitsBothAttackActive` 失败 ✅ |
+| M3 `NormalizeSpawnMask` 变成空操作 | `P1A_EmitThenStruck_MaskCleared_EntityStillFlies` 失败 ✅ |
+| M4 防御分支去掉 `ApplyRemoteHitstop` | `P2B_ProjectileBlocked_AppliesHitstop_ThreeFrameTimeline` 失败 ✅ |
+
+`RESTORED=True`、`ALL_MUTATIONS_CAUGHT=True`，源码已完整恢复。
+
+| 验收项 | 实际结果 |
+|---|---|
+| `dotnet test -c Debug` / `-c Release` | **763/763** / **763/763**，0 失败 0 跳过 |
+| 四构建（BattleCore Debug/Release、NewKOF Debug/Release） | 全部 **0 警告 0 错误** |
+| Godot 无头导入 | `--headless --import` → `[ DONE ] first_scan_filesystem` / `update_scripts_classes` / `loading_editor_layout` |
+| Godot 实际图形运行 | Vulkan Forward+ / RTX 3060；`--maxfps=60` + 键位注入 P1 `5C` 发弹、P2 按住防御 → 截图 `shots/p08fix_projectile_block.png`（逻辑帧 121，P2 HP 仍 1000 = 防御成功、弹已消失、Round InProgress）、`shots/p08fix_block_hitstop.png`（逻辑帧 80）。启动期有 1 条 `帧积压超过上限 5，已丢弃 4 个逻辑帧` 警告（调度器既有保护，非本轮改动、非错误） |
+| 10000 帧确定性 / 中间快照 / EventId 唯一性 | 全通过；两次独立运行状态与事件序列逐位一致，EventId 无重复无回绕 |
+| 不同渲染帧率 / `StepExact` vs `Advance` | 全通过（冻结 + 推挤组合下逐位一致） |
+| 旧阶段 05–08 关键回归 | 722 项既有测试全部通过；D73 高速防穿越、墙角、1 raw 残差、AirHitstun 越身、D94 资格、Hitstop 精确 N 帧、击退摩擦冻结、起跳落地冻结、近战/投掷物 DoubleKO 均未回归 |
+| **重大回归** | **无** |
+
+**仍存在的限制（如实记录，不虚报）**：
+
+1. D101 的固定锚点只作用于 `ApplySeparation`（D73 地面最小间距）。投技位移（D97，显式放置）等其他「结算阶段写入 X」的路径不受该锚点约束——冻结角色被投时仍会位移；本轮按任务书范围只处理四项问题，未扩大改动。
+2. 人为注入「冻结方贴墙且已无空间」的非法初态属于 D70/D73 约束不可同时满足，D101 只把未冻结方钳到边界、不编造额外位移；正常可达状态不会出现。
+3. Godot 截图抓取的是防御发生后的画面，未能定格 HITSTOP 数字本身；逐帧时间线由 `P2B_*` 单元测试钉住，不以截图冒充。
+4. 阶段 08 原有的功能边界保持不变（不做拆投 / 空中防御 / 相杀等级 / 飞行道具被打掉 / 招式数据外置 / AI / 联机回滚）。
+
+**结论**：四项问题全部关闭；**阶段 08 正式结项**，阶段 09 可以启动（仍须主人另下指令）。
+
 ## 阶段 08 总结（2026-11-08）—— 正式结项
 
 | 子阶段 | 结果 | 测试 | 提交 |
@@ -1904,6 +1973,7 @@ BattleState 拒绝重复 ID 与非法分配器、定义与招式的构造期校�
 | 08B | 地面投技（D97） | 663 → 683 | `24b4ec0` |
 | 08C | 攻击相杀（D98） | 683 → 698 | `38e06bb` |
 | 08D | 飞行道具（D99） | 698 → 722 | 见本轮推送 |
+| 08 最终补修 | 跨系统边界（D100–D103） | 722 → 763 | 见本轮推送 |
 
 **仍未实现**：投技的拆投/空投/连续投/等级与霸体；相杀等级与武器相杀；飞行道具被攻击打掉、
 追踪/反弹/耐久；Hitstop 的逐招式分级与视觉演出；比赛规则（多回合/计时/选人）、KO 演出、

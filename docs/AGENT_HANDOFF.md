@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-08（阶段 08D：飞行道具，D99——阶段 08 正式结项，722 项测试）
+> 最后更新：2026-11-08（阶段 08 最终专项补修：D100–D103——阶段 08 最终结项，763 项测试）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 722，已跳过: 0，总计: 722`
+期望：`失败: 0，通过: 763，已跳过: 0，总计: 763`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,28 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 08 最终专项补修（2026-11-08）跨系统边界（D100–D103）—— 阶段 08 最终结项
+
+基线 `6396cf2b83328c720493fcd441c6ed101d8b84d0`（HEAD = origin/main，工作区干净，722 项）。
+四项疑点**全部真实复现**：P1-A 三条中断路径均抛 `角色 0 处于非动作状态 Hitstun / AirHitstun /
+Knockdown 但携带投掷物生成掩码 1`；P1-B 冻结方 0→−2 / 镜像 0→+2 / 墙角 580→578；
+P2-A 首帧相杀 `AttackActive` 期望 2 实际 0；P2-B 防御 `HitstopRemainingFrames` 期望 3 实际 0、
+Blockstun 提前 3 帧结束。修复前 38 项专项测试 **21 失败 / 17 通过**。
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Simulation/BattleSimulation.cs` | **D100** 新增 `NormalizeSpawnMask`（结算末端按攻击实例核账）；**D101** `ApplySeparation` 增加 `frozenThisFrame` 固定锚点分支；**D102** 两份结算前快照移到 `ApplyStrikeClash` 之前；**D103** 新增 `ApplyRemoteHitstop`，命中/防御分支共用 |
+| `tests/BattleCore.Tests/Stage08EdgeCaseTests.cs` | **新增 16 项**：P1-A 三条中断 / 实例生命周期 / 实体独立存活 / 重放；P1-B 冻结与 D73 的 8 个场景 |
+| `tests/BattleCore.Tests/Stage08EventTests.cs` | **新增 22 项**（含 0/1/3/8 帧 Theory）：P2-A 相杀事件、P2-B 防御停顿、场景 A–F |
+| `tests/BattleCore.Tests/Stage08AcceptanceTests.cs` | **新增 3 项**：不同渲染帧率、`StepExact`/`Advance`、10000 帧确定性长跑 |
+| `docs/ARCHITECTURE.md` / `PROGRESS.md` / `AGENT_HANDOFF.md` | 新增 D100–D103、K60–K63、本轮验收记录 |
+
+**StateVersion 12 / CoreVersion 13 不变**（快照格式未变）。**变异验证 4/4 捕获**，恢复后逐字节
+校验 `RESTORED=True`。**验收**：Debug/Release **763/763**、四构建 0/0、Godot 无头导入 `[ DONE ]`、
+Godot 图形运行 `shots/p08fix_projectile_block.png` / `p08fix_block_hitstop.png`（启动期 1 条帧积压
+警告，非错误）。原有 722 项零改动零跳过，无重大回归。**阶段 08 正式结项，阶段 09 可启动
+（须主人另下指令）**。
 
 ### 阶段 08D（2026-11-08）飞行道具（D99）—— 阶段 08 结项
 
@@ -822,8 +844,12 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K57 | **相杀与互中互斥（D98）** | 如果「有重叠就相杀」，D80 的互中会全部消失（既有互中测试大面积失败），而且同一帧会出现「既取消攻击又结算伤害」 | 唯一分界是「有没有人真正打中受击框」：命中优先于相杀。改这条规则前先读 `StrikeClashTests.CloseRange_BothHit_IsTradeNotClash` |
 | K58 | **投掷物是快照实体，不是附着在角色上的判定（D99）** | 跟着发射者走会导致「发射者收招/被击中就消失」，也无法表示双弹对撞 | 只用 `ProjectileState` 自己的位置/速度/寿命/来源身份判定；新增投掷物行为请改 `StepProjectiles` 的顺序表，不要在角色身上加特例 |
 | K59 | **生成当帧只建立实体（D99）** | 生成帧立刻判定会依赖同一帧内的处理顺序，且「出生点贴着对手」时会凭空多打一下 | `ProjectileSpawnMask` 保证每次发动只生成一次（命中停顿冻结动作时间也不会重复生成） |
+| K60 | **掩码按「攻击实例」核账，不按角色（D100）** | 命中/投技结算清了 `MoveId`/`MoveStartedFrame` 却留下 `ProjectileSpawnMask`，`Validate` 整帧失败 | 只在流水线末端 `NormalizeSpawnMask` 一处核账；新增任何会中断招式的路径都自动覆盖，**不要**在每个分支补一句清零，更不要每帧无条件清零 |
+| K61 | **冻结资格要传给 D73 求解器（D101）** | 冻结分支跳过了运动，但旧 `ApplySeparation` 仍把缺口对称分摊，冻结角色会滑动 | 新增「本帧冻结」信息时同步传给求解器；不要用「事后恢复坐标」绕过（会留下非法的另一方位置） |
+| K62 | **结算前快照必须早于所有状态改写（D102）** | `ApplyStrikeClash` 把 Active 改成 Recovery 后再采集，首个生效帧的两条 `AttackActive` 全丢 | 任何新增的「会改状态」阶段都排在 `CollectAttackActive` / `CollectThrowAttempts` 之后；事件负载只读快照 |
+| K63 | **命中/防御停顿共用一个入口（D103）** | 防御分支提前 `return`，跳过了命中分支末尾才写的 Hitstop | 新增「防御派生」分支时统一调用 `ApplyRemoteHitstop`；远程停顿只给目标，不要冻结发射者 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 08D 验收时 722/722 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 08 最终补修验收时 763/763 测试通过，可正常启动运行。
 
 ---
 
@@ -1108,11 +1134,12 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 08 已结项**（08A D96 / 08B D97 / 08C D98 / 08D D99），722 项测试。
+4e. **阶段 08 已结项**（08A D96 / 08B D97 / 08C D98 / 08D D99 / 最终补修 D100–D103），763 项测试。
    阶段 09 安全入口（按依赖顺序）：① 比赛规则（多回合/计时/选人，建在 `RoundState` 上）；
    ② 招式数据外置 JSON（`MoveDefinition` 已含攻击/取消/投技/投掷物四类数据）；
    ③ 空中防御/拆投等防御扩展；④ AI；⑤ 联机回滚（需先做序列化）。
-   **不要**在没有新决策的情况下改动 D96 的冻结语义、D97 的冲突表、D98 的相杀分界、D99 的实体顺序。
+   **不要**在没有新决策的情况下改动 D96 的冻结语义、D97 的冲突表、D98 的相杀分界、D99 的实体顺序、
+   D100–D103 的实例核账 / 冻结锚点 / 快照顺序 / 远程停顿入口。
    阶段 08 安全入口（按依赖顺序，详见 `PROGRESS.md` 阶段 07 总结）：① 比赛规则（多回合/计时/选人，
    建在 `RoundState` 之上）；② Hitstop；③ 投技；④ 飞行道具；⑤ 招式数据外置；⑥ 联机回滚。
    **不要**在没有新决策的情况下改动 D92/D93 的状态簇或 D89 的终局语义。
@@ -1226,7 +1253,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 胜出指令标记「末方向帧号」已消费（`ConsumedEndFrames`），落败指令不得幽灵触发
 - [ ] `frameCommitted` 传入的是帧开始状态（`stateBefore`），其 `Facing` 是当帧输入朝向
 - [ ] `Observe` 帧号严格逐帧连续（首次任意非负），非法帧先抛后不改内部状态
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D88）与代码实现一致
+- [ ] 攻击实例掩码（D100）：离开招式或换实例就清零；同一实例 Active→Recovery 保留；`Validate` 不放宽
+- [ ] 冻结与推挤（D101）：单方冻结由未冻结方承担缺口；双方冻结不动；冻结结束恢复对称分摊；D94 空中资格不变
+- [ ] 相杀事件（D102）：两份结算前快照先于 `ApplyStrikeClash`；首帧相杀仍有 2 条 `AttackActive`，顺序在 `StrikeClash` 之前
+- [ ] 远程停顿（D103）：`ProjectileBlocked` 与 `ProjectileHit` 共用 `ApplyRemoteHitstop`；只冻目标、取 max、N 帧精确
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D103）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**
