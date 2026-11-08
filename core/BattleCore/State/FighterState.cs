@@ -183,9 +183,9 @@ public readonly record struct FighterState(
         //   因此允许 Y == 0 但要求垂直速度为正；不携带跳跃类型（击飞不是跳跃）；
         // - 地面状态一律 Y == 0、VelocityY == 0；除受击/防御硬直的击退外速度必须为零。
         // 新增枚举值不能绕过校验：Enum.IsDefined 通过后仍按状态逐项检查（D62 的延伸）。
-        if (LogicState is FighterLogicState.Airborne or FighterLogicState.AirHitstun)
+        if (LogicState is FighterLogicState.Airborne or FighterLogicState.AirHitstun or FighterLogicState.AirBlockstun)
         {
-            if (LogicState == FighterLogicState.Airborne)
+            if (LogicState is FighterLogicState.Airborne or FighterLogicState.AirBlockstun)
             {
                 if (PositionY <= FixedPoint.Zero)
                     throw new InvalidOperationException(
@@ -249,7 +249,7 @@ public readonly record struct FighterState(
 
         // 硬直计数（阶段 06B D78 / 阶段 07C D93）：受击、防御、倒地、起身携带 ≥ 1 的剩余帧；
         // AirHitstun 与其余状态不得携带（空中受击持续到落地，没有独立计时）。
-        if (LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun
+        if (LogicState is FighterLogicState.Hitstun or FighterLogicState.Blockstun or FighterLogicState.AirBlockstun
             or FighterLogicState.Knockdown or FighterLogicState.Wakeup)
         {
             if (StunRemainingFrames < 1)

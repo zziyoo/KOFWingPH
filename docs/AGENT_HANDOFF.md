@@ -1477,3 +1477,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - D129：1v1/3v3 的 framePresented 与 eventsCommitted 共用发布守卫。比赛计分、校验与战斗帧提交先完成；回调不能重开、返回选择或开启下一回合/交锋。异常原样传播并保留 BattleSession 故障封闭。
 - D130：飞行道具对撞在运动后、实体移除前采集两枚实体中心的定点中点，以 EventId 关联只读 EventAnchor，经 BattleStepResult、已提交会话和 PresentationFrame 传到 FeedbackGeometry。多次对撞各自定位，不改变事件内容、顺序、判定和 BattleState。
 - 旧构造路径的可选锚点参数默认空；StateVersion=13 / CoreVersion=14 保持，因为权威状态与规则未变化。阶段 11B/11C/11D 尚待完成。
+
+
+## 阶段 11B：空中防御（D131–D133）
+- D131：正常 Airborne + 帧开始朝向解析的后输入可防 High/Mid，Low 不可防；AirHitstun、PreJump、动作、倒地、起身不授予防御。近战与飞行道具共用 CanGuard。
+- D132：AirBlockstun=12，保留跳跃类型与空中速度、重力积分；计时归零恢复 Airborne。未归零落地转 Blockstun，剩余计时保留，落地速度清零。Hitstop 分支冻结运动与计时；不属于受击连段延续。
+- D133：沿用 Blocked/BlockstunStarted/ProjectileBlocked；远程防御只冻结目标。Kai/Rei 增加 air_guard 与 air_guard_hurt 姿态，AirBlockstun 映射后者，缺配置显式回退 hurt。
+- StateVersion=14（新增权威逻辑状态），CoreVersion=15（空防规则）；未实现跨进程快照迁移。专项与关联 Debug 回归 377 项通过；1v1/3v3 真实图形集成留在 11D。11C 尚未完成。

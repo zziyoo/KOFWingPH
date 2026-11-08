@@ -187,6 +187,7 @@ public sealed class AnimationSet
             ["Hitstun"] = "hurt",
             ["Blockstun"] = "hurt",
             ["AirHitstun"] = "hurt",
+            ["AirBlockstun"] = "hurt",
             ["Knockdown"] = "hurt",
             ["Wakeup"] = "hurt",
         };

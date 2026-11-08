@@ -81,6 +81,9 @@ public enum FighterLogicState
     /// 期间不可行动、可被命中；归零同帧回到待机更新与指令消费（与硬直恢复同语义）。
     /// </summary>
     Wakeup = 11,
+
+    /// <summary>空中防御硬直，保留跳跃运动，落地转地面剩余硬直。</summary>
+    AirBlockstun = 12,
 }
 
 /// <summary>
@@ -128,7 +131,7 @@ public static class FighterLogicStateExtensions
     /// 「是否执行双人最小间距求解」与「是否可用候选顺序建立新地面顺序」。</para>
     /// </summary>
     public static bool IsAirborneLike(this FighterLogicState state) =>
-        state is FighterLogicState.Airborne or FighterLogicState.AirHitstun;
+        state is FighterLogicState.Airborne or FighterLogicState.AirHitstun or FighterLogicState.AirBlockstun;
 
     /// <summary>是否处于招式三阶段（Startup/Active/Recovery）。</summary>
     public static bool IsInMove(this FighterLogicState state) =>

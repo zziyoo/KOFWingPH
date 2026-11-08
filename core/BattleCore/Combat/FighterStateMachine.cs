@@ -173,6 +173,13 @@ public static class FighterStateMachine
                 recognition, ConsumedMatch: null,
                 Launch: new JumpLaunch(kind, horizontal, vertical));
         }
+        else if (state == FighterLogicState.AirBlockstun)
+        {
+            if (stunRemainingFrames < 1) throw new InvalidOperationException("Invalid air blockstun timer.");
+            int remaining = stunRemainingFrames - 1;
+            return new FighterActionTick(remaining > 0 ? state : FighterLogicState.Airborne,
+                null, 0, recognition, ConsumedMatch: null, StunRemainingFrames: remaining);
+        }
         else if (state is FighterLogicState.Airborne or FighterLogicState.AirHitstun)
         {
             // 空中 / 空中受击：状态机原样保持（重力积分与落地在运动阶段完成，D69/D93）。

@@ -229,7 +229,7 @@ public sealed class BattleSimulation
             int stunRemaining = tick.StunRemainingFrames;
             FixedPoint knockbackFriction = FixedPoint.Zero;
 
-            if (tick.State == FighterLogicState.Airborne)
+            if (tick.State is FighterLogicState.Airborne or FighterLogicState.AirBlockstun)
             {
                 JumpLaunch? launch = tick.Launch;
                 AirborneTick air = AirborneMovement.Integrate(
@@ -249,7 +249,7 @@ public sealed class BattleSimulation
                 {
                     // D69 落地边：贴地、速度归零、回站立（同帧完成，无弹跳）。
                     // 落地帧不消费指令（状态机已按空中运行）；下一个地面帧恢复消费。
-                    logic = FighterLogicState.Standing;
+                    logic = stunRemaining > 0 ? FighterLogicState.Blockstun : FighterLogicState.Standing;
                     y = FixedPoint.Zero;
                     vx = FixedPoint.Zero;
                     vy = FixedPoint.Zero;
@@ -580,14 +580,14 @@ public sealed class BattleSimulation
             {
                 fighters[defender] = defenderState with
                 {
-                    LogicState = FighterLogicState.Blockstun,
+                    LogicState = defenderState.LogicState.IsAirborneLike() ? FighterLogicState.AirBlockstun : FighterLogicState.Blockstun,
                     MoveId = null,
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
                     // 防御击退（D92）：独立配置，默认 0；仍然遵守「速度与摩擦同时存在」不变式。
-                    VelocityX = settled.KnockbackX,
-                    VelocityY = FixedPoint.Zero,
-                    KnockbackFriction = settled.KnockbackFriction,
+                    VelocityX = defenderState.LogicState.IsAirborneLike() ? defenderState.VelocityX : settled.KnockbackX,
+                    VelocityY = defenderState.LogicState.IsAirborneLike() ? defenderState.VelocityY : FixedPoint.Zero,
+                    KnockbackFriction = defenderState.LogicState.IsAirborneLike() ? FixedPoint.Zero : settled.KnockbackFriction,
                     // 被防御亦视为该攻击实例已结算（D81）：记录发动帧，抑制后续帧重复结算。
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     // 被击者自身的动作被打断：攻击实例身份一并清除（防御者通常无动作，
@@ -1196,12 +1196,7 @@ public sealed class BattleSimulation
         FighterState defender = fighters[target];
         bool defenderAirborne = defender.LogicState.IsAirborneLike();
 
-        bool guarding = !defenderAirborne && defender.LogicState switch
-        {
-            FighterLogicState.Standing => backHeld,
-            FighterLogicState.Crouching => backHeld,
-            _ => false,
-        } && GuardCovers(definition.Hit.Height, defender.LogicState);
+        bool guarding = CanGuard(defender.LogicState, backHeld, definition.Hit.Height);
 
         // 方向 = 投掷物自己的飞行方向（不是「远离发射者」——弹可能已经飞过发射者）。
         int direction = projectile.VelocityX >= FixedPoint.Zero ? 1 : -1;
@@ -1216,13 +1211,13 @@ public sealed class BattleSimulation
 
             fighters[target] = defender with
             {
-                LogicState = FighterLogicState.Blockstun,
+                LogicState = defenderAirborne ? FighterLogicState.AirBlockstun : FighterLogicState.Blockstun,
                 MoveId = null,
                 PhaseRemainingFrames = 0,
                 StunRemainingFrames = definition.Hit.BlockstunFrames,
-                VelocityX = knockbackX,
-                VelocityY = FixedPoint.Zero,
-                KnockbackFriction = friction,
+                VelocityX = defenderAirborne ? defender.VelocityX : knockbackX,
+                VelocityY = defenderAirborne ? defender.VelocityY : FixedPoint.Zero,
+                KnockbackFriction = defenderAirborne ? FixedPoint.Zero : friction,
                 MoveStartedFrame = -1,
                 MoveElapsedFrames = 0,
                 ProjectileSpawnMask = 0,
@@ -1447,12 +1442,7 @@ public sealed class BattleSimulation
 
         // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
         // 空中不可防御（D93）：Airborne / AirHitstun 一率不成立。
-        bool guarding = !defenderAirborne && defenderState.LogicState switch
-        {
-            FighterLogicState.Standing => backHeld,
-            FighterLogicState.Crouching => backHeld,
-            _ => false, // 动作/PreJump/硬直/倒地中不能防御。
-        } && GuardCovers(attack.Height, defenderState.LogicState);
+        bool guarding = CanGuard(defenderState.LogicState, backHeld, attack.Height);
 
         // 击退/击飞方向（D92/D93）：按<b>命中时双方的权威相对位置</b>决定「远离攻击者」；
         // 位置完全相同时退化为攻击者的朝向（确定性平局规则）。
@@ -1494,6 +1484,11 @@ public sealed class BattleSimulation
     }
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
+    private static bool CanGuard(FighterLogicState state, bool backHeld, AttackHeight height) =>
+        backHeld && (state == FighterLogicState.Airborne
+            ? height is AttackHeight.High or AttackHeight.Mid
+            : state is FighterLogicState.Standing or FighterLogicState.Crouching && GuardCovers(height, state));
+
     private static bool GuardCovers(AttackHeight height, FighterLogicState guardState) => height switch
     {
         AttackHeight.High => guardState == FighterLogicState.Standing,

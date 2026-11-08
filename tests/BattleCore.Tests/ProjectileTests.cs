@@ -117,6 +117,43 @@ public class ProjectileTests
     // 1. 生成与运动
     // ─────────────────────────────────────────────────────────────
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void AirGuard_ProjectileFreezesOnlyTargetAndResumesSnapshot(int owner)
+    {
+        var sim = Sim(lifetime: 200, hitstop: 3);
+        var source = FireOnce(sim, Duel(p1X: -300, p2X: 300), p2Fires: true);
+        int target = 1 - owner;
+        var fighters = source.Fighters.ToArray();
+        fighters[target] = FighterState.Create(target, 1000, target == 1 ? 100 : -100,
+            target == 1 ? Facing.Left : Facing.Right) with {
+            LogicState = FighterLogicState.Airborne, PositionY = 20, VelocityY = 1,
+            JumpKind = JumpKind.HighJump };
+        var projectile = source.Projectiles[owner] with { PositionX = fighters[target].PositionX,
+            VelocityX = FixedPoint.Zero, PositionY = 60 };
+        var state = new BattleState(source.Frame, fighters, source.StateVersion, source.Round,
+            new[] { projectile }, source.NextProjectileId);
+        var result = sim.Step(state, new FrameInput(state.Frame,
+            target == 0 ? InputBits.Left : InputBits.None, target == 1 ? InputBits.Right : InputBits.None));
+        Assert.Contains(result.Events, e => e.Type == BattleEventType.ProjectileBlocked);
+        Assert.Empty(result.State.Projectiles);
+        var blocked = result.State.Fighter(target);
+        Assert.Equal(FighterLogicState.AirBlockstun, blocked.LogicState);
+        Assert.Equal(1000, blocked.Health);
+        Assert.Equal(0, result.State.Fighter(owner).HitstopRemainingFrames);
+        state = result.State;
+        for (int i = 0; i < 3; i++) {
+            state = sim.Step(state, FrameInput.Empty(state.Frame)).State;
+            Assert.Equal(blocked.PositionY, state.Fighter(target).PositionY);
+            Assert.Equal(blocked.StunRemainingFrames, state.Fighter(target).StunRemainingFrames);
+        }
+        var resumed = sim.Step(state, FrameInput.Empty(state.Frame)).State;
+        Assert.Equal(blocked.StunRemainingFrames - 1, resumed.Fighter(target).StunRemainingFrames);
+        var replay = sim.Step(state, FrameInput.Empty(state.Frame)).State;
+        Assert.Equal(resumed.Fighters.ToArray(), replay.Fighters.ToArray());
+    }
+
     [Fact]
     public void Spawn_CreatesEntityWithOwnerTypeAndVelocity()
     {

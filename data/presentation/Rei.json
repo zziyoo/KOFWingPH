@@ -274,6 +274,36 @@
           "color": "#3F8DE6"
         }
       ]
+    },
+    {
+      "name": "air_guard",
+      "loop": true,
+      "framesPerStep": 8,
+      "frames": [
+        {
+          "width": 58,
+          "height": 116,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotation": -6,
+          "color": "#3F8DE6"
+        }
+      ]
+    },
+    {
+      "name": "air_guard_hurt",
+      "loop": true,
+      "framesPerStep": 8,
+      "frames": [
+        {
+          "width": 56,
+          "height": 118,
+          "offsetX": -10,
+          "offsetY": 0,
+          "rotation": 6,
+          "color": "#7FC0FF"
+        }
+      ]
     }
   ],
   "states": {
@@ -289,7 +319,8 @@
     "Blockstun": "guard",
     "AirHitstun": "air_hurt",
     "Knockdown": "knockdown",
-    "Wakeup": "wakeup"
+    "Wakeup": "wakeup",
+    "AirBlockstun": "air_guard_hurt"
   },
   "moves": {
     "StandLightPunch": {

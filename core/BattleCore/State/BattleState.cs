@@ -113,7 +113,7 @@ public sealed record BattleState
     /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界。
     /// <b>默认不启用计时</b>（null），保持旧单回合 API 逐位兼容。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 13) => new(
+    public static BattleState CreateDefault(int stateVersion = 14) => new(
         frame: 0,
         fighters: new[]
         {

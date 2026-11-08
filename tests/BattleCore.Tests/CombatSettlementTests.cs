@@ -93,6 +93,93 @@ public class CombatSettlementTests
     // 命中与伤害
     // ─────────────────────────────────────────────────────────────
 
+    [Theory]
+    [InlineData(false, Facing.Left)]
+    [InlineData(false, Facing.Right)]
+    [InlineData(true, Facing.Left)]
+    [InlineData(true, Facing.Right)]
+    public void AirGuard_UsesFrameStartFacingAndRequiresBack(bool back, Facing facing)
+    {
+        var f = FighterState.Create(1, 1000, 0, facing) with { LogicState = FighterLogicState.Airborne,
+            PositionY = 10, VelocityY = 2, JumpKind = JumpKind.HighJump };
+        var state = new BattleState(0, new[] { Active("Mid", 0, -60, Facing.Right), f }, BattleState.CreateDefault().StateVersion);
+        var result = NewSim().Step(state, new FrameInput(0, InputBits.None, back ? BackOf(facing) : InputBits.None));
+        Assert.Equal(back ? 1000 : 970, result.State.Fighter(1).Health);
+    }
+
+    [Fact]
+    public void AirBlockstun_ExpiresInAirWithoutConsumingMove()
+    {
+        var f = FighterState.Create(1, 1000, 0, Facing.Left) with { LogicState = FighterLogicState.AirBlockstun,
+            PositionY = 100, VelocityY = 2, JumpKind = JumpKind.HighJump, StunRemainingFrames = 1 };
+        var state = new BattleState(0, new[] { FighterState.Create(0, 1000, -200, Facing.Right), f }, BattleState.CreateDefault().StateVersion);
+        var result = NewSim().Step(state, new FrameInput(0, InputBits.None, InputBits.LightPunch)).State;
+        Assert.Equal(FighterLogicState.Airborne, result.Fighter(1).LogicState);
+        Assert.Equal(0, result.Fighter(1).StunRemainingFrames);
+        Assert.Null(result.Fighter(1).MoveId);
+    }
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    [InlineData(144)]
+    public void AirGuard_SchedulingAndSnapshotReplayAgree(int fps)
+    {
+        var f = FighterState.Create(1, 1000, 0, Facing.Left) with { LogicState = FighterLogicState.Airborne,
+            PositionY = 10, VelocityY = 2, JumpKind = JumpKind.HighJump };
+        var initial = new BattleState(0, new[] { Active("Mid", 0, -60, Facing.Right), f }, BattleState.CreateDefault().StateVersion);
+        FrameInput Input(int frame) => new(frame, InputBits.None, InputBits.Right);
+        var exact = new BattleSession(initial, simulation: NewSim());
+        exact.StepExact(120, inputProvider: Input);
+        var scheduled = new BattleSession(initial, simulation: NewSim());
+        for (int i = 0; i < fps * 2; i++) scheduled.Advance(1d / fps, inputProvider: Input);
+        Assert.Equal(120, scheduled.CurrentState.Frame);
+        Assert.Equal(exact.CurrentState.Fighters.ToArray(), scheduled.CurrentState.Fighters.ToArray());
+        var half = new BattleSession(initial, simulation: NewSim());
+        half.StepExact(2, inputProvider: Input);
+        var resumed = new BattleSession(half.CurrentState, simulation: NewSim());
+        resumed.StepExact(118, inputProvider: Input);
+        Assert.Equal(exact.CurrentState.Fighters.ToArray(), resumed.CurrentState.Fighters.ToArray());
+    }
+
+    [Theory]
+    [InlineData("High", true)]
+    [InlineData("Mid", true)]
+    [InlineData("Low", false)]
+    public void AirGuard_CoversHighAndMidOnly(string move, bool blocks)
+    {
+        var sim = NewSim();
+        var airborne = FighterState.Create(1, 1000, 0, Facing.Left) with {
+            LogicState = FighterLogicState.Airborne, PositionY = 10,
+            VelocityY = 2, JumpKind = JumpKind.HighJump };
+        var state = new BattleState(0, new[] { Active(move, 0, -60, Facing.Right), airborne },
+            BattleState.CreateDefault().StateVersion);
+        var result = sim.Step(state, new FrameInput(0, InputBits.None, InputBits.Right));
+        Assert.Equal(blocks ? 1000 : 960, result.State.Fighter(1).Health);
+        Assert.Equal(blocks, result.Events.Any(e => e.Type == BattleEventType.Blocked));
+        if (blocks) {
+            Assert.Equal(FighterLogicState.AirBlockstun, result.State.Fighter(1).LogicState);
+            Assert.True(result.State.Fighter(1).PositionY > FixedPoint.Zero);
+        }
+    }
+
+    [Theory]
+    [InlineData(100, 0, 2, false)]
+    [InlineData(1, -2, 8, true)]
+    public void AirBlockstun_IntegratesAndPreservesLandingStun(int y, int vy, int stun, bool lands)
+    {
+        var f = FighterState.Create(1, 1000, 0, Facing.Left) with {
+            LogicState = FighterLogicState.AirBlockstun, PositionY = y, VelocityY = vy,
+            JumpKind = JumpKind.HighJump, StunRemainingFrames = stun };
+        var state = new BattleState(0, new[] { FighterState.Create(0, 1000, -200, Facing.Right), f },
+            BattleState.CreateDefault().StateVersion);
+        var sim = NewSim();
+        var result = sim.Step(state, FrameInput.Empty(0)).State.Fighter(1);
+        Assert.Equal(stun - 1, result.StunRemainingFrames);
+        Assert.Equal(lands ? FighterLogicState.Blockstun : FighterLogicState.AirBlockstun, result.LogicState);
+        if (!lands) Assert.True(result.VelocityY < f.VelocityY);
+    }
+
     [Fact]
     public void Hit_AppliesDamageAndHitstun_InterruptsNothing()
     {
