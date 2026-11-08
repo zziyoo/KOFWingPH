@@ -2044,3 +2044,31 @@ null 时钟旧行为兼容、非法时钟值、Hitstop 冻结帧扣时、暂停�
 未实现「Hitstop 期间暂停计时」的另一套时间线（如需改用需另行决策并固定完整时间线）。
 
 ---
+
+## 阶段 09C 成果（选人、回合过渡与完整比赛流程，2026-11-08）—— D110–D112
+
+### 核心规则
+
+1. **`FighterCatalog`**：数据驱动角色目录（ID / 显示名 / 配置来源 / 不可变 `FighterDefinition`），ID 唯一、非法选择拒绝、按双方 ID 生成 `FightRoster`、允许镜像角色。09C 由 `DemoRoster` 构建，09D 起接 JSON 加载器。
+2. **表现层改造**：`BattleScene` 改为持有 `MatchSession` + `FighterCatalog`，实现选人界面（A/D 与 ←/→ 切换、J 与 `,` 确认、Enter 开赛）、回合过渡（Space 进入下一回合）、比赛终局（F5 重开 / ESC 返回选人）、F1 暂停 / F2 判定框保留。
+3. **比赛 HUD**：当前回合、双方角色名、HP、胜场、剩余时间、比赛阶段、回合结果与结束原因、最终比赛结果、跨回合事件身份（`R2:164`）；原有判定框/事件/输入调试显示保留。表现层不计算任何权威结果。
+4. **输入隔离**：选人/过渡/终局界面按键在 `_Input` 拦截，不进入战斗输入缓冲；每回合全新 `InputBuffer` + `KeyboardInputMap` + `Scheduler` + `DebugBoxDrawer` 绑定；暂停状态不跨过渡泄漏。
+5. **仅命令行调试参数**：`--hp=<n>`（初始血量）、`--match-time=<s>`（回合计时秒数）、`--duel=<d>`（初始半距离，下限 30）。默认满血 1000 / 99 秒 / ±120，正常启动零副作用。
+
+### 测试与验收
+
+新增 **14 项**（807 → **821**）：`FighterCatalogTests` —— 目录唯一性与非法选择、四种选人组合、
+镜像角色状态独立、镜像双弹对撞、镜像比赛计分、完整流程（选人→KO→过渡→下一回合→MatchFinished→
+F5→ESC→改选 Rei vs Kai）、暂停不跨过渡、跨回合事件身份、确认键不泄漏、Time Over 平局后的过渡。
+
+| 项 | 实际结果 |
+|---|---|
+| `dotnet test`（Debug / Release） | **821/821** / **821/821** |
+| 四构建（BattleCore + NewKOF，Debug/Release） | 全部 **0 错误** |
+| Godot 图形实测 | 选人 `p09c_select.png`；Round 1 `p09c_round1.png`；KO 过渡 `p09c_round1_win.png`（`Wins P1 1 : P2 0`、`P1 WIN (KO)`）；比赛终局 `p09c_match_win.png`（`P1 MATCH WIN`、`R2:164`）；镜像 `p09c_mirror.png`（`P1 [Kai] / P2 [Kai]`）；重开+改选 `p09c_rei_vs_kai.png`（`P1 [Rei] / P2 [Kai]`、Wins 0:0）；Time Over `p09c_time_over.png`（`Time: 0s`、`DRAW (TIME OVER DRAW)`、HP 1000/1000 不变、`RoundEnded` 一次） |
+| 版本 | **StateVersion 13 / CoreVersion 14 不变** |
+
+**已知限制**：仍是 1v1（非 3v3 队伍赛）；选人界面为调试版（无立绘/动画）；回合过渡需按键确认；
+角色配置仍来自 C# `DemoRoster`（09D 外置 JSON 后正常游戏改用外部配置）。
+
+---

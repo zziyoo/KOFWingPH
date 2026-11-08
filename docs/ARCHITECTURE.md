@@ -472,6 +472,16 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | **D108** | **计时从 1 归零的那一帧：先完成本帧全部攻击/伤害/防御/投技/飞行道具/KO 结算，再裁决。若本帧已产生 KO/DoubleKO（`RoundState.FromFinalHealth` 已把回合改为 Finished），以 KO/DoubleKO 为准，不发 TimeOver；只有双方仍存活才按<b>剩余体力比例</b>裁决：安全整数交叉相乘 `P1.Health × P2.MaxHealth` vs `P2.Health × P1.MaxHealth`（`checked long`，无浮点、无 NaN、无文化区域差异），大者胜，完全相等 → `RoundOutcome.Draw`（TimeOverDraw）。超时裁决不改动任何体力，不产生虚假实扣伤害。** | 「计时器先归零就取消同帧合法攻击」会让最后一帧的胜负依赖处理顺序，破坏 D80 的同时性。比例比较必须用交叉相乘而非绝对 HP：P1 500/1000 (50%) 应胜过 P2 600/1500 (40%)，只看绝对值会判反。`long` 乘积最大约 2^62 < long.MaxValue，`checked` 兜底显式失败而非静默回绕。 |
 | **D109** | **`RoundOutcome` 扩展 `Draw = 4`（旧值 0..3 原义不变），`RoundState` 新增 `Reason`（`RoundEndReason`：None / Knockout / DoubleKO / TimeOver / TimeOverDraw）并与 Outcome 做自洽校验（KO 胜利 ↔ Knockout 或 TimeOver；DoubleKO ↔ DoubleKO；Draw ↔ TimeOverDraw）。新增事件 `TimeOver = 16`，只在超时裁决帧发<b>一条</b>，顺序：KO/DoubleKO 或 TimeOver（互斥）→ `RoundEnded`（恰好一次）。Time Over 胜利绝不伪装成 `Knockout` 事件；`RoundEnded.Amount` 仍是 `(int)RoundOutcome`。`ForOutcome(outcome)` / `Finish(outcome)` 旧单参数签名保留、默认推断为 KO。** | 结果（谁赢）与结束原因（为什么）正交，才能在「不改写 D89 KO/DoubleKO 语义」的前提下表达 Time Over 胜利与平局；同时让比赛层能辨识回合胜者而不用解析事件文本。把原因放进 `RoundState` 而不是事件流，是因为它属于权威状态、必须随快照重放一致。事件只在归零帧发一条，避免每帧事件压力。 |
 
+### 阶段 09C 决策（选人、回合过渡与完整比赛流程，2026-11-08）
+
+**StateVersion 13 / CoreVersion 14 不变**（09C 只新增独立目录类型与表现层，未改快照格式）。
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D110** | **`FighterCatalog` 是数据驱动的角色目录：条目含 `FighterId` / `DisplayName` / `Source` / 不可变 `FighterDefinition`；ID 唯一、未知选择立即拒绝；按双方 ID 生成 `FightRoster`。允许镜像角色（P1/P2 同 ID），允许 `Kai vs Rei` / `Rei vs Kai` / `Kai vs Kai` / `Rei vs Rei` 四种组合。`BattleSimulation` 完全不知道角色名称与目录的存在；09C 目录来自 `DemoRoster`（保留为测试夹具与回退路径），09D 起由 JSON 加载器构建同构目录。** | 配置对象不可变且不含可变战斗状态，镜像对战共用同一 `FighterDefinition` 实例不会共享受击/取消/飞行道具状态——那些都在每回合独立的 `BattleState` 里。把目录做成纯 C# 索引，新增角色只需加数据，不需要在状态机或模拟里加分支。 |
+| **D111** | **完整比赛流程由 `MatchSession` 的四个阶段驱动：`NotStarted`（选人）→ `RoundInProgress`（战斗）→ `BetweenRounds`（按键确认后进入下一回合）→ `MatchFinished`（F5 重开 / ESC 返回选人）。过渡与终局阶段比赛层不推进任何战斗逻辑帧；不扣时间、不重复投递 `RoundEnded`、不重复计分、不保留旧攻击实例或飞行道具。输入隔离：选人/过渡/终局的界面按键在表现层 `_Input` 直接拦截，绝不传给 `KeyboardInputMap`；每回合由 `MatchSession` 新建 `InputBuffer`，表现层同步重建键盘映射与判定框绑定。** | 选人确认键（J / `,`）同时也是战斗轻拳键，若不在选人阶段拦截就会泄漏进开局首帧的输入缓冲；F5 重开时旧按住状态、暂停标志、事件身份都可能跨回合污染。用「每回合全新 InputBuffer + 全新 KeyboardInputMap + 全新 Scheduler」一次性消除整类问题，而不是逐项打补丁。第一版用按键确认进入下一回合（而非自动倒计时），便于调试且保持确定性。 |
+| **D112** | **比赛 HUD 全部只读权威状态：当前回合 / 双方角色名 / HP / 胜场 / 剩余时间（由 `RemainingTimeFrames` 换算）/ 比赛阶段 / 回合结果与结束原因 / 最终比赛结果；原有判定框、事件与输入调试显示保留。跨回合事件用 `(RoundNumber, EventId)` 组合身份展示（如 `R2:164`）。Godot 不自行统计胜场、不自行倒计时、不判定结果。仅命令行的调试验收参数 `--hp=<n>` / `--match-time=<s>` / `--duel=<d>` 只在传入时生效，正常启动零副作用。** | 表现层一旦自己算胜场或倒计时就会出现「画面与权威快照不一致」的第二套结果。调试参数收在命令行并写进文档，避免把测试用短比赛/近站位混成正式默认规则（默认仍是满血 1000、99 秒、±120 站位）。 |
+
 ### 离线原型限定（重要）
 
 **当前丢帧策略与帧同步保证只适用于当前离线原型。**
