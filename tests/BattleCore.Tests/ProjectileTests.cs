@@ -3,6 +3,7 @@ using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.Simulation;
+using NewKOF.BattleCore.Presentation;
 using NewKOF.BattleCore.State;
 using Xunit;
 
@@ -413,6 +414,39 @@ public class ProjectileTests
         Assert.Empty(state.Projectiles);
         Assert.Equal(1000, state.Fighter(0).Health);
         Assert.Equal(1000, state.Fighter(1).Health);
+    }
+
+    [Theory]
+    [InlineData(-200, 200, 5, -5)]
+    [InlineData(-300, 180, 7, -3)]
+    public void ClashAnchors_UseMovedProjectilePositions(int left, int right, int vx, int otherVx)
+    {
+        var sim = Sim(lifetime: 200, maxAlive: 2);
+        BattleState source = FireOnce(sim, Duel(p1X: left, p2X: right), p2Fires: true);
+        var a = source.Projectiles[0] with { PositionX = 90, VelocityX = vx };
+        var b = source.Projectiles[1] with { PositionX = 100, VelocityX = otherVx };
+        var c = a with { ProjectileId = 3, PositionX = -100 };
+        var d = b with { ProjectileId = 4, PositionX = -90 };
+        var state = new BattleState(source.Frame, source.Fighters, source.StateVersion,
+            source.Round, new[] { a, b, c, d }, 5);
+        var result = sim.Step(state, FrameInput.Empty(state.Frame));
+        var clashes = result.Events.Where(e => e.Type == BattleEventType.ProjectileClash).ToArray();
+        Assert.Equal(2, clashes.Length);
+        Assert.Equal(2, result.EventAnchors.Count);
+        for (int j = 0; j < 2; j++)
+        {
+            var anchor = result.EventAnchors[j];
+            Assert.Equal(clashes[j].EventId, anchor.EventId);
+            var first = j == 0 ? a : c;
+            var second = j == 0 ? b : d;
+            Assert.Equal((first.PositionX + first.VelocityX + second.PositionX + second.VelocityX) / FixedPoint.FromInt(2), anchor.X);
+            Assert.Equal(first.PositionY, anchor.Y);
+            var frame = new PresentationFrame(1, state.Frame, state, result.State, result.Events, result.EventAnchors);
+            var director = new FeedbackDirector();
+            Assert.True(director.TryConsume(1, clashes[j], out var cue));
+            Assert.Equal((anchor.X.ToDouble(), anchor.Y.ToDouble()), FeedbackGeometry.Anchor(cue, frame));
+        }
+        Assert.Empty(result.State.Projectiles);
     }
 
     [Fact]

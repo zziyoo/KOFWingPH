@@ -292,17 +292,15 @@ public sealed class MatchSession
         // ⑤ 逐逻辑帧表现快照（D127）：无事件的帧同样要发布——表现时钟必须看到
         //    每一个已提交帧的冻结/恢复；事件位置取「本帧提交后」的状态。
         //    先于逐事件观察者投递：即使后者抛异常，本帧的权威状态与快照也已经落定。
-        _framePresented?.Invoke(new PresentationFrame(
-            roundNumber, stateBefore.Frame, stateBefore, current, events));
-
-        if (_eventsCommitted is null || wrapped.Length == 0)
-            return;
-
         _publishing = true;
         try
         {
-            for (int i = 0; i < wrapped.Length; i++)
-                _eventsCommitted.Invoke(wrapped[i]);
+            _framePresented?.Invoke(new PresentationFrame(
+                roundNumber, stateBefore.Frame, stateBefore, current, events, _roundSession.LastCommittedStep?.EventAnchors));
+
+            if (_eventsCommitted is not null)
+                for (int i = 0; i < wrapped.Length; i++)
+                    _eventsCommitted.Invoke(wrapped[i]);
         }
         finally
         {

@@ -32,14 +32,18 @@ public sealed record BattleStepResult
     /// </summary>
     public IReadOnlyList<BattleEvent> Events { get; }
 
+    public IReadOnlyList<EventAnchor> EventAnchors { get; }
+
     public BattleStepResult(
         int frameBefore,
         int frameAfter,
         Input.FrameInput input,
         State.BattleState state,
         IReadOnlyList<Combat.AttackContact>? contacts = null,
-        IReadOnlyList<BattleEvent>? events = null)
+        IReadOnlyList<BattleEvent>? events = null,
+        IReadOnlyList<EventAnchor>? eventAnchors = null)
     {
+        EventAnchors = Array.AsReadOnly((eventAnchors ?? Array.Empty<EventAnchor>()).ToArray());
         FrameBefore = frameBefore;
         FrameAfter = frameAfter;
         Input = input;

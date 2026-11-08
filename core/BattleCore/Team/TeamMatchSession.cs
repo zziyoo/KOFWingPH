@@ -256,17 +256,15 @@ public sealed class TeamMatchSession
 
         // 逐逻辑帧表现快照（D127 同构）：Scope = 交锋号，无事件帧同样发布。
         // 先于逐事件观察者投递，且此时本场交锋的淘汰/体力已落定。
-        _framePresented?.Invoke(new PresentationFrame(
-            boutNumber, stateBefore.Frame, stateBefore, current, events));
-
-        if (_eventsCommitted is null || wrapped.Length == 0)
-            return;
-
         _publishing = true;
         try
         {
-            for (int i = 0; i < wrapped.Length; i++)
-                _eventsCommitted.Invoke(wrapped[i]);
+            _framePresented?.Invoke(new PresentationFrame(
+                boutNumber, stateBefore.Frame, stateBefore, current, events, _boutSession.LastCommittedStep?.EventAnchors));
+
+            if (_eventsCommitted is not null)
+                for (int i = 0; i < wrapped.Length; i++)
+                    _eventsCommitted.Invoke(wrapped[i]);
         }
         finally
         {

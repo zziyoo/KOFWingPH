@@ -506,7 +506,13 @@ public sealed class BattleSimulation
         var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion, nextRound,
             projectileStep.Projectiles, projectileStep.NextProjectileId, timerAfter);
 
-        return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts, events);
+        var clashEvents = events.Where(e => e.Type == BattleEventType.ProjectileClash).ToArray();
+        var clashPositions = projectileStep.Events.Where(e => e.Type == BattleEventType.ProjectileClash).ToArray();
+        var anchors = new EventAnchor[clashEvents.Length];
+        for (int i = 0; i < anchors.Length; i++)
+            anchors[i] = new EventAnchor(clashEvents[i].EventId,
+                clashPositions[i].AnchorX!.Value, clashPositions[i].AnchorY!.Value);
+        return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts, events, anchors);
     }
 
     /// <summary>
@@ -1026,7 +1032,9 @@ public sealed class BattleSimulation
                     Math.Min(alive[i].OwnerFighterId, alive[j].OwnerFighterId),
                     Math.Max(alive[i].OwnerFighterId, alive[j].OwnerFighterId),
                     MoveId: null,
-                    Amount: 0));
+                    Amount: 0,
+                    AnchorX: (alive[i].PositionX + alive[j].PositionX) / FixedPoint.FromInt(2),
+                    AnchorY: (alive[i].PositionY + alive[j].PositionY) / FixedPoint.FromInt(2)));
             }
         }
 
@@ -1519,7 +1527,9 @@ public sealed class BattleSimulation
         int Source,
         int Target,
         string? MoveId,
-        int Amount);
+        int Amount,
+        FixedPoint? AnchorX = null,
+        FixedPoint? AnchorY = null);
 
     /// <summary>本帧飞行道具阶段的输出（D99）：存活实体、事件、下一个可分配 ID。</summary>
     private readonly record struct ProjectileStep(

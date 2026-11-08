@@ -1471,3 +1471,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 更新 `docs/AGENT_HANDOFF.md` 第 4/5/6 节
 - [ ] 若做了架构决策，写入 `docs/ARCHITECTURE.md` 第 4 节，并从第 5 节移除
 - [ ] 实际运行测试并在文档中记录真实结果（**不得编造**）
+
+
+## 阶段 11A：回调与对撞定位（D129/D130）
+- D129：1v1/3v3 的 framePresented 与 eventsCommitted 共用发布守卫。比赛计分、校验与战斗帧提交先完成；回调不能重开、返回选择或开启下一回合/交锋。异常原样传播并保留 BattleSession 故障封闭。
+- D130：飞行道具对撞在运动后、实体移除前采集两枚实体中心的定点中点，以 EventId 关联只读 EventAnchor，经 BattleStepResult、已提交会话和 PresentationFrame 传到 FeedbackGeometry。多次对撞各自定位，不改变事件内容、顺序、判定和 BattleState。
+- 旧构造路径的可选锚点参数默认空；StateVersion=13 / CoreVersion=14 保持，因为权威状态与规则未变化。阶段 11B/11C/11D 尚待完成。

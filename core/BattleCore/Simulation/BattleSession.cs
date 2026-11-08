@@ -58,6 +58,8 @@ public sealed class BattleSession
     /// <summary>当前权威状态。外部只读；更新只能经由 <see cref="Advance"/> 或 <see cref="StepExact"/>。</summary>
     public BattleState CurrentState { get; private set; }
 
+    public BattleStepResult? LastCommittedStep { get; private set; }
+
     /// <summary>
     /// 会话是否处于<b>故障封闭</b>状态。当提交后观察者（<see cref="_frameCommitted"/>）
     /// 抛异常时置为 <see langword="true"/>：该帧的战斗状态、输入历史、记账均已落定，
@@ -188,6 +190,7 @@ public sealed class BattleSession
                 inputSource?.Commit(input);
 
                 CurrentState = nextState;
+                LastCommittedStep = stepResult;
 
                 // 只有真正提交后才记账，保证 TotalSteps 不会跑在状态前面。
                 Scheduler.CommitStep();
@@ -293,6 +296,7 @@ public sealed class BattleSession
             BattleStepResult stepResult = _simulation.Step(CurrentState, input);
             inputSource?.Commit(input);
             CurrentState = stepResult.State;
+            LastCommittedStep = stepResult;
             Scheduler.CommitStep();
 
             // 与 Advance 相同：完整提交后才通知观察者，传帧开始状态。

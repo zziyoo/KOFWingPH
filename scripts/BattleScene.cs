@@ -1290,7 +1290,7 @@ public partial class BattleScene
         if (size > 0)
         {
             // 位置来自事件帧的权威状态（不是当前渲染帧的最终位置）。
-            (double x, double y) = FeedbackGeometry.Anchor(cue, frame.StateAfter);
+            (double x, double y) = FeedbackGeometry.Anchor(cue, frame);
             var position = new Vector2(640f + (float)x, 560f - (float)y);
 
             // 固定方向序列（身份 → 角度），保证同一回放产生同样画面。

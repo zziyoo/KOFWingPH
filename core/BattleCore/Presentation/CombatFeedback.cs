@@ -141,6 +141,14 @@ public sealed class FeedbackDirector
 /// </summary>
 public static class FeedbackGeometry
 {
+    public static (double X, double Y) Anchor(FeedbackCue cue, in PresentationFrame frame)
+    {
+        foreach (EventAnchor anchor in frame.EventAnchors)
+            if (((long)frame.Scope << 32 | (uint)anchor.EventId) == cue.Identity)
+                return (anchor.X.ToDouble(), anchor.Y.ToDouble());
+        return Anchor(cue, frame.StateAfter);
+    }
+
     /// <summary>胸口相对脚底的高度（世界单位）。</summary>
     public const double ChestHeight = 60d;
 

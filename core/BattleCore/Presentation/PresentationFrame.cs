@@ -40,7 +40,10 @@ public readonly record struct PresentationFrame
     /// <summary>该帧的<b>全部</b>权威事件（只读、帧内顺序固定；无事件时为空列表，绝不为 null）。</summary>
     public IReadOnlyList<BattleEvent> Events { get; }
 
-    /// <summary>该帧是否产生了事件（无事件帧同样是有效的时钟观察点）。</summary>
+    /// <summary>实体移除前采集的位置，按事件身份关联，仅供表现。</summary>
+    public IReadOnlyList<EventAnchor> EventAnchors { get; }
+
+    /// <summary>该帧是否产生了事件。</summary>
     public bool HasEvents => Events.Count > 0;
 
     /// <param name="scope">回合号 / 交锋号，必须 ≥ 1。</param>
@@ -56,7 +59,8 @@ public readonly record struct PresentationFrame
         int logicFrame,
         BattleState stateBefore,
         BattleState stateAfter,
-        IReadOnlyList<BattleEvent>? events = null)
+        IReadOnlyList<BattleEvent>? events = null,
+        IReadOnlyList<EventAnchor>? eventAnchors = null)
     {
         ArgumentNullException.ThrowIfNull(stateBefore);
         ArgumentNullException.ThrowIfNull(stateAfter);
@@ -84,6 +88,7 @@ public readonly record struct PresentationFrame
                     nameof(events));
         }
 
+        EventAnchors = Array.AsReadOnly((eventAnchors ?? Array.Empty<EventAnchor>()).ToArray());
         Scope = scope;
         LogicFrame = logicFrame;
         StateBefore = stateBefore;

@@ -169,6 +169,136 @@ public class Stage10PresentationTests
         return cues;
     }
 
+    [Fact]
+    public void Match_FrameObserver_CannotRestartOrReturnToSelection()
+    {
+        MatchSession? match = null;
+        int observed = 0;
+        match = new MatchSession(MatchRules.CreateDefault(), (_, _) => LethalRoster(),
+            framePresented: frame =>
+            {
+                Assert.Equal(frame.StateAfter.Frame, match!.CurrentBattleState!.Frame);
+                Assert.Throws<InvalidOperationException>(() => match.RestartMatch());
+                Assert.Throws<InvalidOperationException>(() => match.ReturnToSelection());
+                observed++;
+            });
+        match.SelectFighters("Kai", "Kai");
+        match.StartMatch();
+        match.StepExact(1);
+        Assert.Equal(1, observed);
+    }
+
+    [Fact]
+    public void Team_FrameObserver_CannotRestartOrReturnToSelection()
+    {
+        TeamMatchSession? match = null;
+        int observed = 0;
+        match = new TeamMatchSession(TeamMatchRules.CreateDefault(), (_, _) => LethalRoster(),
+            framePresented: frame =>
+            {
+                Assert.Equal(frame.StateAfter.Frame, match!.CurrentBattleState!.Frame);
+                Assert.Throws<InvalidOperationException>(() => match.RestartMatch());
+                Assert.Throws<InvalidOperationException>(() => match.ReturnToSelection());
+                observed++;
+            });
+        TeamDefinition Team(string id) => new(id, new[] {
+            new TeamMemberDefinition("Kai", 1000), new TeamMemberDefinition("Kai", 1000),
+            new TeamMemberDefinition("Kai", 1000) });
+        match.SelectTeams(Team("P1"), Team("P2"));
+        match.StartMatch();
+        match.StepExact(1);
+        Assert.Equal(1, observed);
+    }
+
+    [Fact]
+    public void Match_TerminalFrameObserver_RejectsNextRoundAndKeepsScope()
+    {
+        MatchSession? match = null;
+        var frames = new List<PresentationFrame>();
+        match = new MatchSession(MatchRules.CreateDefault(), (_, _) => LethalRoster(),
+            rules => new BattleState(0, new[] { FighterState.Create(0, 1000, -30, Facing.Right),
+                FighterState.Create(1, 1000, 30, Facing.Left) }, BattleState.CreateDefault().StateVersion,
+                round: null, projectiles: null, nextProjectileId: 1,
+                roundTimerRemainingFrames: rules.EnableTimeout ? rules.RoundTimerFrames : null),
+            framePresented: frame => {
+                frames.Add(frame);
+                if (frame.StateAfter.Round.IsFinished)
+                    Assert.Throws<InvalidOperationException>(() => match!.StartNextRound());
+            });
+        match.SelectFighters("Kai", "Kai");
+        match.StartMatch();
+        match.Advance(FixedStepScheduler.FixedStepSeconds * 12,
+            new ScriptedInput(f => f == 0 ? F(f, InputBits.LightPunch) : FrameInput.Empty(f)));
+        Assert.True(match.CurrentBattleState!.Round.IsFinished);
+        Assert.Equal(match.CurrentBattleState.Frame, frames.Count);
+        Assert.All(frames, f => Assert.Equal(1, f.Scope));
+        Assert.Contains(frames[^1].Events, e => e.Type == BattleEventType.RoundEnded);
+        match.StartNextRound();
+        match.StepExact(1);
+        Assert.Equal(2, frames[^1].Scope);
+    }
+
+    [Fact]
+    public void Team_TerminalFrameObserver_RejectsNextBoutAndKeepsScope()
+    {
+        TeamMatchSession? match = null;
+        var frames = new List<PresentationFrame>();
+        match = new TeamMatchSession(TeamMatchRules.CreateDefault(), (_, _) => LethalRoster(),
+            (rules, p1, p2) => new BattleState(0, new[] {
+                FighterState.Create(0, p1.ActiveMaxHealth, -30, Facing.Right) with { Health = p1.ActiveHealth },
+                FighterState.Create(1, p2.ActiveMaxHealth, 30, Facing.Left) with { Health = p2.ActiveHealth }
+            }, BattleState.CreateDefault().StateVersion, round: null, projectiles: null, nextProjectileId: 1,
+                roundTimerRemainingFrames: rules.EnableTimeout ? rules.BoutTimerFrames : null),
+            framePresented: frame => {
+                frames.Add(frame);
+                if (frame.StateAfter.Round.IsFinished)
+                    Assert.Throws<InvalidOperationException>(() => match!.StartNextBout());
+            });
+        TeamDefinition Team(string id) => new(id, new[] { new TeamMemberDefinition("Kai", 1000),
+            new TeamMemberDefinition("Kai", 1000), new TeamMemberDefinition("Kai", 1000) });
+        match.SelectTeams(Team("P1"), Team("P2"));
+        match.StartMatch();
+        match.Advance(FixedStepScheduler.FixedStepSeconds * 12,
+            new ScriptedInput(f => f == 0 ? F(f, InputBits.LightPunch) : FrameInput.Empty(f)));
+        Assert.True(match.CurrentBattleState!.Round.IsFinished);
+        Assert.Equal(match.CurrentBattleState.Frame, frames.Count);
+        Assert.All(frames, f => Assert.Equal(1, f.Scope));
+        Assert.Contains(frames[^1].Events, e => e.Type == BattleEventType.RoundEnded);
+        match.StartNextBout();
+        match.StepExact(1);
+        Assert.Equal(2, frames[^1].Scope);
+    }
+
+    [Fact]
+    public void Match_FrameObserverException_CommitsAndFaultsSession()
+    {
+        var failure = new ApplicationException("observer");
+        var match = new MatchSession(MatchRules.CreateDefault(), (_, _) => LethalRoster(),
+            framePresented: _ => throw failure);
+        match.SelectFighters("Kai", "Kai");
+        match.StartMatch();
+        Assert.Same(failure, Assert.Throws<ApplicationException>(() => match.StepExact(1)));
+        Assert.Equal(1, match.CurrentBattleState!.Frame);
+        Assert.Throws<InvalidOperationException>(() => match.StepExact(1));
+        Assert.Equal(1, match.CurrentBattleState.Frame);
+    }
+
+    [Fact]
+    public void Team_FrameObserverException_CommitsAndFaultsSession()
+    {
+        var failure = new ApplicationException("observer");
+        var match = new TeamMatchSession(TeamMatchRules.CreateDefault(), (_, _) => LethalRoster(),
+            framePresented: _ => throw failure);
+        TeamDefinition Team(string id) => new(id, new[] { new TeamMemberDefinition("Kai", 1000),
+            new TeamMemberDefinition("Kai", 1000), new TeamMemberDefinition("Kai", 1000) });
+        match.SelectTeams(Team("P1"), Team("P2"));
+        match.StartMatch();
+        Assert.Same(failure, Assert.Throws<ApplicationException>(() => match.StepExact(1)));
+        Assert.Equal(1, match.CurrentBattleState!.Frame);
+        Assert.Throws<InvalidOperationException>(() => match.StepExact(1));
+        Assert.Equal(1, match.CurrentBattleState.Frame);
+    }
+
     // ─────────────────────────────────────────────────────────────
     // A. 事件传递（P1）
     // ─────────────────────────────────────────────────────────────
