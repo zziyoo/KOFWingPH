@@ -219,6 +219,9 @@ public sealed class CancelDto
 
 public sealed class ThrowDto
 {
+    [JsonPropertyName("techable")]
+    public bool Techable { get; set; } = true;
+
     [JsonPropertyName("throwId")]
     public string? ThrowId { get; set; }
 

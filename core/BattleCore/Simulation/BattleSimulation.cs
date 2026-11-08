@@ -153,7 +153,7 @@ public sealed class BattleSimulation
             // ── 命中停顿（08A/D96）：本帧<b>整体冻结</b>——动作阶段、硬直计时、击退衰减、
             //    空中积分、取消窗口全部停摆；只有输入识别照常推进（缓冲不丢失、不消费）。
             //    N 帧停顿 = 冻结后续 N 个逻辑帧，第 N+1 帧恢复（计数器逐帧 −1）。
-            if (fighter.HitstopRemainingFrames > 0)
+            if (fighter.HitstopRemainingFrames > 0 || state.PendingThrow is not null)
             {
                 RecognitionState frozenRecognition = fighter.RecognitionState.Advance(
                     bits, fighter.Facing, state.Frame, i, definition.Commands);
@@ -181,7 +181,7 @@ public sealed class BattleSimulation
                     KnockbackFriction = fighter.KnockbackFriction,
                     LandingKnockdownFrames = fighter.LandingKnockdownFrames,
                     LandingWakeupFrames = fighter.LandingWakeupFrames,
-                    HitstopRemainingFrames = fighter.HitstopRemainingFrames - 1,
+                    HitstopRemainingFrames = Math.Max(0, fighter.HitstopRemainingFrames - 1),
                     ProjectileSpawnMask = fighter.ProjectileSpawnMask,
                 };
                 frozenThisFrame[i] = true;
@@ -404,13 +404,13 @@ public sealed class BattleSimulation
 
         // ── 第 6 阶段：命中结算（D78/D79/D80/D81）——接触检测 + 双方同时判定（互不先手）
         //    + 攻击实例去重（同一发动对同一目标只结算一次，被防御亦算已结算）。
-        IReadOnlyList<AttackContact> contacts = HitDetection.Detect(
+        IReadOnlyList<AttackContact> contacts = state.PendingThrow is not null ? Array.Empty<AttackContact>() : HitDetection.Detect(
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
 
         // ── 第 6a 阶段：攻击相杀（D98）——两个攻击实例的攻击框正面积重叠，
         //    且双方都<b>没有</b>打中对方受击框（攻击在空中对撞）。任一方真正命中的帧
         //    按 D80 正常结算（互中/单方命中），不判相杀：同一帧不能既相杀又命中。
-        bool strikeClash = contacts.Count == 0
+        bool strikeClash = state.PendingThrow is null && contacts.Count == 0
             && FighterBoxes.HitboxesOverlap(
                 nextFighters[0], _roster.Fighter(0), nextFighters[1], _roster.Fighter(1));
 
@@ -428,8 +428,44 @@ public sealed class BattleSimulation
             candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
 
         // ── 第 6b 阶段：投技仲裁与结算（D97）——必须晚于打击结算：有效打击会中断投技。
-        ThrowResolution throwResolution = ApplyThrows(
-            state.Frame, nextFighters, throwAttempts, outcomes, strikeClash);
+        PendingThrow? pending = state.PendingThrow;
+        ThrowResolution throwResolution;
+        bool tech = false;
+        if (pending is not null)
+        {
+            if (TechPressed(state, input, pending.Target))
+            {
+                tech = true;
+                throwResolution = new ThrowResolution(false, false, pending.Thrower, pending.Target, pending.MoveId, 0, pending.Definition.ThrowId);
+                for (int i = 0; i < nextFighters.Length; i++)
+                    nextFighters[i] = ReleaseGrab(nextFighters[i]);
+                SeparateTech(nextFighters);
+                pending = null;
+            }
+            else if (state.Frame == pending.StartedFrame + 2)
+            {
+                var attempts = new ThrowAttempt[2];
+                attempts[pending.Thrower] = new ThrowAttempt(true, false, pending.Target,
+                    pending.Definition, pending.MoveId, true);
+                throwResolution = ApplyThrows(state.Frame, nextFighters, attempts, outcomes, false,
+                    allowPending: false, out _);
+                pending = null;
+            }
+            else throwResolution = default;
+        }
+        else
+        {
+            throwResolution = ApplyThrows(state.Frame, nextFighters, throwAttempts, outcomes, strikeClash,
+                allowPending: true, out pending);
+            if (pending is not null && TechPressed(state, input, pending.Target))
+            {
+                tech = true;
+                throwResolution = new ThrowResolution(false, false, pending.Thrower, pending.Target, pending.MoveId, 0, pending.Definition.ThrowId);
+                for (int i = 0; i < nextFighters.Length; i++) nextFighters[i] = ReleaseGrab(nextFighters[i]);
+                SeparateTech(nextFighters);
+                pending = null;
+            }
+        }
 
         // ── 第 6c 阶段：飞行道具（D99）——已有实体移动/对撞/命中，随后本帧新生成的实体入列。
         //    放在近战与投技之后：近战优先占用目标本帧的受击资格（相杀/投技同理），
@@ -437,6 +473,10 @@ public sealed class BattleSimulation
         //    一枚投掷物命中（按 ID 升序取第一枚）。
         ProjectileStep projectileStep = StepProjectiles(
             state.Frame, nextFighters, state.Projectiles, candidates, state.NextProjectileId);
+
+        // Independent projectiles remain active. A hit to either participant cancels the unresolved grab.
+        if (pending is not null && projectileStep.Events.Any(e => e.Type == BattleEventType.ProjectileHit))
+            pending = null;
 
         // 攻击实例附属状态归一化（D100）：掩码属于「角色 + 发动帧」这一次攻击实例，
         // 不是角色本身。命中结算/投技结算/相杀会改写状态，必须在全部结算完成后统一核账：
@@ -485,7 +525,7 @@ public sealed class BattleSimulation
         IReadOnlyList<BattleEvent> events = CollectEvents(
             state.Frame, nextFighters, candidates, outcomes, attackActive,
             throwAttempts, throwResolution, strikeClash,
-            projectileStep.Events, state.Round, nextRound, timeOverThisFrame);
+            projectileStep.Events, state.Round, nextRound, timeOverThisFrame, tech);
 
         // ── 第 9 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
@@ -504,7 +544,7 @@ public sealed class BattleSimulation
         }
 
         var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion, nextRound,
-            projectileStep.Projectiles, projectileStep.NextProjectileId, timerAfter);
+            projectileStep.Projectiles, projectileStep.NextProjectileId, timerAfter, nextRound.IsFinished ? null : pending);
 
         var clashEvents = events.Where(e => e.Type == BattleEventType.ProjectileClash).ToArray();
         var clashPositions = projectileStep.Events.Where(e => e.Type == BattleEventType.ProjectileClash).ToArray();
@@ -857,13 +897,39 @@ public sealed class BattleSimulation
     /// <item>否则该投技成立：扣血 → 目标倒地 → 沿「远离投技者」方向平移（D70 边界 + D73 间距）。</item>
     /// </list>
     /// </summary>
+    private void SeparateTech(FighterState[] fighters)
+    {
+        int left = fighters[0].PositionX <= fighters[1].PositionX ? 0 : 1;
+        int right = 1 - left;
+        fighters[left] = fighters[left] with { PositionX = _stage.ClampX(fighters[left].PositionX - FixedPoint.FromInt(8)) };
+        fighters[right] = fighters[right] with { PositionX = _stage.ClampX(fighters[right].PositionX + FixedPoint.FromInt(8)) };
+    }
+
+    private static bool TechPressed(BattleState state, FrameInput input, int target)
+    {
+        const InputBits chord = InputBits.LightPunch | InputBits.LightKick;
+        InputBits now = input.ForPlayer(target);
+        return (now & chord) == chord && (state.Fighter(target).RecognitionState.HeldAttacks & chord) != chord;
+    }
+
+    private static FighterState ReleaseGrab(FighterState fighter) => fighter with {
+        LogicState = FighterLogicState.Standing, MoveId = null, PhaseRemainingFrames = 0,
+        StunRemainingFrames = 0, MoveStartedFrame = -1, MoveElapsedFrames = 0,
+        VelocityX = FixedPoint.Zero, VelocityY = FixedPoint.Zero, KnockbackFriction = FixedPoint.Zero,
+        HitConfirmFrame = -1, BlockConfirmFrame = -1, ProjectileSpawnMask = 0,
+        LandingKnockdownFrames = 0, LandingWakeupFrames = 0, ComboRecord = ComboState.None
+    };
+
     private ThrowResolution ApplyThrows(
         int frame,
         FighterState[] fighters,
         ThrowAttempt[] attempts,
         CombatSettlement?[] outcomes,
-        bool strikeClash)
+        bool strikeClash,
+        bool allowPending,
+        out PendingThrow? pending)
     {
+        pending = null;
         bool[] interrupted = new bool[fighters.Length];
         for (int i = 0; i < fighters.Length; i++)
         {
@@ -896,6 +962,13 @@ public sealed class BattleSimulation
         int target = attempt.TargetIndex;
         FighterState attacker = fighters[thrower];
         FighterState defender = fighters[target];
+
+        if (allowPending && definition.Techable)
+        {
+            pending = new PendingThrow(thrower, target, attacker.MoveStartedFrame, attempt.MoveId!, frame, definition);
+            fighters[target] = defender with { LastThrowStartFrame = attacker.MoveStartedFrame };
+            return default;
+        }
 
         int healthAfter = defender.Health - definition.Damage;
         if (healthAfter < 0)
@@ -1539,7 +1612,8 @@ public sealed class BattleSimulation
         int Thrower,
         int Target,
         string? MoveId,
-        int Damage);
+        int Damage,
+        string? ThrowId = null);
 
     /// <summary>
     /// 计算本帧「攻击实例首个生效帧」快照（D82 的 AttackActive 语义来源）。
@@ -1614,7 +1688,8 @@ public sealed class BattleSimulation
         List<ProjectileEvent> projectileEvents,
         RoundState previousRound,
         RoundState nextRound,
-        bool timeOverThisFrame)
+        bool timeOverThisFrame,
+        bool throwTech = false)
     {
         List<BattleEvent>? events = null;
         int seq = 0;
@@ -1688,7 +1763,12 @@ public sealed class BattleSimulation
 
         // ⑥ 投技结果（D97）：成功一条 ThrowHit（Amount = 实扣伤害）；双方互投则一条 ThrowClash。
         //    每帧至多一条（1v1 下投技冲突只有「互相抓」一种，两边都不成立）。
-        if (throwResolution.Clash)
+        if (throwTech)
+        {
+            Add(BattleEventType.ThrowTech, throwResolution.Target, throwResolution.Thrower, throwResolution.MoveId, 0);
+            events![^1] = events[^1] with { ThrowId = throwResolution.ThrowId };
+        }
+        else if (throwResolution.Clash)
             Add(BattleEventType.ThrowClash, 0, 1, null, 0);
         else if (throwResolution.Hit)
             Add(BattleEventType.ThrowHit, throwResolution.Thrower, throwResolution.Target,

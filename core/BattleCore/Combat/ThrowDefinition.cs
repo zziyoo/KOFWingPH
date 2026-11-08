@@ -68,7 +68,8 @@ public sealed class ThrowDefinition
         int wakeupFrames = 8,
         FixedPoint pushDistance = default,
         int hitstopFrames = 0,
-        ThrowTargetStates targetStates = ThrowTargetStates.All)
+        ThrowTargetStates targetStates = ThrowTargetStates.All,
+        bool techable = true)
     {
         if (string.IsNullOrWhiteSpace(throwId))
             throw new ArgumentException("投技 ID 不能为空。", nameof(throwId));
@@ -106,6 +107,7 @@ public sealed class ThrowDefinition
                 $"投技目标状态只能是 Standing/Attacking/Stunned 的组合，收到 {targetStates}。",
                 nameof(targetStates));
 
+        Techable = techable;
         ThrowId = throwId;
         Range = range;
         FirstActiveFrame = firstActiveFrame;
@@ -120,6 +122,8 @@ public sealed class ThrowDefinition
 
     /// <summary>投技 ID（同一招式内唯一）。</summary>
     public string ThrowId { get; }
+
+    public bool Techable { get; }
 
     /// <summary>最大可抓取水平中心距离（世界单位）。</summary>
     public FixedPoint Range { get; }

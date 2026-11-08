@@ -232,7 +232,8 @@ public static class FighterDataLoader
             hitstopFrames: RequiredInt(dto.HitstopFrames, source, path + ".hitstopFrames"),
             targetStates: ParseFlags(
                 RequiredString(dto.TargetStates, source, path + ".targetStates"),
-                source, path + ".targetStates", ThrowTargetStates.All)),
+                source, path + ".targetStates", ThrowTargetStates.All),
+            techable: dto.Techable),
         source, path);
 
     private static ProjectileDefinition BuildProjectile(

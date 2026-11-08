@@ -213,6 +213,10 @@ public class FighterDataTests
         BattleStepResult r = sim.Step(
             ActiveState("StandingThrow", 2), FrameInput.Empty(0));
 
+        Assert.NotNull(r.State.PendingThrow);
+        Assert.Equal(1000, r.State.Fighter(1).Health);
+        r = sim.Step(r.State, FrameInput.Empty(r.State.Frame));
+        r = sim.Step(r.State, FrameInput.Empty(r.State.Frame));
         Assert.Equal(940, r.State.Fighter(1).Health);   // 投技伤害 60
         Assert.Equal(FighterLogicState.Knockdown, r.State.Fighter(1).LogicState);
         Assert.Single(r.Events, e => e.Type == BattleEventType.ThrowHit);

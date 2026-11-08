@@ -103,7 +103,7 @@ public class Stage08EdgeCaseTests
                 {
                     new ThrowDefinition("T", FixedPoint.FromInt(70),
                         damage: 60, knockdownFrames: 12, wakeupFrames: 8,
-                        pushDistance: FixedPoint.FromInt(20)),
+                        pushDistance: FixedPoint.FromInt(20), techable: false),
                 }),
             _ => new MoveDefinition(Strike, "5A", 1, 3, 4,
                 attacks: new[] { MeleeHit(launches: false) }),

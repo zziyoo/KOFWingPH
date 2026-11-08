@@ -299,6 +299,35 @@ public class Stage10PresentationTests
         Assert.Equal(1, match.CurrentBattleState.Frame);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Team_ThrowTechOrKo_UpdatesEliminationExactlyOnce(bool tech)
+    {
+        var catalog = Catalog();
+        var frames = new List<PresentationFrame>();
+        var session = new TeamMatchSession(TeamMatchRules.CreateDefault(),
+            (a,b) => catalog.CreateRoster(a,b),
+            (rules,a,b) => new BattleState(0, new[] {
+                FighterState.Create(0,a.ActiveMaxHealth,-30,Facing.Right) with { Health=a.ActiveHealth },
+                FighterState.Create(1,b.ActiveMaxHealth,30,Facing.Left) with { Health=b.ActiveHealth }
+            }, BattleState.CreateDefault().StateVersion), framePresented: frames.Add);
+        TeamDefinition Team(string id) => new(id,new[] { new TeamMemberDefinition("Kai",60),
+            new TeamMemberDefinition("Kai",60),new TeamMemberDefinition("Kai",60) });
+        session.SelectTeams(Team("P1"),Team("P2")); session.StartMatch();
+        session.StepExact(8,f => F(f, f==0 ? InputBits.HeavyKick : InputBits.None,
+            tech && f==4 ? InputBits.LightPunch|InputBits.LightKick : InputBits.None));
+        Assert.Equal(tech,session.State.IsBoutLive);
+        Assert.Equal(tech ? 3 : 2,session.State.P2!.RemainingCount);
+        Assert.Equal(tech ? 1 : 0,frames.SelectMany(f=>f.Events).Count(e=>e.Type==BattleEventType.ThrowTech));
+        Assert.Equal(tech ? 0 : 1,frames.SelectMany(f=>f.Events).Count(e=>e.Type==BattleEventType.RoundEnded));
+        if (!tech) {
+            session.StartNextBout();
+            Assert.Null(session.CurrentBattleState!.PendingThrow);
+            Assert.All(session.CurrentBattleState.Fighters,f=>Assert.Equal(60,f.Health));
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────
     // A. 事件传递（P1）
     // ─────────────────────────────────────────────────────────────

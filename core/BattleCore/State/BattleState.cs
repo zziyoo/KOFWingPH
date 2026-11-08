@@ -14,6 +14,8 @@ public sealed record BattleState
     /// <summary>下一个待模拟的逻辑帧号。初始为 0。</summary>
     public int Frame { get; }
 
+    public PendingThrow? PendingThrow { get; }
+
     /// <summary>1v1 固定两名角色。数组本身在构造时复制，对外只读。</summary>
     public IReadOnlyList<FighterState> Fighters { get; }
 
@@ -53,7 +55,8 @@ public sealed record BattleState
         RoundState? round = null,
         IReadOnlyList<ProjectileState>? projectiles = null,
         int nextProjectileId = 1,
-        int? roundTimerRemainingFrames = null)
+        int? roundTimerRemainingFrames = null,
+        PendingThrow? pendingThrow = null)
     {
         if (frame < 0)
             throw new ArgumentOutOfRangeException(nameof(frame), frame, "逻辑帧号不能为负。");
@@ -61,6 +64,10 @@ public sealed record BattleState
         if (fighters.Count != 2)
             throw new ArgumentException($"阶段 01 仅支持 2 名角色，实际 {fighters.Count}。", nameof(fighters));
 
+        pendingThrow?.Validate(frame);
+        if (pendingThrow is not null && round?.IsFinished == true)
+            throw new ArgumentException("Finished round cannot retain a pending throw.");
+        PendingThrow = pendingThrow;
         Frame = frame;
         Fighters = Array.AsReadOnly(fighters.ToArray());
         StateVersion = stateVersion;
@@ -113,7 +120,7 @@ public sealed record BattleState
     /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界。
     /// <b>默认不启用计时</b>（null），保持旧单回合 API 逐位兼容。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 14) => new(
+    public static BattleState CreateDefault(int stateVersion = 15) => new(
         frame: 0,
         fighters: new[]
         {

@@ -1484,3 +1484,13 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - D132：AirBlockstun=12，保留跳跃类型与空中速度、重力积分；计时归零恢复 Airborne。未归零落地转 Blockstun，剩余计时保留，落地速度清零。Hitstop 分支冻结运动与计时；不属于受击连段延续。
 - D133：沿用 Blocked/BlockstunStarted/ProjectileBlocked；远程防御只冻结目标。Kai/Rei 增加 air_guard 与 air_guard_hurt 姿态，AirBlockstun 映射后者，缺配置显式回退 hurt。
 - StateVersion=14（新增权威逻辑状态），CoreVersion=15（空防规则）；未实现跨进程快照迁移。专项与关联 Debug 回归 377 项通过；1v1/3v3 真实图形集成留在 11D。11C 尚未完成。
+
+
+## 阶段 11C：三帧拆投窗口（D134–D138）
+- D134：LP+LK 同时按住且组合产生新的按下边沿才拆投；上一帧按钮来自 FighterState.RecognitionState.HeldAttacks。长按不自动触发。
+- D135：普通投技默认 Techable=true，旧 JSON 缺字段同样默认 true，可显式 techable=false 保留不可拆投规则。Schema v1 新增可选布尔字段，类型错误由 JSON 加载器拒绝。旧 D97 即时结算专项夹具明确使用不可拆投配置，断言保持；真实 JSON 投技测试增加窗口期不扣血断言后再验证完整伤害。
+- D136：BattleState.PendingThrow 是不可变待决抓取，包含双方、攻击实例发动帧、MoveId、抓取帧和不可变 ThrowDefinition（含 ThrowId）。剩余窗口由抓取帧与当前帧计算。T、T+1、T+2 有效，T+2 末尾未拆则扣血、倒地、Hitstop；T+3 不可逆转。
+- D137：待决期间双方动作/运动锁定，输入历史继续推进，窗口按已提交逻辑帧计数（Hitstop 不延长）。独立飞行道具继续运动/碰撞/命中；任一方被弹命中取消未完成抓取，同帧已结算的投技不回滚。Time Over 仍在攻击/投技/飞行道具之后，终局清除待决状态。新回合/交锋使用全新状态。
+- D138：ThrowTech=17，与 ThrowClash 区分，源为拆投方、目标为原投技者，携带 MoveId、ThrowId、帧和唯一 EventId。成功双方回地面，向外各分离8单位且受墙角钳制，清空动作、生成掩码、连段与倒地计划；青色火花。失败沿用 D97 伤害/倒地/命中确认/停顿路径。
+- StateVersion=15（PendingThrow），CoreVersion=16；没有跨进程快照序列化与迁移能力。Debug/Release 全量各1072项通过、无跳过；核心与宿主 Debug/Release 构建通过。
+- 图形运行已实测 Kai vs Kai：shots/p11_airguard.png 中 P2 AirBlockstun、双方1000HP；shots/p11_throwtech.png 中 ThrowTech P2→P1、双方满血、分离至±38。完整11D对局与全部图形场景尚未验收，不宣称阶段11正式完成。

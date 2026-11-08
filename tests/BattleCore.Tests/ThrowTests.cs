@@ -23,7 +23,7 @@ public class ThrowTests
     private const string Grab = "Grab";
 
     /// <summary>双方同配置：5A（Startup 2，与投技同帧生效）与 5D 投技（Startup 2）。</summary>
-    private static BattleSimulation Sim(int throwHitstop = 0, int range = 70, int damage = 60)
+    private static BattleSimulation Sim(int throwHitstop = 0, int range = 70, int damage = 60, bool techable = false)
     {
         MovementDefinition movement = MovementDefinition.CreateDefault();
 
@@ -56,7 +56,7 @@ public class ThrowTests
                             knockdownFrames: 12,
                             wakeupFrames: 8,
                             pushDistance: FixedPoint.FromInt(20),
-                            hitstopFrames: throwHitstop),
+                            hitstopFrames: throwHitstop, techable: techable),
                     }),
             },
             movement);
@@ -88,6 +88,116 @@ public class ThrowTests
     // ─────────────────────────────────────────────────────────────
     // 1. 基本成功率与几何
     // ─────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    [InlineData(144)]
+    public void TechWindow_AdvanceAndExactAgreeOver10000Frames(int fps)
+    {
+        FrameInput Input(int f) => F(f, f == 0 ? InputBits.HeavyKick : InputBits.None,
+            f == 4 ? InputBits.LightPunch | InputBits.LightKick : InputBits.None);
+        var expected = new BattleSession(Duel(), simulation: Sim(techable: true));
+        expected.StepExact(10000, inputProvider: Input);
+        var actual = new BattleSession(Duel(), simulation: Sim(techable: true));
+        while (actual.CurrentState.Frame < 10000)
+        {
+            int remain = 10000 - actual.CurrentState.Frame;
+            actual.Advance(Math.Min(1d / fps, remain * FixedStepScheduler.FixedStepSeconds), inputProvider: Input);
+        }
+        Assert.Equal(expected.CurrentState.Fighters.ToArray(), actual.CurrentState.Fighters.ToArray());
+        Assert.Equal(expected.CurrentState.PendingThrow, actual.CurrentState.PendingThrow);
+    }
+
+    [Theory]
+    [InlineData(0, -60, 0)]
+    [InlineData(1, -60, 0)]
+    [InlineData(0, 400, 460)]
+    [InlineData(1, -460, -400)]
+    public void Tech_SeparatesLegallyAndIdentifiesOriginalThrow(int owner, int left, int right)
+    {
+        var sim = Sim(techable: true);
+        var state = Duel(p1X: left, p2X: right);
+        var events = new List<BattleEvent>();
+        for (int f = 0; f <= 4; f++) {
+            InputBits attacker = f == 0 ? InputBits.HeavyKick : InputBits.None;
+            InputBits defender = f == 4 ? InputBits.LightPunch | InputBits.LightKick : InputBits.None;
+            var result = sim.Step(state, F(f, owner == 0 ? attacker : defender, owner == 1 ? attacker : defender));
+            state = result.State; events.AddRange(result.Events);
+        }
+        var tech = Assert.Single(events, e => e.Type == BattleEventType.ThrowTech);
+        Assert.Equal(1-owner, tech.SourceFighterId);
+        Assert.Equal(owner, tech.TargetFighterId);
+        Assert.Equal("Grab", tech.MoveId);
+        Assert.Equal("Throw", tech.ThrowId);
+        Assert.Equal(4, tech.Frame);
+        Assert.True(state.Fighter(1).PositionX - state.Fighter(0).PositionX >= FixedPoint.FromInt(60));
+        Assert.All(state.Fighters, fighter => { fighter.Validate(); Assert.Equal(1000, fighter.Health); Assert.Equal(0, fighter.ProjectileSpawnMask); });
+    }
+
+    [Theory]
+    [InlineData(InputBits.LightPunch)]
+    [InlineData(InputBits.LightKick)]
+    [InlineData(InputBits.HeavyPunch | InputBits.HeavyKick)]
+    [InlineData(InputBits.LightPunch | InputBits.LightKick)]
+    public void HeldOrWrongButtons_DoNotTech(InputBits held)
+    {
+        var sim = Sim(techable: true);
+        var state = Duel();
+        var events = new List<BattleEvent>();
+        for (int f = 0; f < 5; f++) {
+            var result = sim.Step(state, F(f, f == 0 ? InputBits.HeavyKick : InputBits.None, held));
+            state = result.State; events.AddRange(result.Events);
+        }
+        Assert.DoesNotContain(events, e => e.Type == BattleEventType.ThrowTech);
+        // LP may interrupt a same-frame grab through the pre-existing D97 strike rule.
+        if (held == InputBits.LightKick) Assert.Contains(events, e => e.Type == BattleEventType.ThrowHit);
+        if ((held & InputBits.HeavyKick) != 0) Assert.Contains(events, e => e.Type == BattleEventType.ThrowClash);
+    }
+
+    [Fact]
+    public void PendingThrow_SnapshotResumesAndHasNoPrematureKo()
+    {
+        var sim = Sim(throwHitstop: 3, damage: 1000, techable: true);
+        var state = Duel();
+        (state, _) = Throw(sim, state);
+        Assert.False(state.Round.IsFinished);
+        Assert.NotNull(state.PendingThrow);
+        var saved = state;
+        for (int f = 3; f <= 4; f++) state = sim.Step(state, FrameInput.Empty(f)).State;
+        var replay = saved;
+        for (int f = 3; f <= 4; f++) replay = sim.Step(replay, FrameInput.Empty(f)).State;
+        Assert.Equal(state.Fighters.ToArray(), replay.Fighters.ToArray());
+        Assert.True(state.Round.IsFinished);
+        Assert.Null(state.PendingThrow);
+        Assert.Equal(3, state.Fighter(1).HitstopRemainingFrames);
+    }
+
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    [InlineData(4, true)]
+    [InlineData(5, false)]
+    public void TechableThrow_ThreeFrameWindow(int techFrame, bool succeeds)
+    {
+        var sim = Sim(techable: true);
+        var state = Duel();
+        var events = new List<BattleEvent>();
+        for (int f = 0; f < 6; f++) {
+            var result = sim.Step(state, F(f, f == 0 ? InputBits.HeavyKick : InputBits.None,
+                f == techFrame ? InputBits.LightPunch | InputBits.LightKick : InputBits.None));
+            state = result.State;
+            events.AddRange(result.Events);
+            if (f == 2 && techFrame != 2) {
+                Assert.NotNull(state.PendingThrow);
+                Assert.Equal(1000, state.Fighter(1).Health);
+            }
+        }
+        Assert.Equal(succeeds ? 1000 : 940, state.Fighter(1).Health);
+        Assert.Equal(succeeds ? 1 : 0, events.Count(e => e.Type == BattleEventType.ThrowTech));
+        Assert.Equal(succeeds ? 0 : 1, events.Count(e => e.Type == BattleEventType.ThrowHit));
+        Assert.Null(state.PendingThrow);
+    }
 
     [Fact]
     public void P1_GrabsP2_DealsDamageAndKnocksDown()

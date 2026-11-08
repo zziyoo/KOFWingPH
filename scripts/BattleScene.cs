@@ -1324,6 +1324,7 @@ public partial class BattleScene
         FeedbackKind.StrikeClash => (Color.FromHtml("#FFFFFF"), 30, 3),
         FeedbackKind.ProjectileImpact => (Color.FromHtml("#FFD166"), 24, 2),
         FeedbackKind.ProjectileBlocked => (Color.FromHtml("#8FD3FF"), 20, 1),
+        FeedbackKind.ThrowTech => (Color.FromHtml("#7EFAFF"), 24, 1),
         FeedbackKind.ProjectileClash => (Color.FromHtml("#FFFFFF"), 28, 2),
         FeedbackKind.Knockout => (Color.FromHtml("#FF3B3B"), 48, 6),
         FeedbackKind.DoubleKnockout => (Color.FromHtml("#FF3B3B"), 48, 6),

@@ -96,6 +96,8 @@ public enum BattleEventType
     /// <see cref="RoundEnded"/> 之前。KO 与 Time Over 同帧时以 KO 为准，不发本事件。
     /// </summary>
     TimeOver = 16,
+
+    ThrowTech = 17,
 }
 
 /// <summary>
@@ -125,6 +127,8 @@ public readonly record struct BattleEvent(
     int Amount)
 {
     /// <summary>每帧事件数上限（EventId 帧内 4 位空间）。</summary>
+    public string? ThrowId { get; init; }
+
     public const int MaxEventsPerFrame = 16;
 
     /// <summary>

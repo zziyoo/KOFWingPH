@@ -41,6 +41,7 @@ public enum FeedbackKind
 
     /// <summary>时间到：仅横幅，无火花。</summary>
     TimeOver = 11,
+    ThrowTech = 12,
 }
 
 /// <summary>
@@ -116,6 +117,7 @@ public sealed class FeedbackDirector
         BattleEventType.Hit => FeedbackKind.Hit,
         BattleEventType.Blocked => FeedbackKind.Blocked,
         BattleEventType.ThrowHit => FeedbackKind.ThrowImpact,
+        BattleEventType.ThrowTech => FeedbackKind.ThrowTech,
         BattleEventType.ThrowClash => FeedbackKind.ThrowClash,
         BattleEventType.StrikeClash => FeedbackKind.StrikeClash,
         BattleEventType.ProjectileHit => FeedbackKind.ProjectileImpact,
@@ -159,7 +161,7 @@ public static class FeedbackGeometry
     {
         ArgumentNullException.ThrowIfNull(state);
 
-        if (cue.Kind is FeedbackKind.StrikeClash or FeedbackKind.ThrowClash
+        if (cue.Kind is FeedbackKind.StrikeClash or FeedbackKind.ThrowClash or FeedbackKind.ThrowTech
             or FeedbackKind.ProjectileClash)
         {
             (double ax, double ay) = AnchorOf(state.Fighter(0));
