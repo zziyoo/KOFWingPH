@@ -59,6 +59,12 @@ public partial class BattleScene : Node2D
     private FighterVisual? _visual1;
     private FighterVisual? _visual2;
     private Dictionary<string, AnimationSet> _presentationSets = new(StringComparer.Ordinal);
+
+    private readonly FeedbackDirector _feedback = new();
+    private readonly HitShake _shake = new();
+    private CombatFeedbackLayer _fx = null!;
+    private bool _fxEnabled = true;
+    private (int X, int Y) _shakeOffset;
     private Label? _hudLabel;
     private Label? _resultLabel;
     private DebugBoxDrawer _debugBoxes = null!;
@@ -88,6 +94,11 @@ public partial class BattleScene : Node2D
 
         _debugBoxes = new DebugBoxDrawer { Enabled = _showDebugBoxes };
         AddChild(_debugBoxes);
+
+        _fx = new CombatFeedbackLayer { Name = "CombatFx" };
+        AddChild(_fx);
+        int hudIndex = GetNodeOrNull<Node>("Hud")?.GetIndex() ?? GetChildCount() - 1;
+        MoveChild(_fx, Math.Max(0, hudIndex));
 
         _diagnostics = HasArg("--inputdiag");
         _trace.Enabled = _diagnostics;
@@ -310,6 +321,20 @@ public partial class BattleScene : Node2D
             return;
         }
 
+        if (pressed.Keycode == Key.F4)
+        {
+            _fxEnabled = !_fxEnabled;
+            _fx.Enabled = _fxEnabled;
+            if (!_fxEnabled)
+            {
+                _fx.Clear();
+                _shake.Reset();
+                _shakeOffset = (0, 0);
+            }
+            SyncViewFromState();
+            return;
+        }
+
         // 全局调试键（所有阶段可用）。
         if (pressed.Keycode == Key.F2)
         {
@@ -459,10 +484,12 @@ public partial class BattleScene : Node2D
         {
             case Key.F5:
                 _match.RestartMatch();
+                _feedback.Reset();
                 BindDuelRound();
                 return;
             case Key.Escape:
                 _match.ReturnToSelection();
+                _feedback.Reset();
                 _p1Confirmed = false;
                 _p2Confirmed = false;
                 RebindInput(_match.RoundInputBuffer);
@@ -503,10 +530,12 @@ public partial class BattleScene : Node2D
         {
             case Key.F5:
                 _team.RestartMatch();
+                _feedback.Reset();
                 BindTeamBout();
                 return;
             case Key.Escape:
                 _team.ReturnToSelection();
+                _feedback.Reset();
                 _teamSelect.ClearReady();
                 RebindInput(_team.BoutInputBuffer);
                 _stage = Stage.TeamSelect;
@@ -609,6 +638,7 @@ public partial class BattleScene : Node2D
             _visual2?.SetAnimationSet(SetFor(p2));
             _visual1?.Reset();
             _visual2?.Reset();
+            ResetFeedbackLayer();
         }
         SyncViewFromState();
     }
@@ -626,6 +656,7 @@ public partial class BattleScene : Node2D
             _visual2?.SetAnimationSet(SetFor(p2.ActiveFighterId));
             _visual1?.Reset();
             _visual2?.Reset();
+            ResetFeedbackLayer();
         }
         SyncViewFromState();
     }
@@ -639,6 +670,8 @@ public partial class BattleScene : Node2D
 
     public override void _Process(double delta)
     {
+        _shakeOffset = _shake.Tick();
+
         int steps = TeamActive
             ? _team.Advance(delta, _tracedSource)
             : _match.Advance(delta, _tracedSource);
@@ -719,6 +752,8 @@ public partial class BattleScene : Node2D
 
     private void RenderBattle(BattleState? state)
     {
+        ConsumeFeedback(state);
+
         FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
         FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
         PlaceFighters(p1, p2, state?.Frame ?? 0);
@@ -739,14 +774,16 @@ public partial class BattleScene : Node2D
         const float originX = 640f;
         const float groundY = 560f;
 
+        // 抖动只是节点偏移（表现），渲染同一权威坐标时会被重新覆盖。
+        var shake = new Vector2(_shakeOffset.X, _shakeOffset.Y);
         if (_fighter1Node is not null)
             _fighter1Node.Position = new Vector2(
                 originX + (float)p1.PositionX.ToDouble(),
-                groundY - (float)p1.PositionY.ToDouble());
+                groundY - (float)p1.PositionY.ToDouble()) + shake;
         if (_fighter2Node is not null)
             _fighter2Node.Position = new Vector2(
                 originX + (float)p2.PositionX.ToDouble(),
-                groundY - (float)p2.PositionY.ToDouble());
+                groundY - (float)p2.PositionY.ToDouble()) + shake;
 
         // 只读投影：状态 → 动画 → 姿态（不写回任何战斗状态）。
         _visual1?.Apply(p1, logicFrame);
@@ -1193,5 +1230,113 @@ public partial class BattleScene
                     SetFor(_teamSelect.CharacterAt(TeamSelectionModel.Player2, _teamSelect.P2Cursor).FighterId));
                 break;
         }
+    }
+}
+
+// ── 打击反馈（阶段 10D，D126）─────────────────────────────────────
+
+public partial class BattleScene
+{
+    /// <summary>消费本帧权威事件并生成至多一次反馈（去重由 <see cref="FeedbackDirector"/> 保证）。</summary>
+    private void ConsumeFeedback(BattleState? state)
+    {
+        if (!_fxEnabled)
+            return;
+
+        if (TeamActive)
+        {
+            foreach (TeamMatchEvent e in _team.LastEvents)
+            {
+                if (!_feedback.TryConsume(e.BoutNumber, e.BoutEvent, out FeedbackCue cue))
+                    continue;
+                ApplyCue(cue, state);
+            }
+        }
+        else
+        {
+            foreach (MatchEvent e in _match.LastEvents)
+            {
+                if (!_feedback.TryConsume(e.RoundNumber, e.RoundEvent, out FeedbackCue cue))
+                    continue;
+                ApplyCue(cue, state);
+            }
+        }
+    }
+
+    private void ApplyCue(FeedbackCue cue, BattleState? state)
+    {
+        (Color color, int size, int shake) = CueStyle(cue.Kind);
+        if (size > 0)
+        {
+            // 固定方向序列（身份 → 角度），保证同一回放产生同样画面。
+            float angle = (cue.Identity % 6) * (Mathf.Pi / 3f);
+            var velocity = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * 1.6f;
+            _fx.Spawn(CuePosition(cue, state), color, size, velocity);
+        }
+
+        _shake.Trigger(shake);
+
+        if (cue.Kind is FeedbackKind.Hit or FeedbackKind.ThrowImpact)
+            TargetVisual(cue.TargetFighterId)?.FlashUntil(CurrentLogicFrame + 5);
+    }
+
+    private FighterVisual? TargetVisual(int fighterId) => fighterId switch
+    {
+        0 => _visual1,
+        1 => _visual2,
+        _ => null,
+    };
+
+    /// <summary>反馈样式表：颜色、尺寸与抖动幅度（0 = 不抖动）。</summary>
+    private static (Color Color, int Size, int Shake) CueStyle(FeedbackKind kind) => kind switch
+    {
+        FeedbackKind.Hit => (Color.FromHtml("#FFE58A"), 26, 3),
+        FeedbackKind.Blocked => (Color.FromHtml("#7FC0FF"), 20, 1),
+        FeedbackKind.ThrowImpact => (Color.FromHtml("#FFB347"), 34, 4),
+        FeedbackKind.ThrowClash => (Color.FromHtml("#FFFFFF"), 30, 3),
+        FeedbackKind.StrikeClash => (Color.FromHtml("#FFFFFF"), 30, 3),
+        FeedbackKind.ProjectileImpact => (Color.FromHtml("#FFD166"), 24, 2),
+        FeedbackKind.ProjectileBlocked => (Color.FromHtml("#8FD3FF"), 20, 1),
+        FeedbackKind.ProjectileClash => (Color.FromHtml("#FFFFFF"), 28, 2),
+        FeedbackKind.Knockout => (Color.FromHtml("#FF3B3B"), 48, 6),
+        FeedbackKind.DoubleKnockout => (Color.FromHtml("#FF3B3B"), 48, 6),
+        FeedbackKind.TimeOver => (Colors.Transparent, 0, 0),
+        _ => (Colors.Transparent, 0, 0),
+    };
+
+    /// <summary>火花位置：相杀/对撞取双方中点，其余取被击者胸口。</summary>
+    private static Vector2 CuePosition(FeedbackCue cue, BattleState? state)
+    {
+        if (state is null)
+            return new Vector2(640f, 480f);
+
+        bool clash = cue.Kind is FeedbackKind.StrikeClash or FeedbackKind.ThrowClash
+            or FeedbackKind.ProjectileClash;
+        if (clash)
+        {
+            Vector2 a = FighterWorld(state.Fighter(0));
+            Vector2 b = FighterWorld(state.Fighter(1));
+            return (a + b) / 2f;
+        }
+
+        int target = cue.TargetFighterId is 0 or 1 ? cue.TargetFighterId : cue.SourceFighterId;
+        if (target is not (0 or 1))
+            return new Vector2(640f, 480f);
+        return FighterWorld(state.Fighter(target));
+    }
+
+    /// <summary>权威坐标 → 屏幕坐标（与角色节点使用同一变换；胸口高度 -60）。</summary>
+    private static Vector2 FighterWorld(FighterState fighter) => new(
+        640f + (float)fighter.PositionX.ToDouble(),
+        560f - (float)fighter.PositionY.ToDouble() - 60f);
+
+    /// <summary>清空瞬时表现（新回合/换人/关闭特效）：不动权威状态，也不清事件去重。</summary>
+    private void ResetFeedbackLayer()
+    {
+        _fx.Clear();
+        _shake.Reset();
+        _shakeOffset = (0, 0);
+        _visual1?.Reset();
+        _visual2?.Reset();
     }
 }

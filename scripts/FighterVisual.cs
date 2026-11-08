@@ -21,6 +21,7 @@ public sealed class FighterVisual
     private readonly FighterVisualClock _clock = new();
 
     private AnimationSet _set;
+    private int _flashUntilFrame = -1;
 
     public FighterVisual(Node2D root, ColorRect body, AnimationSet set)
     {
@@ -48,7 +49,15 @@ public sealed class FighterVisual
     }
 
     /// <summary>重置动画时钟（新回合/新交锋）。</summary>
-    public void Reset() => _clock.Reset();
+    public void Reset()
+    {
+        _clock.Reset();
+        _flashUntilFrame = -1;
+    }
+
+    /// <summary>受击闪白：在指定逻辑帧之前把姿态染成白色（纯表现，不改任何状态）。</summary>
+    public void FlashUntil(int logicFrame) =>
+        _flashUntilFrame = System.Math.Max(_flashUntilFrame, logicFrame);
 
     /// <summary>按权威状态刷新一次画面（只读投影）。</summary>
     public void Apply(FighterState fighter, int logicFrame)
@@ -67,7 +76,9 @@ public sealed class FighterVisual
         _body.Position = new Vector2(
             offsetX - frame.Width / 2f,
             -(frame.OffsetY + frame.Height));
-        _body.Color = Color.FromHtml(frame.Color);
+        _body.Color = logicFrame < _flashUntilFrame
+            ? Colors.White
+            : Color.FromHtml(frame.Color);
         _root.RotationDegrees = facingLeft ? -frame.RotationDegrees : frame.RotationDegrees;
     }
 }

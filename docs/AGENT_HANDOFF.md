@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 978，已跳过: 0，总计: 978`
+期望：`失败: 0，通过: 1004，已跳过: 0，总计: 1004`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,19 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 10D（2026-11-08）打击反馈（D126）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Presentation/CombatFeedback.cs` | **新增**：`FeedbackKind` / `FeedbackCue` / `FeedbackDirector`（映射 + 去重）/ `HitShake` |
+| `scripts/CombatFeedbackLayer.cs` | **新增**：短命几何火花层（渲染帧衰减、QueueFree） |
+| `scripts/FighterVisual.cs` | `FlashUntil(logicFrame)` 受击闪白（叠加在姿态上） |
+| `scripts/BattleScene.cs` | 消费事件生成反馈、抖动偏移、F4 关闭特效、重开时清空去重 |
+| `tests/BattleCore.Tests/FeedbackTests.cs` | **新增 26 项** |
+
+**验收**：1004/1004（Debug）、表现层 0 警告 0 错误、`p10d_hit_18.png` / `p10d_doubleko_fx.png`。
+**StateVersion 13 / CoreVersion 14 不变**。
 
 ### 阶段 10C（2026-11-08）状态驱动动画管线（D125）
 
@@ -1001,8 +1014,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K84 | **双人同帧先看采样掩码，再怀疑输入链路（D124）** | 直接改 `KeyboardInputMap`/`InputBuffer` 会把健康链路改坏，还掩盖真正的配置缺口 | 开 `--inputdiag` 看 `sample: P1=… P2=…` 与 `state: fN …`；本轮真因是 **Rei 无裸 5A**，不是输入缺陷 |
 | K85 | **动画只能读权威状态，绝不能反过来写（D125）** | 用 AnimationPlayer 回调扣血/结束硬直/开判定框，会让掉帧与缺素材改变胜负 | 单向流 `FighterState → AnimationResolver → Pose`；招式帧用 `MoveElapsedFrames`，不用动画时钟 |
 | K86 | **表现配置独立于战斗 JSON（D125）** | fighter schema 已声明未知字段拒绝，往里加动画字段会直接破坏已发布格式 | 放 `data/presentation/*.json`；缺素材允许降级（`CreateFallback`），格式非法必须带路径报错 |
+| K87 | **特效只能由权威事件触发并按身份去重（D126）** | 自己判断「靠得近就是命中」会在相杀/被防御/投技冲突时出现假特效；不去重会每渲染帧重放 | 只用 `FeedbackDirector.TryConsume(scope, event)`；重开/返回选人要 `Reset()`（回合号会重用） |
+| K88 | **抖动用固定序列，别用随机数（D126）** | `Random` 会让同一段回放的截图不可复现，也难写回归测试 | 固定偏移表 + 线性衰减 + 取最大值不叠加；只叠加在角色节点，不写回权威坐标 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10C 验收时 **978/978** 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10D 验收时 **1004/1004** 测试通过，可正常启动运行。
 
 ---
 
