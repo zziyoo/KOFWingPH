@@ -35,13 +35,25 @@ public sealed record BattleState
     /// </summary>
     public int NextProjectileId { get; }
 
+    /// <summary>
+    /// 当前回合剩余逻辑帧（阶段 09B，D107）：<b>权威计时器</b>，只由
+    /// <c>BattleSimulation.Step</c> 在成功推进一个逻辑帧后递减；
+    /// <c>null</c> = 未启用计时（旧单回合 API 的默认路径，逐位兼容阶段 01–08）。
+    /// 终局冻结时原样保留，过渡/暂停/未提交帧都不改变它。
+    /// </summary>
+    public int? RoundTimerRemainingFrames { get; }
+
     /// <param name="round">回合状态；null 表示进行中（旧构造路径语义不变）。</param>
     /// <param name="projectiles">飞行道具集合；null/空 = 场上没有实体。</param>
     /// <param name="nextProjectileId">下一个投掷物 ID（≥ 1，且必须大于集合内所有 ID）。</param>
+    /// <param name="roundTimerRemainingFrames">
+    /// 回合剩余逻辑帧；null = 不启用计时。必须落在 0..<see cref="BattleCoreInfo.MaxRoundTimerFrames"/>。
+    /// </param>
     public BattleState(int frame, IReadOnlyList<FighterState> fighters, int stateVersion,
         RoundState? round = null,
         IReadOnlyList<ProjectileState>? projectiles = null,
-        int nextProjectileId = 1)
+        int nextProjectileId = 1,
+        int? roundTimerRemainingFrames = null)
     {
         if (frame < 0)
             throw new ArgumentOutOfRangeException(nameof(frame), frame, "逻辑帧号不能为负。");
@@ -76,6 +88,14 @@ public sealed record BattleState
         Projectiles = Array.AsReadOnly(projectileCopy);
         NextProjectileId = nextProjectileId;
 
+        if (roundTimerRemainingFrames is int timer
+            && (timer < 0 || timer > BattleCoreInfo.MaxRoundTimerFrames))
+        {
+            throw new ArgumentOutOfRangeException(nameof(roundTimerRemainingFrames), timer,
+                $"回合剩余逻辑帧必须在 0..{BattleCoreInfo.MaxRoundTimerFrames} 内。");
+        }
+        RoundTimerRemainingFrames = roundTimerRemainingFrames;
+
         foreach (FighterState fighter in Fighters)
             fighter.Validate();
     }
@@ -88,11 +108,12 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 12 = 阶段 08D（BattleState 新增 Projectiles 实体集合与 NextProjectileId；
-    /// FighterState 新增 ProjectileSpawnMask。项目尚无序列化快照，无迁移负担，
-    /// 版本号只标记格式边界）。
+    /// 状态格式版本 13 = 阶段 09B（新增权威回合计时器 RoundTimerRemainingFrames；
+    /// 08D 的 12 版新增了 Projectiles 实体集合与 NextProjectileId）。
+    /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界。
+    /// <b>默认不启用计时</b>（null），保持旧单回合 API 逐位兼容。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 12) => new(
+    public static BattleState CreateDefault(int stateVersion = 13) => new(
         frame: 0,
         fighters: new[]
         {

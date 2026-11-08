@@ -228,17 +228,21 @@ public sealed class MatchSession
         if (!State.IsRoundLive || _roundSession is null)
             return;
 
-        // 回合计时：09A 由比赛层按「成功提交的逻辑帧」逐帧递减；09B 起本段改为
-        // 从 BattleState.RoundTimerRemainingFrames 权威字段投影（见 09B 交付）。
-        if (Rules.EnableTimeout)
-            State = State.WithRemainingTime(Math.Max(0, State.RemainingTimeFrames - 1));
-
         BattleState current = _roundSession.CurrentState;
+
+        // 权威时钟投影（09B，D107）：内核 BattleState 每成功提交一个逻辑帧递减 1，
+        // 比赛层只读同步，不再另起一套计时（09A 的比赛层占位记账已移除）。
+        // Step 抛异常时本回调不执行 → 未提交帧不扣时；暂停/过渡同理。
+        if (current.RoundTimerRemainingFrames is int remaining)
+            State = State.WithRemainingTime(remaining);
+
         if (current.Round.IsFinished)
         {
-            RoundEndReason reason = current.Round.IsDoubleKO
-                ? RoundEndReason.DoubleKO
-                : RoundEndReason.Knockout;
+            // 结束原因直接取内核 RoundState（KO / DoubleKO / TimeOver / TimeOverDraw），
+            // 比赛层不重新推断，避免把超时胜利误记成 KO。
+            RoundEndReason reason = current.Round.Reason != RoundEndReason.None
+                ? current.Round.Reason
+                : current.Round.IsDoubleKO ? RoundEndReason.DoubleKO : RoundEndReason.Knockout;
             State = State.RecordRoundResult(current.Round.Outcome, reason);
         }
 
@@ -248,7 +252,9 @@ public sealed class MatchSession
     private static BattleState DefaultInitialState(MatchRules rules)
     {
         BattleState state = BattleState.CreateDefault();
-        // 09A 尚未把时钟下放到 BattleState；09B 起这里会注入 rules.RoundTimerFrames。
-        return state;
+        int? timer = rules.EnableTimeout ? rules.RoundTimerFrames : null;
+        return new BattleState(
+            state.Frame, state.Fighters, state.StateVersion, state.Round,
+            state.Projectiles, state.NextProjectileId, timer);
     }
 }

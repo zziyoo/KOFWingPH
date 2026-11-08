@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-08（阶段 09A：多回合比赛 D104–D106，783 项测试）
+> 最后更新：2026-11-08（阶段 09B：回合计时与 Time Over D107–D109，807 项测试）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 783，已跳过: 0，总计: 783`
+期望：`失败: 0，通过: 807，已跳过: 0，总计: 807`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,22 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 09B（2026-11-08）回合计时与 Time Over（D107–D109）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/State/BattleState.cs` | 新增 `int? RoundTimerRemainingFrames`（默认 null = 旧 API 兼容）+ 构造期范围校验；`CreateDefault` 版本 13 |
+| `core/BattleCore/State/RoundState.cs` | `RoundOutcome.Draw = 4`；新增 `Reason` 与结果-原因自洽校验；`ForOutcome(outcome, reason)` / `Finish(outcome, reason)` 重载；旧单参数签名保留 |
+| `core/BattleCore/Simulation/TimeOverResolver.cs` | **新增**：`checked long` 交叉相乘比例裁决 |
+| `core/BattleCore/Simulation/BattleSimulation.cs` | `Step` 第 7b 阶段递减权威时钟并按比例裁决 Time Over（KO 优先）；终局冻结保留时钟；`CollectEvents` 发 `TimeOver` |
+| `core/BattleCore/Simulation/BattleEvent.cs` | 新增 `TimeOver = 16` |
+| `core/BattleCore/Match/MatchSession.cs` | 初始状态注入 `rules.RoundTimerFrames`；`OnFrameCommitted` 改为只读投影内核时钟，计分原因取 `RoundState.Reason` |
+| `core/BattleCore/BattleCoreInfo.cs` | StateVersion 12 → 13、CoreVersion 13 → 14；`MaxRoundTimerFrames` |
+| `tests/BattleCore.Tests/RoundTimerTests.cs` | **新增 24 项** |
+
+**验收**：Debug/Release 807/807、四构建 0 错误；783 项既有测试零改动。
+**注意**：`StateVersion` 已升到 13 / `CoreVersion` 14（格式边界，项目仍无序列化快照，无迁移负担）。
 
 ### 阶段 09A（2026-11-08）多回合比赛（D104–D106）
 
@@ -867,8 +883,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K64 | **每回合一个 BattleSession，别去重置 Frame（D104）** | 方案二会让 `Frame − 初始帧 == TotalSteps` 与 D89 终局冻结同时失效；还会让不同回合的 EventId 重号 | 新回合必须重建会话 + 全新 InputBuffer；跨回合去重一律用 `MatchEventId`，不要假设裸 EventId 全比赛唯一 |
 | K65 | **计分只有一个入口（D105）** | 终局冻结帧仍会调用提交观察者，若在观察者里无条件加分就会重复计分；DoubleKO 也不能凭空加分 | 只在 `State.IsRoundLive` 且 `Round.IsFinished` 时调用 `RecordRoundResult` 一次；平局只增 `RoundsPlayed` |
 | K66 | **新回合要「重建」而不是「清理」（D106）** | 逐字段重置容易漏掉 ProjectileSpawnMask / 命中确认 / 输入边沿 / NextProjectileId | 直接用 `BattleState.CreateDefault()` 等价初态 + `new InputBuffer()`；保留规则/胜场/回合号/选人 |
+| K67 | **计时器属于 BattleState，不属于比赛层（D107）** | 09A 的比赛层占位记账在 09B 已移除；两套计时会让「暂停/未提交帧」出现分叉 | 只由 `BattleSimulation.Step` 递减；`null` = 旧 API 兼容；比赛层只读投影，不要自己 −1 |
+| K68 | **KO 优先于 Time Over（D108）** | 计时归零就取消同帧合法攻击会破坏 D80 同时性，让最后一帧胜负依赖处理顺序 | 先 `FromFinalHealth`，只有 `!IsFinished` 且计时归零才裁决；比例比较用 `checked long` 交叉相乘，绝不用浮点 |
+| K69 | **结果与结束原因正交（D109）** | 把 Time Over 胜利伪装成 Knockout 事件会破坏 D89 语义；平局借用 DoubleKO 会丢失「时间到」这一事实 | 用 `RoundState.Reason` 区分；`RoundOutcome.Draw` 的 `WinnerFighterId` 为 null，事件代码不要对它取 `.Value` |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 09A 验收时 783/783 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 09B 验收时 807/807 测试通过，可正常启动运行。
 
 ---
 
@@ -1153,8 +1172,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 08 已结项**（08A–08D + 最终补修 D100–D103）；**阶段 09A 已交付**（D104–D106），
-   783 项测试。09B（计时/Time Over）→ 09C（选人/比赛流程）→ 09D（JSON 外置）仍待完成。
+4e. **阶段 08 已结项**（08A–08D + 最终补修 D100–D103）；**阶段 09A/09B 已交付**
+   （D104–D106 / D107–D109），807 项测试。09C（选人/比赛流程）→ 09D（JSON 外置）仍待完成。
    阶段 09 安全入口（按依赖顺序）：① 比赛规则（多回合/计时/选人，建在 `RoundState` 上）；
    ② 招式数据外置 JSON（`MoveDefinition` 已含攻击/取消/投技/投掷物四类数据）；
    ③ 空中防御/拆投等防御扩展；④ AI；⑤ 联机回滚（需先做序列化）。
@@ -1277,9 +1296,12 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 冻结与推挤（D101）：单方冻结由未冻结方承担缺口；双方冻结不动；冻结结束恢复对称分摊；D94 空中资格不变
 - [ ] 相杀事件（D102）：两份结算前快照先于 `ApplyStrikeClash`；首帧相杀仍有 2 条 `AttackActive`，顺序在 `StrikeClash` 之前
 - [ ] 远程停顿（D103）：`ProjectileBlocked` 与 `ProjectileHit` 共用 `ApplyRemoteHitstop`；只冻目标、取 max、N 帧精确
+- [ ] 回合计时（D107–D109）：`BattleState.RoundTimerRemainingFrames` 权威时钟、5940 帧精确递减、
+      Hitstop 帧扣时 / 暂停与未提交帧不扣时、KO 优先于 Time Over、比例用 checked long 交叉相乘、
+      `TimeOver` 只在归零帧一条、`RoundEnded` 恰好一次、`RoundState.Reason` 区分 KO 与超时
 - [ ] 多回合比赛（D104–D106）：每回合独立 BattleSession、跨回合事件身份 `(RoundNumber, EventId)`、
       计分只在 `RecordRoundResult` 一次发生、DoubleKO 不加分、终局禁止再开回合、新回合全新 InputBuffer
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D106）与代码实现一致
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D109）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

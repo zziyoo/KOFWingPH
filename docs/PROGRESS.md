@@ -2010,6 +2010,37 @@ P1/P2 连胜、DoubleKO 不加分、终局不重复加分、5 回合封顶平局
 | `dotnet build NewKOF.csproj`（Debug） | **0 警告 0 错误** |
 | 版本 | **StateVersion 12 / CoreVersion 13 不变**（09A 纯比赛层，内核快照格式未变） |
 
-**已知限制**：09A 的 `RemainingTimeFrames` 由比赛层按已提交帧数逐帧记账，**尚未**接入内核权威时钟与 Time Over 裁决（09B 交付）；当前比赛只能由 KO / DoubleKO 结束，没有超时、没有选人界面、没有 JSON 配置。这些是明确的分阶段边界，不是遗漏。
+**已知限制（09A 当时，09B 已解除计时部分）**：09A 的 `RemainingTimeFrames` 由比赛层按已提交帧数逐帧记账，当时尚未接入内核权威时钟与 Time Over 裁决（09B 已交付并改为只读投影）；09A 的比赛只能由 KO / DoubleKO 结束。
+
+---
+
+## 阶段 09B 成果（回合计时与 Time Over，2026-11-08）—— D107–D109
+
+### 核心规则
+
+1. **权威时钟**：`BattleState.RoundTimerRemainingFrames`（`int?`），由 `BattleSimulation.Step` 每成功提交一个进行中战斗逻辑帧 −1；默认 99 秒 = **5940 帧**。`null` = 旧单回合 API 兼容路径（阶段 01–08 全部 783 项测试零改动通过）。
+2. **时间线**：Hitstop 冻结帧照常扣时；Godot 暂停 / 未提交 Step / 帧积压丢弃预算 / 已结束回合 / 过渡阶段都不扣时。比赛层 `MatchState.RemainingTimeFrames` 改为内核字段的只读投影，09A 的比赛层占位记账已移除，**全程只有一套计时**。
+3. **KO 优先**：计时归零帧先完成全部结算，若本帧已 KO/DoubleKO 则以 KO 为准、不发 `TimeOver`；双方仍存活才按体力比例裁决。超时不产生任何虚假伤害。
+4. **比例裁决**：`P1.Health × P2.MaxHealth` vs `P2.Health × P1.MaxHealth`（`checked long` 交叉相乘），相等 → `TimeOverDraw`。
+5. **结果与原因正交**：`RoundOutcome.Draw = 4`、`RoundState.Reason`（KO / DoubleKO / TimeOver / TimeOverDraw）自洽校验；新增 `TimeOver = 16` 事件只在归零帧发一条，事件顺序 `TimeOver|KO → RoundEnded`，`RoundEnded` 恰好一次。
+
+### 测试与验收
+
+新增 **24 项**（783 → **807**）：`RoundTimerTests` —— 5940 帧精确倒计时、逐帧递减、1 帧边界、
+null 时钟旧行为兼容、非法时钟值、Hitstop 冻结帧扣时、暂停不扣时、未提交 Step 不扣时、
+丢弃预算不多扣、Time Over P1/P2 胜与平局、绝对 HP 不同但比例相同 / 绝对 HP 相同但比例不同、
+`TimeOverResolver` 非法输入、KO 与 Time Over 同帧、DoubleKO 与 Time Over 同帧、
+超时后不再产生伤害或事件、事件顺序与唯一性、`RoundState` KO/TimeOver 区分、
+比赛层新回合计时重置与计分、StepExact/Advance 一致与中间快照重放。
+
+| 项 | 实际结果 |
+|---|---|
+| `dotnet test`（Debug / Release） | **807/807** / **807/807**，0 失败 0 跳过 |
+| 四构建（BattleCore + NewKOF，Debug/Release） | 全部 **0 错误** |
+| 版本 | **StateVersion 12 → 13、CoreVersion 13 → 14** |
+
+**尚未支持**：选人界面与完整比赛流程（09C）、JSON 招式数据外置（09D）、正式 KOF 的 3v3 队伍赛、
+超时后的「判定胜负动画」与回合演出。计时规则第一版明确采用「按成功提交的逻辑帧递减」，
+未实现「Hitstop 期间暂停计时」的另一套时间线（如需改用需另行决策并固定完整时间线）。
 
 ---

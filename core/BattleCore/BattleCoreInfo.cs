@@ -14,11 +14,17 @@ namespace NewKOF.BattleCore;
 /// </summary>
 public static class BattleCoreInfo
 {
-    /// <summary>核心内核版本。规则/数据格式变化时递增（阶段 08D：飞行道具实体 → 13）。</summary>
-    public const int CoreVersion = 13;
+    /// <summary>核心内核版本。规则/数据格式变化时递增（阶段 09B：权威回合计时 → 14）。</summary>
+    public const int CoreVersion = 14;
 
     /// <summary>固定逻辑帧率（Hz）。权威模拟只按逻辑帧推进，与渲染帧率无关。</summary>
     public const int LogicFrameRate = 60;
+
+    /// <summary>
+    /// 回合计时器的最大逻辑帧数（999 秒 × 60Hz）。<see cref="State.BattleState"/> 构造期
+    /// 用它拒绝非法的初始计时值，避免「负数时钟永不归零」或溢出。
+    /// </summary>
+    public const int MaxRoundTimerFrames = 999 * LogicFrameRate;
 
     public const string AssemblyName = "NewKOF.BattleCore";
 }

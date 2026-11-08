@@ -137,7 +137,7 @@ public sealed class BattleSimulation
         if (state.Round.IsFinished)
         {
             var frozen = new BattleState(frameAfter, state.Fighters, state.StateVersion, state.Round,
-                state.Projectiles, state.NextProjectileId);
+                state.Projectiles, state.NextProjectileId, state.RoundTimerRemainingFrames);
             return new BattleStepResult(state.Frame, frameAfter, input, frozen);
         }
 
@@ -452,11 +452,40 @@ public sealed class BattleSimulation
         //    双方同帧归零即 DoubleKO（不存在先手优势）；已结束的回合原样保留。
         RoundState nextRound = RoundState.FromFinalHealth(state.Round, nextFighters[0].Health, nextFighters[1].Health);
 
+        // ── 第 7b 阶段：权威回合计时（09B，D107/D108）——计时器是 BattleState 的一部分，
+        //    只有「成功推进一个进行中战斗逻辑帧」才递减 1（Step 成功即代表该帧已提交）。
+        //    Hitstop 冻结帧仍是一个成功提交的逻辑帧，照常扣时；暂停/未提交/被丢弃的时间预算
+        //    不会走到这里；终局冻结在 Step 开头已返回，因此已结束回合不再扣时。
+        //
+        //    顺序即语义（D108）：本帧的攻击/伤害/防御/投技/飞行道具/KO 已全部结算完成，
+        //    只有回合仍进行中（本帧没有 KO/DoubleKO）且计时从 1 归零，才按剩余体力比例
+        //    裁决 Time Over —— 绝不因为计时归零就取消同帧已经合法成立的攻击。
+        int? timerAfter = state.RoundTimerRemainingFrames;
+        bool timeOverThisFrame = false;
+        if (timerAfter.HasValue)
+        {
+            int decremented = Math.Max(0, timerAfter.Value - 1);
+            timerAfter = decremented;
+
+            if (decremented == 0 && !nextRound.IsFinished)
+            {
+                FighterState p1 = nextFighters[0];
+                FighterState p2 = nextFighters[1];
+                RoundOutcome timeOutcome = TimeOverResolver.Resolve(
+                    p1.Health, p1.MaxHealth, p2.Health, p2.MaxHealth);
+                nextRound = RoundState.ForOutcome(timeOutcome,
+                    timeOutcome == RoundOutcome.Draw
+                        ? RoundEndReason.TimeOverDraw
+                        : RoundEndReason.TimeOver);
+                timeOverThisFrame = true;
+            }
+        }
+
         // ── 第 8 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
         IReadOnlyList<BattleEvent> events = CollectEvents(
             state.Frame, nextFighters, candidates, outcomes, attackActive,
             throwAttempts, throwResolution, strikeClash,
-            projectileStep.Events, state.Round, nextRound);
+            projectileStep.Events, state.Round, nextRound, timeOverThisFrame);
 
         // ── 第 9 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
@@ -475,7 +504,7 @@ public sealed class BattleSimulation
         }
 
         var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion, nextRound,
-            projectileStep.Projectiles, projectileStep.NextProjectileId);
+            projectileStep.Projectiles, projectileStep.NextProjectileId, timerAfter);
 
         return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts, events);
     }
@@ -1564,6 +1593,10 @@ public sealed class BattleSimulation
     /// AttackActive 的招式身份只从这里取，绝不回读结算后的状态。</param>
     /// <param name="previousRound">帧开始的回合状态（判断「本帧刚结束」）。</param>
     /// <param name="nextRound">结算后的回合状态（事件负载的唯一来源）。</param>
+    /// <param name="timeOverThisFrame">
+    /// 本帧是否由计时耗尽完成回合裁决（09B，D109）。true 时在 RoundEnded 之前发一条
+    /// <c>TimeOver</c>；与 KO 互斥（同帧 KO 以 KO 为准，本标志恒 false）。
+    /// </param>
     private static IReadOnlyList<BattleEvent> CollectEvents(
         int frame,
         FighterState[] fighters,
@@ -1575,7 +1608,8 @@ public sealed class BattleSimulation
         bool strikeClash,
         List<ProjectileEvent> projectileEvents,
         RoundState previousRound,
-        RoundState nextRound)
+        RoundState nextRound,
+        bool timeOverThisFrame)
     {
         List<BattleEvent>? events = null;
         int seq = 0;
@@ -1662,13 +1696,23 @@ public sealed class BattleSimulation
             Add(e.Type, e.Source, e.Target, e.MoveId, e.Amount);
         }
 
-        // ⑧ 回合终局（D89）：只在「本帧刚结束」时产生一次——
-        //    单方 KO：Knockout(胜者→败者) + RoundEnded；双 KO：DoubleKnockout(0→1) + RoundEnded。
-        //    RoundEnded.Amount = (int)RoundOutcome，是消费方判断胜负的唯一依据。
+        // ⑧ 回合终局（D89 / 09B D109）：只在「本帧刚结束」时产生一次。
+        //    事件顺序固定：KO/DoubleKO 或 TimeOver（互斥）→ RoundEnded。
+        //    - KO：Knockout(胜者→败者) 或 DoubleKnockout(0→1)，绝不发 TimeOver；
+        //    - Time Over：只发一条 TimeOver，绝不把超时胜利伪装成 Knockout；
+        //    - 两者同帧时 D108 已保证以 KO 为准（timeOverThisFrame = false）。
+        //    RoundEnded.Amount = (int)RoundOutcome，是消费方判断胜负的唯一依据；
+        //    TimeOverDraw 的 Amount = (int)Draw，且 WinnerFighterId = null（不取 .Value）。
         if (!previousRound.IsFinished && nextRound.IsFinished)
         {
-            if (nextRound.IsDoubleKO)
+            if (timeOverThisFrame)
+            {
+                Add(BattleEventType.TimeOver, 0, 1, null, (int)nextRound.Outcome);
+            }
+            else if (nextRound.IsDoubleKO)
+            {
                 Add(BattleEventType.DoubleKnockout, 0, 1, null, 0);
+            }
             else
             {
                 int winner = nextRound.WinnerFighterId!.Value;

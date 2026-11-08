@@ -461,6 +461,17 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 
 > **09A 的计时边界（为 09B 预留）**：`MatchState.RemainingTimeFrames` 在 09A 由比赛层按「成功提交的逻辑帧」逐帧记账（初值 5940）。09B 将权威时钟下放为 `BattleState.RoundTimerRemainingFrames`，由 `BattleSimulation.Step` 在同一权威转换内递减并完成 Time Over 裁决，比赛层改为只读投影——届时**只有一套**权威计时。09A 不改内核，因此 StateVersion 12 / CoreVersion 13 不变。
 
+### 阶段 09B 决策（回合计时与 Time Over，2026-11-08）
+
+**StateVersion 12 → 13**（`BattleState` 新增权威计时字段）；**CoreVersion 13 → 14**。
+旧单回合 API 逐位兼容：计时字段为 `null` 时 `Step` 完全不做计时/超时逻辑，783 项既有测试零改动通过。
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D107** | **权威计时器是 `BattleState.RoundTimerRemainingFrames`（int?），由 `BattleSimulation.Step` 在成功推进一个进行中战斗逻辑帧后递减 1；`null` = 未启用（旧 API 默认）。默认 99 秒 = 5940 帧（99 × `LogicFrameRate`）。Hitstop 冻结帧仍是一个成功提交的逻辑帧，照常扣时；Godot 暂停、`Step` 抛异常（未提交）、帧积压丢弃的时间预算都不产生提交帧，因此不扣时；已结束回合走 D89 终局冻结、过渡阶段由比赛层停止推进，也不扣时。计时器随不可变快照携带，终局冻结原样保留。比赛层 `MatchState.RemainingTimeFrames` 只是它的只读投影，不再另起一套记账。** | 计时若放在 Godot（Timer / `DateTime.Now` / `Stopwatch` / 渲染 delta）就会随帧率与机器漂移，违背 D1/D63。放在 `BattleSimulation.Step` 的同一权威转换内，使「一个成功提交的帧 = 计时 −1」成为不证自明的事实，也让 09B 的「同帧先结算后裁决」可以在同一处完成。09A 的比赛层占位记账在 09B 移除，全程只有一套时钟。每秒变化由 UI 直接读权威字段，不新增逐帧事件。 |
+| **D108** | **计时从 1 归零的那一帧：先完成本帧全部攻击/伤害/防御/投技/飞行道具/KO 结算，再裁决。若本帧已产生 KO/DoubleKO（`RoundState.FromFinalHealth` 已把回合改为 Finished），以 KO/DoubleKO 为准，不发 TimeOver；只有双方仍存活才按<b>剩余体力比例</b>裁决：安全整数交叉相乘 `P1.Health × P2.MaxHealth` vs `P2.Health × P1.MaxHealth`（`checked long`，无浮点、无 NaN、无文化区域差异），大者胜，完全相等 → `RoundOutcome.Draw`（TimeOverDraw）。超时裁决不改动任何体力，不产生虚假实扣伤害。** | 「计时器先归零就取消同帧合法攻击」会让最后一帧的胜负依赖处理顺序，破坏 D80 的同时性。比例比较必须用交叉相乘而非绝对 HP：P1 500/1000 (50%) 应胜过 P2 600/1500 (40%)，只看绝对值会判反。`long` 乘积最大约 2^62 < long.MaxValue，`checked` 兜底显式失败而非静默回绕。 |
+| **D109** | **`RoundOutcome` 扩展 `Draw = 4`（旧值 0..3 原义不变），`RoundState` 新增 `Reason`（`RoundEndReason`：None / Knockout / DoubleKO / TimeOver / TimeOverDraw）并与 Outcome 做自洽校验（KO 胜利 ↔ Knockout 或 TimeOver；DoubleKO ↔ DoubleKO；Draw ↔ TimeOverDraw）。新增事件 `TimeOver = 16`，只在超时裁决帧发<b>一条</b>，顺序：KO/DoubleKO 或 TimeOver（互斥）→ `RoundEnded`（恰好一次）。Time Over 胜利绝不伪装成 `Knockout` 事件；`RoundEnded.Amount` 仍是 `(int)RoundOutcome`。`ForOutcome(outcome)` / `Finish(outcome)` 旧单参数签名保留、默认推断为 KO。** | 结果（谁赢）与结束原因（为什么）正交，才能在「不改写 D89 KO/DoubleKO 语义」的前提下表达 Time Over 胜利与平局；同时让比赛层能辨识回合胜者而不用解析事件文本。把原因放进 `RoundState` 而不是事件流，是因为它属于权威状态、必须随快照重放一致。事件只在归零帧发一条，避免每帧事件压力。 |
+
 ### 离线原型限定（重要）
 
 **当前丢帧策略与帧同步保证只适用于当前离线原型。**

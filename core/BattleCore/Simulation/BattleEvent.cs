@@ -87,6 +87,15 @@ public enum BattleEventType
     /// Source = 较小 ID 的发射者，Target = 另一名发射者，MoveId = null，Amount = 0。每帧可多次。
     /// </summary>
     ProjectileClash = 15,
+
+    /// <summary>
+    /// 回合计时耗尽并由剩余体力比例裁决（阶段 09B，D109）：Source = 0 / Target = 1、
+    /// MoveId = null、Amount = (int)<see cref="State.RoundOutcome"/>。
+    /// <b>只在计时归零且本帧没有 KO/DoubleKO 的那一帧发一条</b>（不是每个计时帧都发）；
+    /// 顺序在 <see cref="Knockout"/>/<see cref="DoubleKnockout"/> 之后（二者互斥）、
+    /// <see cref="RoundEnded"/> 之前。KO 与 Time Over 同帧时以 KO 为准，不发本事件。
+    /// </summary>
+    TimeOver = 16,
 }
 
 /// <summary>
