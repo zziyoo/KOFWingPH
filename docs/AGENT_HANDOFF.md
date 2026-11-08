@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-08（阶段 08 最终专项补修：D100–D103——阶段 08 最终结项，763 项测试）
+> 最后更新：2026-11-08（阶段 09A：多回合比赛 D104–D106，783 项测试）
 
 ---
 
@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 763，已跳过: 0，总计: 763`
+期望：`失败: 0，通过: 783，已跳过: 0，总计: 783`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,22 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 09A（2026-11-08）多回合比赛（D104–D106）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Match/MatchRules.cs` | **新增**：比赛规则（2 胜 / 5 回合 / 99 秒 / 超时开关）+ 构造期校验 |
+| `core/BattleCore/Match/MatchState.cs` | **新增**：不可变比赛状态、四阶段、计分唯一入口、`Validate` 全部不变式 |
+| `core/BattleCore/Match/MatchEvent.cs` | **新增**：`MatchEvent` / `MatchEventId` 组合身份 `(RoundNumber, EventId)` |
+| `core/BattleCore/Match/MatchSession.cs` | **新增**：每回合独立 `BattleSession` + `InputBuffer` + 初始状态；开赛/下一回合/重开/返回选人/逐帧提交回调 |
+| `core/BattleCore/State/RoundEndReason.cs` | **新增**：结束原因枚举（KO / DoubleKO / TimeOver / TimeOverDraw），09B 接入内核 |
+| `tests/BattleCore.Tests/MatchTests.cs` | **新增 20 项** |
+
+**方案选择**：方案一（多 BattleSession），**方案二被否决**（会破坏帧同步契约与 D89）。
+**跨帧身份**：裸 `EventId` 只在单回合内唯一，跨回合用 `(RoundNumber, EventId)`。
+**验收**：783/783；Godot 表现层构建 0/0；StateVersion 12 / CoreVersion 13 不变。
+**边界**：09A 计时尚未接入内核时钟与 Time Over（09B），暂只能由 KO/DoubleKO 结束比赛。
 
 ### 阶段 08 最终专项补修（2026-11-08）跨系统边界（D100–D103）—— 阶段 08 最终结项
 
@@ -848,8 +864,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K61 | **冻结资格要传给 D73 求解器（D101）** | 冻结分支跳过了运动，但旧 `ApplySeparation` 仍把缺口对称分摊，冻结角色会滑动 | 新增「本帧冻结」信息时同步传给求解器；不要用「事后恢复坐标」绕过（会留下非法的另一方位置） |
 | K62 | **结算前快照必须早于所有状态改写（D102）** | `ApplyStrikeClash` 把 Active 改成 Recovery 后再采集，首个生效帧的两条 `AttackActive` 全丢 | 任何新增的「会改状态」阶段都排在 `CollectAttackActive` / `CollectThrowAttempts` 之后；事件负载只读快照 |
 | K63 | **命中/防御停顿共用一个入口（D103）** | 防御分支提前 `return`，跳过了命中分支末尾才写的 Hitstop | 新增「防御派生」分支时统一调用 `ApplyRemoteHitstop`；远程停顿只给目标，不要冻结发射者 |
+| K64 | **每回合一个 BattleSession，别去重置 Frame（D104）** | 方案二会让 `Frame − 初始帧 == TotalSteps` 与 D89 终局冻结同时失效；还会让不同回合的 EventId 重号 | 新回合必须重建会话 + 全新 InputBuffer；跨回合去重一律用 `MatchEventId`，不要假设裸 EventId 全比赛唯一 |
+| K65 | **计分只有一个入口（D105）** | 终局冻结帧仍会调用提交观察者，若在观察者里无条件加分就会重复计分；DoubleKO 也不能凭空加分 | 只在 `State.IsRoundLive` 且 `Round.IsFinished` 时调用 `RecordRoundResult` 一次；平局只增 `RoundsPlayed` |
+| K66 | **新回合要「重建」而不是「清理」（D106）** | 逐字段重置容易漏掉 ProjectileSpawnMask / 命中确认 / 输入边沿 / NextProjectileId | 直接用 `BattleState.CreateDefault()` 等价初态 + `new InputBuffer()`；保留规则/胜场/回合号/选人 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 08 最终补修验收时 763/763 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 09A 验收时 783/783 测试通过，可正常启动运行。
 
 ---
 
@@ -1134,7 +1153,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 08 已结项**（08A D96 / 08B D97 / 08C D98 / 08D D99 / 最终补修 D100–D103），763 项测试。
+4e. **阶段 08 已结项**（08A–08D + 最终补修 D100–D103）；**阶段 09A 已交付**（D104–D106），
+   783 项测试。09B（计时/Time Over）→ 09C（选人/比赛流程）→ 09D（JSON 外置）仍待完成。
    阶段 09 安全入口（按依赖顺序）：① 比赛规则（多回合/计时/选人，建在 `RoundState` 上）；
    ② 招式数据外置 JSON（`MoveDefinition` 已含攻击/取消/投技/投掷物四类数据）；
    ③ 空中防御/拆投等防御扩展；④ AI；⑤ 联机回滚（需先做序列化）。
@@ -1257,7 +1277,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - [ ] 冻结与推挤（D101）：单方冻结由未冻结方承担缺口；双方冻结不动；冻结结束恢复对称分摊；D94 空中资格不变
 - [ ] 相杀事件（D102）：两份结算前快照先于 `ApplyStrikeClash`；首帧相杀仍有 2 条 `AttackActive`，顺序在 `StrikeClash` 之前
 - [ ] 远程停顿（D103）：`ProjectileBlocked` 与 `ProjectileHit` 共用 `ApplyRemoteHitstop`；只冻目标、取 max、N 帧精确
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D103）与代码实现一致
+- [ ] 多回合比赛（D104–D106）：每回合独立 BattleSession、跨回合事件身份 `(RoundNumber, EventId)`、
+      计分只在 `RecordRoundResult` 一次发生、DoubleKO 不加分、终局禁止再开回合、新回合全新 InputBuffer
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D106）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

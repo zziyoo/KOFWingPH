@@ -1986,3 +1986,30 @@ BattleState 拒绝重复 ID 与非法分配器、定义与招式的构造期校�
 
 **每完成一个子任务，立即更新本文件与 `AGENT_HANDOFF.md`。**
 
+## 阶段 09A 成果（多回合比赛，2026-11-08）—— D104–D106
+
+### 核心规则
+
+1. **方案比较与选择**：采用**方案一**（`MatchSession` 管理多个 `BattleSession`），每回合独立会话、Frame 与 `Scheduler.TotalSteps` 都从 0 开始；方案二（单一连续会话 + 权威回合重置）会同时触碰帧同步契约、D89 终局冻结与输入提交顺序，破坏面最大，故不采用。内核 `BattleSimulation` / `BattleSession` / `BattleState` / `FixedStepScheduler` **零改动**。
+2. **跨回合事件身份**：`MatchEvent` / `MatchEventId` 提供 `(RoundNumber, EventId)` 组合键；明确记录「裸 EventId 只在单回合内唯一、跨回合会重复」，并有专项测试实测重复存在且组合键全比赛唯一。
+3. **`MatchRules`**：默认先胜 2 回合 / 最多 5 回合 / 每回合 99 秒（5940 逻辑帧）/ 启用超时；构造期校验 RoundsToWin ≥ 1、MaxRounds ≥ RoundsToWin 且 ≤ 15、计时秒数 1..999。
+4. **`MatchState`**：不可变比赛级快照，含阶段（NotStarted / RoundInProgress / BetweenRounds / MatchFinished）、回合序号、双方胜场、已结束回合数、当前回合结果与结束原因、比赛结果、剩余时间、双方选人 ID、`Validate` 完整不变式。
+5. **计分**：`RecordRoundResult` 是唯一入口；P1Win/P2Win 各 +1，DoubleKO / 平局不加分但计入已结束回合数；先到 RoundsToWin 立即终局，达 MaxRounds 按胜场比较、相同为 MatchDraw；终局后拒绝新回合、拒绝重复计分。
+6. **新回合**：重建 `BattleSession` + `BattleState.CreateDefault()` 等价初态 + 全新 `InputBuffer`；保留规则/胜场/回合序号/选人。过渡与终局阶段不推进任何战斗逻辑帧。
+
+### 测试与验收
+
+新增 **20 项**（763 → **783**）：`MatchTests` —— 默认规则与非法配置、MatchState 状态转换与不变式、
+P1/P2 连胜、DoubleKO 不加分、终局不重复加分、5 回合封顶平局、胜场不同时的封顶裁决、
+决胜回合、新回合重置角色/飞行道具/输入边沿/命中去重身份、跨回合帧同步、比赛级事件身份、
+中间快照重放、重开比赛、返回选人。
+
+| 项 | 结果 |
+|---|---|
+| `dotnet test`（Debug） | **783/783 通过**（既有 763 项零改动） |
+| `dotnet build NewKOF.csproj`（Debug） | **0 警告 0 错误** |
+| 版本 | **StateVersion 12 / CoreVersion 13 不变**（09A 纯比赛层，内核快照格式未变） |
+
+**已知限制**：09A 的 `RemainingTimeFrames` 由比赛层按已提交帧数逐帧记账，**尚未**接入内核权威时钟与 Time Over 裁决（09B 交付）；当前比赛只能由 KO / DoubleKO 结束，没有超时、没有选人界面、没有 JSON 配置。这些是明确的分阶段边界，不是遗漏。
+
+---

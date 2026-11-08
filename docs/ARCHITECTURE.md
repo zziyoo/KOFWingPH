@@ -451,6 +451,16 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 | **D102** | **结算前事件快照必须早于任何状态改写：`strikeClash` 仍用结算前状态计算 → 先采集 `AttackActiveSnapshot[]` 与 `ThrowAttempt[]` → 再执行 `ApplyStrikeClash` → 其余结算。事件组装只读快照，绝不回读改写后的状态。** | `ApplyStrikeClash` 会把双方从 `Active` 直接改成 `Recovery`，而 `CollectAttackActive` 只识别 `Active`；首个 Active 帧相杀时两条 `AttackActive` 全部丢失（实测事件集合只剩 `MoveStarted` ×2 + `StrikeClash`，AttackActive 期望 2 实际 0）。不改 D98 相杀资格、D80 互中语义、相杀后进 Recovery 的规则、EventId 公式与 MoveStarted 帧语义；同一实例仍只发一次 AttackActive，冻结帧仍跳过（D96）。 |
 | **D103** | **飞行道具的命中停顿与成功防御停顿共用唯一入口 `ApplyRemoteHitstop(fighters, target, frames)`：只作用于被命中/成功防御的目标，不自动冻结远处发射者（D99 远程语义）；`frames = 0` 不停顿，已有更长停顿用 `Math.Max` 保留，N 帧精确冻结 N 个后续逻辑帧、第 N+1 帧恢复 Blockstun/硬直倒计时。** | 防御分支在写完 `ProjectileBlocked` 事件后提前 `return`，跳过了命中分支末尾才写入的 Hitstop（实测 `HitstopRemainingFrames` 期望 3 实际 0；Blockstun 恢复帧数期望 11 实际 8，提前 3 帧）。把「向目标应用远程停顿」提成私有方法让两个分支共用，避免再次分叉。 |
 
+### 阶段 09A 决策（多回合比赛，2026-11-08）
+
+| # | 决策 | 理由 |
+|---|---|---|
+| **D104** | **采用「方案一：比赛级 `MatchSession` 管理多个 `BattleSession`」。每回合拥有独立的 `BattleSession` / `InputBuffer` / `BattleState`，Frame 从 0 开始、`Scheduler.TotalSteps` 也从 0 开始；回合结束后由比赛层读取内核 `RoundState` 做一次计分，下一回合重建会话。<br>跨回合事件身份 = `(RoundNumber, EventId)`（`MatchEventId`）；<b>裸 `EventId = Frame × 16 + seq` 只在单回合内唯一</b>，不同回合会重复，绝不宣称全比赛唯一。 | 方案二（单一连续 BattleSession + 权威回合重置）需要同时改动帧同步契约（`Frame − 初始帧 == TotalSteps`）、D89 终局冻结与 `BattleSession` 的输入提交顺序，风险最大。方案一让 `BattleSimulation.Step()` / `BattleSession` / `BattleState` / `FixedStepScheduler` <b>一行都不用改</b>，且天然隔离跨回合输入边沿、攻击实例与飞行道具。代价（EventId 重号）由比赛级包装层显式承担，而不是悄悄忽略。 |
+| **D105** | **`MatchRules`（RoundsToWin / MaxRounds / RoundTimeSeconds / EnableTimeout，构造期校验）与不可变 `MatchState`（Phase / RoundNumber / RoundsPlayed / P1Wins / P2Wins / 当前回合结果与结束原因 / MatchOutcome / RemainingTimeFrames / 双方选人 ID）是比赛级唯一权威。计分只在 `RecordRoundResult` 一处发生：P1Win → P1 +1、P2Win → P2 +1、DoubleKO 与平局都不加分但计入 `RoundsPlayed`；先到 RoundsToWin 立即 MatchFinished，达到 MaxRounds 按累计胜场比较（相同 → MatchDraw）。`Validate` 固定所有不变式（枚举合法、胜场非负且不超过已结束回合数、双方胜场和 ≤ 已结束回合数、MatchFinished ⇔ Outcome ≠ None、终局禁止再开回合）。 | 胜负不能出现第二套裁决：内核 `RoundState` 只回答「这一回合谁赢」，比赛层只做「一次计分 + 比赛终局」，Godot 只读显示。把计分收进一个纯函数入口，可杜绝「终局冻结帧被重复计分」「DoubleKO 凭空加分」；`RoundsPlayed` 与胜场和的约束让平局不会制造不存在的胜场。 |
+| **D106** | **新回合初始化 = 重建会话与初始 `BattleState`，不是重建整场比赛。重置：体力 / 位置 / 朝向 / 逻辑状态 / 阶段计数 / 硬直 / Hitstop / 连段 / 命中确认 / `ProjectileSpawnMask` / 飞行道具列表 / `NextProjectileId` / 输入缓冲与方向历史 / 旧回合事件显示 / 计时器。保留：规则、累计胜场、已结束回合数、选人身份、当前回合序号。`MatchFinished` 明确拒绝 `StartNextRound`。** | 直接复用 `BattleState.CreateDefault()` 这一既有干净初态，比逐字段「清理」更可靠；回合切换时新建 `InputBuffer` 保证旧按住状态不泄漏。`RoundNumber = RoundsPlayed + 1`（进行中）这一不变式让「比分清零」类错误在 `Validate` 阶段即暴露。 |
+
+> **09A 的计时边界（为 09B 预留）**：`MatchState.RemainingTimeFrames` 在 09A 由比赛层按「成功提交的逻辑帧」逐帧记账（初值 5940）。09B 将权威时钟下放为 `BattleState.RoundTimerRemainingFrames`，由 `BattleSimulation.Step` 在同一权威转换内递减并完成 Time Over 裁决，比赛层改为只读投影——届时**只有一套**权威计时。09A 不改内核，因此 StateVersion 12 / CoreVersion 13 不变。
+
 ### 离线原型限定（重要）
 
 **当前丢帧策略与帧同步保证只适用于当前离线原型。**
