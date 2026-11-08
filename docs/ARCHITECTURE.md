@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — NewKOF 架构说明
 
-> 最后更新：阶段 06C（2026-11-07，含 D81–D83：攻击实例去重 / 确定性事件流 / 提交后发布）
+> 最后更新：2026-11-08（阶段 11，D129–D139；Debug/Release 各 1078 项通过，StateVersion 15 / CoreVersion 16）
 > 本文描述**已确定**的架构与**未决定**的问题。修改代码前请先读本文件。
 
 ---
@@ -593,3 +593,17 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - D138：ThrowTech=17，与 ThrowClash 区分，源为拆投方、目标为原投技者，携带 MoveId、ThrowId、帧和唯一 EventId。成功双方回地面，向外各分离8单位且受墙角钳制，清空动作、生成掩码、连段与倒地计划；青色火花。失败沿用 D97 伤害/倒地/命中确认/停顿路径。
 - StateVersion=15（PendingThrow），CoreVersion=16；没有跨进程快照序列化与迁移能力。Debug/Release 全量各1072项通过、无跳过；核心与宿主 Debug/Release 构建通过。
 - 图形运行已实测 Kai vs Kai：shots/p11_airguard.png 中 P2 AirBlockstun、双方1000HP；shots/p11_throwtech.png 中 ThrowTech P2→P1、双方满血、分离至±38。完整11D对局与全部图形场景尚未验收，不宣称阶段11正式完成。
+
+## 阶段 11D 集成验收记录（D139）
+- Git：11A `29a46e8`，11B `6b0adaf`，11C `38d4baf`，均已独立推送。11D 追加了空中按后姿态解析、抓取提示、实际墙角及旧 JSON 配置验证。
+- 最终测试：Debug **1078/1078**，Release **1078/1078**，均失败0/跳过0。原1031项测试全部保留，新增47项。随合法状态增加，将未定义状态用例从12改为13；D97即时投技夹具显式使用不可拆投配置；JSON投技用例增加待决不扣血断言，原伤害/倒地/事件断言保留。
+- 四构建：BattleCore Debug/Release、NewKOF Debug/Release 全部成功，0警告0错误。测试构建仍有原有 CS8600 / xUnit2029 两条告警。
+- Godot mono 4.7.2 无头导入成功；真实 Vulkan / RTX 3060 图形运行截图逐张检查：`shots/p11_airguard.png`、`p11_landed.png`、`p11_groundguard.png`、`p11_pending.png`、`p11_throwtech.png`、`p11_doubleko.png`、`p11_duel_win.png`、`p11_team_airguard.png`、`p11_team_tech.png`、`p11_team_win.png`、`p11_team_draw.png`。
+- 图形实测：Kai vs Kai 空防满血、Hitstop、落地回Standing；地面防御；抓取待决提示；拆投青色火花和确定性分离；窗口结束投技KO；下一回合；MATCH WIN。队伍赛首名空防与拆投、逐交锋换人、投技KO后TEAM WIN、同帧互中最终TEAM DRAW。快速终局只用既有 `--hp=30` 调试参数，正式招式数值未改。
+- 调度：30/60/144fps 的10000帧拆投测试与StepExact结果一致；空防调度/中间快照、待决抓取快照、D80/D89/D97/D117/D127/D128与其余旧专项均包含在全量回归中。图形一次启动出现过1帧积压丢弃告警（现有宿主5步预算），不将渲染帧当作权威帧验收。
+- 阶段12前置：AI只能输出权威FrameInput；需理解AirBlockstun、三帧PendingThrow窗口、输入边沿与Hitstop，不可根据动画结束控制规则。阶段12未开始。
+
+- 结算边界补修：T+1弹丸命中取消未完成抓取；T+2先结算投技再处理弹丸，保留既有优先级。新增失败复现发现倒地转地面受击后的旧起身计划残留，现于全部结算后统一归一化清理。PendingThrow构造还校验双方地面状态与抓取实例一致。
+
+### 阶段 11 最终交付状态
+11A/11B/11C 已实现并分别提交推送；11D完成本节所列最终回归与真实图形验收。以上1078项为最终基线，覆盖旧1031项，新增47项。独立代码复核未发现尚待处理的正确性问题；投技/弹丸同帧非法落地计划已由失败复现驱动修复并通过全量回归。未发现重大回归。此前“11D尚未验收”等段落为分阶段历史记录，以本节最终记录为准。阶段12未启动。

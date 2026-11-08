@@ -482,8 +482,8 @@ public sealed class BattleSimulation
         // 不是角色本身。命中结算/投技结算/相杀会改写状态，必须在全部结算完成后统一核账：
         // 离开招式或换到新实例就清零，同一实例 Active → Recovery 则原样保留。
         for (int i = 0; i < nextFighters.Length; i++)
-            nextFighters[i] = NormalizeSpawnMask(
-                nextFighters[i], state.Fighters[i].MoveStartedFrame);
+            nextFighters[i] = NormalizeLandingPlan(NormalizeSpawnMask(
+                nextFighters[i], state.Fighters[i].MoveStartedFrame));
 
         // 连段收尾（D90）：恢复自由行动的角色清空旧记录（命中帧本身不会到这里——命中后必为受击状态）。
         UpdateCombos(nextFighters);
@@ -1514,7 +1514,7 @@ public sealed class BattleSimulation
             return null;
 
         // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
-        // 空中不可防御（D93）：Airborne / AirHitstun 一率不成立。
+        // D131：正常 Airborne 可防 High/Mid，AirHitstun 与动作状态没有防御资格。
         bool guarding = CanGuard(defenderState.LogicState, backHeld, attack.Height);
 
         // 击退/击飞方向（D92/D93）：按<b>命中时双方的权威相对位置</b>决定「远离攻击者」；

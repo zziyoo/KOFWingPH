@@ -23,7 +23,7 @@ public class ThrowTests
     private const string Grab = "Grab";
 
     /// <summary>双方同配置：5A（Startup 2，与投技同帧生效）与 5D 投技（Startup 2）。</summary>
-    private static BattleSimulation Sim(int throwHitstop = 0, int range = 70, int damage = 60, bool techable = false)
+    private static BattleSimulation Sim(int throwHitstop = 0, int range = 70, int damage = 60, bool techable = false, bool withProjectile = false)
     {
         MovementDefinition movement = MovementDefinition.CreateDefault();
 
@@ -45,7 +45,10 @@ public class ThrowTests
                             FixedPoint.FromInt(45), FixedPoint.FromInt(60),
                             FixedPoint.FromInt(30), FixedPoint.FromInt(30),
                             0, 0, AttackHeight.Mid, damage: 10, hitstunFrames: 20, blockstunFrames: 10),
-                    }),
+                    }, projectiles: withProjectile ? new[] {
+                        new ProjectileDefinition("Bullet", new AttackDefinition(0, 60, 10, 10,
+                            damage: 10, hitstunFrames: 5, blockstunFrames: 5), speedX: 5, lifetimeFrames: 200)
+                    } : null),
                 new MoveDefinition(Grab, "5D", 2, 2, 8,
                     throws: new[]
                     {
@@ -90,6 +93,50 @@ public class ThrowTests
     // ─────────────────────────────────────────────────────────────
 
     [Theory]
+    [InlineData(3, 990, false)]
+    [InlineData(4, 930, true)]
+    public void ProjectileInterrupt_HasExplicitFinalFramePrecedence(int hitFrame, int health, bool throwHits)
+    {
+        var sim = Sim(techable: true, withProjectile: true);
+        var state = Duel();
+        (state, _) = Throw(sim, state);
+        while (state.Frame < hitFrame) state = sim.Step(state, FrameInput.Empty(state.Frame)).State;
+        var projectile = new ProjectileState(1,0,"Bullet","Jab",state.Fighter(1).PositionX,60,0,0,100);
+        state = new BattleState(state.Frame,state.Fighters,state.StateVersion,state.Round,new[]{projectile},2,
+            pendingThrow: state.PendingThrow);
+        var result = sim.Step(state,FrameInput.Empty(state.Frame));
+        Assert.Contains(result.Events,e=>e.Type==BattleEventType.ProjectileHit);
+        Assert.Equal(throwHits,result.Events.Any(e=>e.Type==BattleEventType.ThrowHit));
+        Assert.Equal(health,result.State.Fighter(1).Health);
+        Assert.Null(result.State.PendingThrow);
+    }
+
+    [Fact]
+    public void PendingThrowSnapshot_RejectsMismatchedInstance()
+    {
+        var sim = Sim(techable: true);
+        var (state, _) = Throw(sim,Duel());
+        var fighters = state.Fighters.ToArray();
+        fighters[0] = fighters[0] with { MoveStartedFrame = 1 };
+        Assert.Throws<ArgumentException>(() => new BattleState(state.Frame,fighters,state.StateVersion,
+            pendingThrow: state.PendingThrow));
+    }
+
+    [Fact]
+    public void PreheldChord_RealPendingThrowCannotAutoTech()
+    {
+        var sim = Sim(techable: true);
+        var state = Duel();
+        const InputBits chord = InputBits.LightPunch | InputBits.LightKick;
+        for (int f = 0; f < 30; f++) state = sim.Step(state, F(f, InputBits.None, chord)).State;
+        state = sim.Step(state, F(30, InputBits.HeavyKick, chord)).State;
+        for (int f = 31; f <= 34; f++) state = sim.Step(state, F(f, InputBits.None, chord)).State;
+        Assert.Equal(940, state.Fighter(1).Health);
+        Assert.Null(state.PendingThrow);
+        Assert.Equal(FighterLogicState.Knockdown, state.Fighter(1).LogicState);
+    }
+
+    [Theory]
     [InlineData(30)]
     [InlineData(60)]
     [InlineData(144)]
@@ -112,8 +159,8 @@ public class ThrowTests
     [Theory]
     [InlineData(0, -60, 0)]
     [InlineData(1, -60, 0)]
-    [InlineData(0, 400, 460)]
-    [InlineData(1, -460, -400)]
+    [InlineData(0, 580, 640)]
+    [InlineData(1, -640, -580)]
     public void Tech_SeparatesLegallyAndIdentifiesOriginalThrow(int owner, int left, int right)
     {
         var sim = Sim(techable: true);
@@ -132,7 +179,7 @@ public class ThrowTests
         Assert.Equal("Throw", tech.ThrowId);
         Assert.Equal(4, tech.Frame);
         Assert.True(state.Fighter(1).PositionX - state.Fighter(0).PositionX >= FixedPoint.FromInt(60));
-        Assert.All(state.Fighters, fighter => { fighter.Validate(); Assert.Equal(1000, fighter.Health); Assert.Equal(0, fighter.ProjectileSpawnMask); });
+        Assert.All(state.Fighters, fighter => { fighter.Validate(); Assert.InRange(fighter.PositionX.ToDouble(), -640, 640); Assert.Equal(1000, fighter.Health); Assert.Equal(0, fighter.ProjectileSpawnMask); });
     }
 
     [Theory]

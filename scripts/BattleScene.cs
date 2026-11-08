@@ -884,6 +884,7 @@ public partial class BattleScene
         text.Append($"P1 State: {DescribeState(p1)}   P2 State: {DescribeState(p2)}\n");
         text.Append($"P1 Move: {DescribeMove(p1)}   P2 Move: {DescribeMove(p2)}\n");
         text.Append($"Combo: P1 {p1.Combo} | P2 {p2.Combo}\n");
+        if (state?.PendingThrow is not null) text.Append("GRAB — LP+LK to escape\n");
         text.Append($"Projectiles: {DescribeProjectiles(state)}\n");
         text.Append($"Event: {DescribeLastMatchEvent(_match.LastEvents)}\n");
         text.Append(ControlsHint(m.Phase));
@@ -921,6 +922,7 @@ public partial class BattleScene
         text.Append($"P1 State: {DescribeState(p1)}   P2 State: {DescribeState(p2)}\n");
         text.Append($"P1 Move: {DescribeMove(p1)}   P2 Move: {DescribeMove(p2)}\n");
         text.Append($"Combo: P1 {p1.Combo} | P2 {p2.Combo}\n");
+        if (state?.PendingThrow is not null) text.Append("GRAB — LP+LK to escape\n");
         text.Append($"Projectiles: {DescribeProjectiles(state)}\n");
         text.Append($"Event: {DescribeLastTeamEvent(_team.LastEvents)}\n");
         text.Append(ControlsHint(m.Phase));

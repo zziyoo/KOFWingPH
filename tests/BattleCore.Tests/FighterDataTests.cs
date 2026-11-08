@@ -206,6 +206,21 @@ public class FighterDataTests
         Assert.True(FighterStateMachine.IsInCancelWindow(fighter, catalog.Get("Kai").Definition));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ThrowTech_OptionalJsonFlagIsExplicitAndTyped(bool techable)
+    {
+        JsonNode root = JsonNode.Parse(Json("Kai"))!;
+        var move = root["moves"]!.AsArray().Single(m => m!["moveId"]!.GetValue<string>() == "StandingThrow")!;
+        var definition = move["throws"]![0]!;
+        Assert.True(FighterDataLoader.Load(root.ToJsonString()).Moves.Single(m => m.MoveId == "StandingThrow").Throws[0].Techable);
+        definition["techable"] = techable;
+        Assert.Equal(techable, FighterDataLoader.Load(root.ToJsonString()).Moves.Single(m => m.MoveId == "StandingThrow").Throws[0].Techable);
+        definition["techable"] = "false";
+        Assert.Throws<FighterDataException>(() => FighterDataLoader.Load(root.ToJsonString()));
+    }
+
     [Fact]
     public void LoadedDefinition_Throw_UsesJsonDefinition()
     {

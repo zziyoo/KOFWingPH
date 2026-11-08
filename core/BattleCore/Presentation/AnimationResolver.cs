@@ -1,4 +1,5 @@
 using NewKOF.BattleCore.Combat;
+using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.State;
 
@@ -144,6 +145,12 @@ public static class AnimationResolver
                 _ => move.Active,
             };
         }
+
+        if (fighter.LogicState == FighterLogicState.Airborne &&
+            fighter.RecognitionState.Directions.Count > 0 &&
+            fighter.RecognitionState.Directions[^1].Direction is CommandDirection.Back or CommandDirection.UpBack or CommandDirection.DownBack &&
+            set.FindClip("air_guard") is not null)
+            return "air_guard";
 
         // ② 站立 + 有水平速度 = 行走（贴地把 PositionY 作为判据，空中不算）。
         if (fighter.LogicState == FighterLogicState.Standing

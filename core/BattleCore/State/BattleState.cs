@@ -1,3 +1,4 @@
+using NewKOF.BattleCore.Combat;
 namespace NewKOF.BattleCore.State;
 
 /// <summary>
@@ -105,6 +106,13 @@ public sealed record BattleState
 
         foreach (FighterState fighter in Fighters)
             fighter.Validate();
+        if (PendingThrow is { } grab &&
+            (!Fighters[grab.Thrower].IsInMove ||
+             Fighters[grab.Thrower].MoveStartedFrame != grab.AttackStartFrame ||
+             Fighters[grab.Thrower].MoveId != grab.MoveId ||
+             Fighters[grab.Target].LastThrowStartFrame != grab.AttackStartFrame ||
+             Fighters.Any(f => f.PositionY != Numerics.FixedPoint.Zero || f.LogicState.IsAirborneLike())))
+            throw new ArgumentException("Pending throw does not match the locked ground fighters.", nameof(pendingThrow));
     }
 
     /// <summary>按索引取角色（0 = P1，1 = P2）。</summary>
@@ -115,7 +123,8 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 13 = 阶段 09B（新增权威回合计时器 RoundTimerRemainingFrames；
+    /// 状态格式版本 15 = 阶段 11（新增 PendingThrow；14 版扩展空中防御状态）。
+    /// 13 = 阶段 09B（新增权威回合计时器 RoundTimerRemainingFrames；
     /// 08D 的 12 版新增了 Projectiles 实体集合与 NextProjectileId）。
     /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界。
     /// <b>默认不启用计时</b>（null），保持旧单回合 API 逐位兼容。

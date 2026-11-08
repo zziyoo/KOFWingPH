@@ -24,8 +24,8 @@ namespace NewKOF.BattleCore.Combat;
 /// <para>
 /// <b>不允许的状态跳转</b>：Hitstun/Blockstun 期间不能步行、起跳或发动招式
 /// （硬直归零同帧才回到待机更新路径）；<b>不存在</b> Hitstun → Startup、
-/// Blockstun → Airborne 等未定义边。本阶段<b>不做空中受击/空中防御</b>——
-/// 空中角色的命中结算被显式跳过（测试固定）。</para>
+/// Blockstun → Airborne 等未定义边。阶段 11 允许正常 Airborne 防御 High/Mid，并进入 AirBlockstun；
+/// 空中受击与空中防御分别按其专属状态积分。</para>
 /// </summary>
 public enum FighterLogicState
 {
