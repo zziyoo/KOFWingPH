@@ -41,12 +41,13 @@ public sealed class TeamMemberDefinition : IEquatable<TeamMemberDefinition>
 /// <para>构造期拒绝：空队伍、人数不符（须与 <see cref="TeamSize"/> 一致）、
 /// 空 FighterId、非法体力、重复槽位。队伍本身<b>不可变</b>，可安全共享给重开/回放。</para>
 ///
-/// <para>默认 <see cref="TeamSize"/> = 3（第一版 3v3），但所有算法都通过
-/// <see cref="Count"/> 取实际人数，不在别处散落常量 3。</para>
+/// <para>默认 <see cref="TeamSize"/> = 3（第一版 3v3），但构造期只要求「非空」，
+/// 所有算法都通过 <see cref="Count"/> 取实际人数——不在别处散落常量 3，
+/// 未来做 1v1 队伍或 5v5 时只需改数据。</para>
 /// </summary>
 public sealed class TeamDefinition : IEquatable<TeamDefinition>
 {
-    /// <summary>第一版队伍人数（3v3）。算法请一律读 <see cref="Count"/>。</summary>
+    /// <summary>第一版默认队伍人数（3v3）。算法请一律读 <see cref="Count"/>。</summary>
     public const int TeamSize = 3;
 
     public TeamDefinition(string teamId, IEnumerable<TeamMemberDefinition> members)
@@ -56,9 +57,8 @@ public sealed class TeamDefinition : IEquatable<TeamDefinition>
         ArgumentNullException.ThrowIfNull(members);
 
         TeamMemberDefinition[] list = members.ToArray();
-        if (list.Length != TeamSize)
-            throw new ArgumentException(
-                $"队伍必须恰好 {TeamSize} 名队员，实际 {list.Length} 名。", nameof(members));
+        if (list.Length == 0)
+            throw new ArgumentException("队伍不能为空。", nameof(members));
         if (list.Any(m => m is null))
             throw new ArgumentException("队伍包含 null 队员。", nameof(members));
 

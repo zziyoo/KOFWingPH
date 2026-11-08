@@ -152,11 +152,12 @@ public class TeamMatchTests
     public void IllegalTeamDefinitions_AreRejected()
     {
         Assert.Throws<ArgumentException>(() => new TeamDefinition("P1", Array.Empty<TeamMemberDefinition>()));
-        Assert.Throws<ArgumentException>(() => new TeamDefinition("P1", new[]
+        // 人数不再硬绑 3：2 人队合法（算法一律读 Count），只有空队被拒绝。
+        Assert.Equal(2, new TeamDefinition("P1", new[]
         {
             new TeamMemberDefinition("Kai", 1000),
             new TeamMemberDefinition("Rei", 1000),
-        }));
+        }).Count);
         Assert.Throws<ArgumentException>(() => new TeamDefinition(" ", new[]
         {
             new TeamMemberDefinition("Kai", 1000),

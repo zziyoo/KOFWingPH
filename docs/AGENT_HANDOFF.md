@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 938，已跳过: 0，总计: 938`
+期望：`失败: 0，通过: 951，已跳过: 0，总计: 951`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,22 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 10B（2026-11-08）选队、接替流程与输入诊断（D123–D124）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Presentation/TeamSelectionModel.cs` | **新增**：纯 C# 选队模型（槽位游标/换人/确认/建队） |
+| `core/BattleCore/Presentation/InputTrace.cs` | **新增**：`InputTrace` + `TracingInputSource`（只读探针） |
+| `scripts/BattleScene.cs` | 重写为「模式选择 → 选人/选队 → 1v1/3v3 战斗」；队伍 HUD；`--inputdiag` |
+| `scripts/KeyboardInputMap.cs` | 增加 `HeldMask` / `HeldKeys` 只读诊断视图（不改映射逻辑） |
+| `tests/BattleCore.Tests/TeamSelectionTests.cs` | **新增 13 项** |
+| `core/BattleCore/Team/TeamDefinition.cs` | 人数不再硬绑 3（只要求非空），算法一律读 `Count` |
+
+**DoubleKO 诊断结论**：输入链路健康（`sample: P1=A P2=A` → 双方同帧 Startup → 同帧 0 HP）；
+上一轮失败的真因是 **Rei 的 JSON 没有裸 5A**。**未修改** `KeyboardInputMap` / `InputBuffer`。
+
+**验收**：951/951（Debug）、表现层 0 警告 0 错误、6 张 Godot 图形实证。**StateVersion 13 / CoreVersion 14 不变**。
 
 ### 阶段 10A（2026-11-08）3v3 队伍赛核心（D120–D122）
 
@@ -965,8 +981,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K80 | **3v3 不要塞进 BattleState（D120）** | 六人同场会让推挤/相杀/投技/飞行道具与 D89 终局语义全部失效，且所有旧测试要重写 | 队伍赛是比赛层组织多个 1v1 交锋；`BattleSimulation` 一行不改；新回合重建 BattleSession |
 | K81 | **淘汰不是 `Health == 0`（D121）** | Time Over 败者可能仍有正体力，用 HP 判存活会让它重新登场、剩余人数算错 | 一律读 `TeamSideState.Eliminated[]`；体力只用于继承与显示；新上场队员用自身 `MaxHealth` |
 | K82 | **跨交锋事件必须带交锋号（D122）** | 每场 Frame 从 0 开始，裸 EventId 必然重号，特效去重/回放会把旧事件当新事件 | 用 `TeamMatchEventId(BoutNumber, EventId)`；不要假设裸 EventId 全场唯一 |
+| K83 | **选队规则放纯 C#，别写进 Godot 节点（D123）** | 槽位游标、换人回绕、改阵容取消确认这些确定性逻辑写成节点脚本后只能手点验证 | 用 `TeamSelectionModel`；BattleScene 只把按键转成方法调用、把结果画出来 |
+| K84 | **双人同帧先看采样掩码，再怀疑输入链路（D124）** | 直接改 `KeyboardInputMap`/`InputBuffer` 会把健康链路改坏，还掩盖真正的配置缺口 | 开 `--inputdiag` 看 `sample: P1=… P2=…` 与 `state: fN …`；本轮真因是 **Rei 无裸 5A**，不是输入缺陷 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10A 验收时 **938/938** 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10B 验收时 **951/951** 测试通过，可正常启动运行。
 
 ---
 

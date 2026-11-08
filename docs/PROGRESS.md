@@ -2175,6 +2175,54 @@ Draw + TimeOverDraw）保持可用；未定义枚举仍抛 `ArgumentOutOfRangeEx
 
 ---
 
+## 阶段 10B 成果（选队、接替与输入诊断，2026-11-08）—— D123–D124
+
+### 核心规则
+
+- **模式入口**：启动进入模式选择（`1v1 MATCH` / `3v3 TEAM`），A/D 或方向键切换、J/ENTER 确认、
+  `1`/`2` 直接选择；两套会话并列互不干扰，1v1 语义与阶段 09 完全一致。
+- **选队**：`TeamSelectionModel`（纯 C#）管理双方各三人与出战顺序——W/S 移槽位、A/D 换角色
+  （回绕，改阵容即取消确认）、J 确认；P2 用方向键 + `,`。ENTER 在双方确认后开赛。
+- **接替**：交锋结束进入 `BetweenBouts`，HUD 显示 `BOUT n RESULT`、`NEXT P1 x : P2 y`，
+  SPACE 确认后建立新 `BattleSession`（帧号从 0、计时重置、飞行道具与输入历史清零）。
+- **HUD**：双方三人阵容按槽位渲染（`>` 出战 / `X` 淘汰 / 空格候补，附各自剩余体力）、
+  当前出战角色与 HP、剩余人数、交锋序号与计时、上一场结果、队伍结果；原有判定框与调试信息保留。
+- **输入隔离**：非战斗阶段按键全部拦截；每场交锋重建 `InputBuffer` + `KeyboardInputMap`；
+  Esc 返回选队时清空确认状态。
+
+### DoubleKO 双人同帧输入诊断（D124）
+
+上一轮无法构造双人同帧出招。本轮加入 `--inputdiag`（`InputTrace` + `TracingInputSource`），
+记录键盘事件、`_down` 集合、双方采样掩码、Prepare/Commit 与帧末权威状态。实测（Kai 镜像）：
+
+```
+key: J down     → sample: P1=A P2=-
+key: Comma down → sample: P1=A P2=A        ← 双方输入进入同一批次
+state: f9  P1=Startup/StandLightPunch  P2=Startup/StandLightPunch
+state: f11 P1=Hitstun/-/0             P2=Hitstun/-/0
+```
+
+**结论：输入链路没有缺陷。** 之前的失败是角色数据问题——Rei 的 JSON 只有 236A / 214B / 5D / 5C，
+没有裸 5A，P2 按轻拳没有指令可匹配。改用 Kai 镜像后真实得到 `DOUBLE KO (DOUBLE KO)`、
+双方 `X Kai(0)`、`Left P1 2 / P2 2`、`RoundEnded P0 3 (B1:167)`。
+**未修改 `KeyboardInputMap` 与 `InputBuffer`**（没有可复现的缺陷就不动核心输入）。
+
+### 测试与验收
+
+新增 **13 项** `TeamSelectionTests`：默认阵容、游标回绕、换人取消确认、同名角色占位、
+按目录满血值建队、重置、非法玩家/槽位、HUD 行标记、可配置人数、`InputTrace` 开关/容量/顺序、
+位掩码文本、`TracingInputSource` 转发与记录。
+
+| 项 | 实际结果 |
+|---|---|
+| `dotnet test`（Debug） | **951/951**（938 + 13） |
+| 表现层构建 | 0 警告 0 错误 |
+| Godot 图形 | `p10b_mode.png`、`p10b_team_select.png`、`p10b_bout1_win.png`（B1:164、`X Rei(0)`、NEXT）、`p10b_bout2.png`（Bout 2、`Logic Frame 16`）、`p10b_doubleko.png`（DOUBLE KO、双方各淘汰一名）、`p10b_duel_regression.png`（1v1 正常） |
+
+**已知限制**：角色仍是色块（10C 接入动画）；KI 攻击特效在 10D；导出模板未安装。
+
+---
+
 ## 阶段 10A 成果（3v3 队伍赛核心，2026-11-08）—— D120–D122
 
 ### 核心规则

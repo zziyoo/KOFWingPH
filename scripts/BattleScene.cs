@@ -2,46 +2,57 @@ using System.Text;
 using Godot;
 using NewKOF.BattleCore;
 using NewKOF.BattleCore.Combat;
-using NewKOF.BattleCore.Data;
 using NewKOF.BattleCore.Commands;
+using NewKOF.BattleCore.Data;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Match;
 using NewKOF.BattleCore.Numerics;
+using NewKOF.BattleCore.Presentation;
 using NewKOF.BattleCore.Simulation;
 using NewKOF.BattleCore.State;
+using NewKOF.BattleCore.Team;
 
 namespace NewKOF;
 
 /// <summary>
-/// 战斗场景的表现层根节点（阶段 09C 起接入完整比赛流程）。
+/// 战斗场景的表现层根节点（阶段 10B 起同时支持 1v1 与 3v3 队伍赛）。
 ///
 /// <para><b>职责边界（不变）</b>：只读权威状态，绝不写回；不参与任何权威判定；
 /// 不自己实现时间累积与补帧（交给 <see cref="FixedStepScheduler"/>）；
 /// 不自己保存输入历史、不做 SOCD/指令识别（交给 <see cref="InputBuffer"/> 与内核）。</para>
 ///
-/// <para><b>09C 新增</b>：表现层改为持有 <see cref="MatchSession"/> 与
-/// <see cref="FighterCatalog"/>，负责选人界面、回合过渡、比赛终局与重开。
-/// 胜场、倒计时、回合结果、比赛结果<b>全部只读</b> <see cref="MatchState"/> /
-/// <see cref="BattleState"/>，表现层不自行统计。</para>
+/// <para><b>两套比赛层</b>：<see cref="MatchSession"/>（1v1，阶段 09）与
+/// <see cref="TeamMatchSession"/>（3v3，阶段 10A）。二者互不干扰，本类只是按模式选择其中一个
+/// 作为「当前会话」。场上永远是 1v1 的 <see cref="BattleState"/>。</para>
 ///
-/// <para><b>输入隔离（D111）</b>：选人/过渡/终局阶段的界面按键在 <c>_Input</c> 中直接拦截，
-/// 绝不传给 <see cref="KeyboardInputMap"/>；每回合 <see cref="MatchSession"/> 都会新建
-/// <see cref="InputBuffer"/>，本类同步重建键盘映射，因此确认键不会变成开局首帧攻击，
-/// 旧按住状态也不会跨回合/跨重开泄漏。</para>
+/// <para><b>输入隔离（D111/D123）</b>：模式选择、选人、选队、交锋过渡与终局阶段的界面按键
+/// 在 <c>_Input</c> 中直接拦截，绝不传给 <see cref="KeyboardInputMap"/>；每回合/每场交锋
+/// 都新建 <see cref="InputBuffer"/>，本类同步重建键盘映射。</para>
 /// </summary>
 public partial class BattleScene : Node2D
 {
-    /// <summary>比赛规则（默认 2 胜 / 5 回合 / 99 秒；命令行调试参数只影响调试运行）。</summary>
-    private MatchRules _rules = null!;
+    /// <summary>界面阶段（权威阶段仍由会话决定；本枚举只区分「在哪个界面」）。</summary>
+    private enum Stage
+    {
+        ModeSelect,
+        DuelSelect,
+        TeamSelect,
+        DuelBattle,
+        TeamBattle,
+    }
 
-    /// <summary>角色目录（09C 为 C# 演示配置，09D 起由 JSON 加载器构建）。</summary>
+    private MatchRules _rules = null!;
+    private TeamMatchRules _teamRules = null!;
     private FighterCatalog _catalog = null!;
 
-    /// <summary>比赛级会话（权威状态唯一来源）。</summary>
     private MatchSession _match = null!;
+    private TeamMatchSession _team = null!;
+    private TeamSelectionModel _teamSelect = null!;
 
-    /// <summary>键盘映射（表现层唯一接触 Godot 输入 API 的地方；每回合重建）。</summary>
     private KeyboardInputMap _inputMap = null!;
+    private IInputSource _tracedSource = null!;
+    private readonly InputTrace _trace = new();
+    private bool _diagnostics;
 
     private Node2D? _fighter1Node;
     private Node2D? _fighter2Node;
@@ -49,15 +60,16 @@ public partial class BattleScene : Node2D
     private Label? _resultLabel;
     private DebugBoxDrawer _debugBoxes = null!;
 
-    private bool _paused;
-    private bool _showDebugBoxes = true;
-    private bool _backlogWarningIssued;
-
-    // 选人界面的表现层状态（权威选人身份在 MatchSession.SelectFighters 中落定）。
+    private Stage _stage = Stage.ModeSelect;
+    private int _modeIndex;              // 0 = 1v1, 1 = 3v3
     private int _p1Index;
     private int _p2Index;
     private bool _p1Confirmed;
     private bool _p2Confirmed;
+
+    private bool _paused;
+    private bool _showDebugBoxes = true;
+    private bool _backlogWarningIssued;
 
     /// <summary>单次渲染最多补的逻辑帧数。</summary>
     private const int MaxStepsPerAdvance = 5;
@@ -68,31 +80,29 @@ public partial class BattleScene : Node2D
         _fighter2Node = GetNodeOrNull<Node2D>("Fighter2");
         _hudLabel = GetNodeOrNull<Label>("Hud/HudLabel");
         _resultLabel = GetNodeOrNull<Label>("Result");
-        // 大标题移到 HUD 右侧（HUD 面板右边界 = 400），避免遮挡规则/阶段文字。
         if (_resultLabel is not null)
             _resultLabel.Position = new Vector2(430f, 190f);
 
         _debugBoxes = new DebugBoxDrawer { Enabled = _showDebugBoxes };
         AddChild(_debugBoxes);
 
-        // 正常游戏优先使用外部 JSON 配置；仅在开赛前加载一次，运行中绝不重读文件。
+        _diagnostics = HasArg("--inputdiag");
+        _trace.Enabled = _diagnostics;
+
         _catalog = LoadFighterCatalog();
         _rules = RulesFromArgs();
+        _teamRules = TeamRulesFromArgs();
+        _teamSelect = new TeamSelectionModel(_catalog);
         _p1Index = 0;
         _p2Index = _catalog.Entries.Count > 1 ? 1 : 0;
-        _p1Confirmed = false;
-        _p2Confirmed = false;
 
-        CreateMatchSession();
+        CreateDuelSession();
+        CreateTeamSession();
+        _stage = Stage.ModeSelect;
         SyncViewFromState();
     }
 
-    /// <summary>
-    /// 从 <c>res://data/fighters/*.json</c> 一次性加载全部角色配置（D115）。
-    /// Godot 只负责打开实际文件；合法性判断全在纯 C# 加载器里。
-    /// 目录缺失、读取失败、JSON 非法都<b>立即抛出明确错误</b>，绝不悄悄回退到演示配置
-    /// 假装加载成功；纯内存 <c>FighterCatalog.CreateDemo()</c> 只作为测试夹具与回退路径。
-    /// </summary>
+    /// <summary>从 <c>res://data/fighters/*.json</c> 一次性加载全部角色配置（D115）。</summary>
     private static FighterCatalog LoadFighterCatalog()
     {
         const string directory = "res://data/fighters";
@@ -123,48 +133,88 @@ public partial class BattleScene : Node2D
         return FighterDataLoader.LoadCatalog(documents);
     }
 
-    private void CreateMatchSession()
+    private void CreateDuelSession()
     {
         _match = new MatchSession(
             _rules,
-            (p1, p2) => _catalog.CreateRoster(
+            (p1, p2) => BuildRoster(
                 p1 ?? _catalog.Entries[0].FighterId,
                 p2 ?? _catalog.Entries[^1].FighterId),
-            initialStateFactory: CreateInitialState,
+            initialStateFactory: CreateDuelInitialState,
             maxStepsPerAdvance: MaxStepsPerAdvance);
-
-        _inputMap = new KeyboardInputMap(_match.RoundInputBuffer);
-        _paused = false;
-        _backlogWarningIssued = false;
+        RebindInput(_match.RoundInputBuffer);
     }
 
-    /// <summary>
-    /// 生成每回合的初始权威状态。<c>--hp=&lt;n&gt;</c> 与 <c>--match-time=&lt;s&gt;</c>
-    /// 是<b>仅命令行</b>的调试验收参数：不传时满血 1000、99 秒，正常启动零副作用。
-    /// </summary>
-    private static BattleState CreateInitialState(MatchRules rules)
+    private void CreateTeamSession()
     {
-        BattleState state = BattleState.CreateDefault();
-        int health = InitialHealthFromArgs();
+        _team = new TeamMatchSession(
+            _teamRules,
+            BuildRoster,
+            CreateBoutInitialState,
+            maxStepsPerAdvance: MaxStepsPerAdvance);
+    }
+
+    private FightRoster BuildRoster(string p1FighterId, string p2FighterId) =>
+        _catalog.CreateRoster(p1FighterId, p2FighterId);
+
+    /// <summary>当前激活的会话是否处于队伍赛。</summary>
+    private bool TeamActive => _stage == Stage.TeamBattle;
+
+    /// <summary>重新绑定键盘映射与（可选）诊断探针。</summary>
+    private void RebindInput(InputBuffer buffer)
+    {
+        _inputMap = new KeyboardInputMap(buffer);
+        _tracedSource = _diagnostics ? new TracingInputSource(buffer, _trace) : buffer;
+        _paused = false;
+    }
+
+    /// <summary>1v1 每回合初态（<c>--hp</c> / <c>--duel</c> 只影响命令行调试）。</summary>
+    private static BattleState CreateDuelInitialState(MatchRules rules)
+    {
+        int health = CapByDebugHealth(1000);
         int distance = InitialDistanceFromArgs();
         IReadOnlyList<FighterState> fighters = new[]
         {
-            state.Fighter(0) with
-            {
-                Health = health,
-                PositionX = FixedPoint.FromInt(-distance),
-            },
-            state.Fighter(1) with
-            {
-                Health = health,
-                PositionX = FixedPoint.FromInt(distance),
-            },
+            FighterState.Create(0, 1000, -distance, Facing.Right) with { Health = health },
+            FighterState.Create(1, 1000, distance, Facing.Left) with { Health = health },
         };
 
-        return new BattleState(state.Frame, fighters, state.StateVersion,
+        return new BattleState(0, fighters, BattleState.CreateDefault().StateVersion,
             round: null, projectiles: null, nextProjectileId: 1,
             roundTimerRemainingFrames: rules.EnableTimeout ? rules.RoundTimerFrames : null);
     }
+
+    /// <summary>
+    /// 3v3 每场交锋初态：我方队员的满血值与继承体力来自队伍状态；
+    /// <c>--hp</c> 只在该值更小时生效（调试快速 KO）。
+    /// </summary>
+    private static BattleState CreateBoutInitialState(
+        TeamMatchRules rules, TeamSideState p1, TeamSideState p2)
+    {
+        int distance = InitialDistanceFromArgs();
+        FighterState f1 = FighterState.Create(0, p1.ActiveMaxHealth, -distance, Facing.Right) with
+        {
+            Health = Math.Min(p1.ActiveHealth, CapByDebugHealth(p1.ActiveHealth)),
+        };
+        FighterState f2 = FighterState.Create(1, p2.ActiveMaxHealth, distance, Facing.Left) with
+        {
+            Health = Math.Min(p2.ActiveHealth, CapByDebugHealth(p2.ActiveHealth)),
+        };
+
+        return new BattleState(0, new[] { f1, f2 }, BattleState.CreateDefault().StateVersion,
+            round: null, projectiles: null, nextProjectileId: 1,
+            roundTimerRemainingFrames: rules.EnableTimeout ? rules.BoutTimerFrames : null);
+    }
+
+    /// <summary>调试用体力上限：未传 <c>--hp</c> 时不改变（返回 <paramref name="health"/> 本身）。</summary>
+    private static int CapByDebugHealth(int health)
+    {
+        int cap = InitialHealthFromArgs();
+        return Math.Min(health, cap);
+    }
+
+    private static bool HasArg(string name) =>
+        OS.GetCmdlineUserArgs().Any(a => a.Equals(name, StringComparison.Ordinal));
 
     private static MatchRules RulesFromArgs()
     {
@@ -179,6 +229,21 @@ public partial class BattleScene : Node2D
             }
         }
         return new MatchRules(roundsToWin: 2, maxRounds: 5, roundTimeSeconds: seconds);
+    }
+
+    private static TeamMatchRules TeamRulesFromArgs()
+    {
+        int seconds = 99;
+        foreach (string arg in OS.GetCmdlineUserArgs())
+        {
+            if (arg.StartsWith("--match-time=", StringComparison.Ordinal)
+                && int.TryParse(arg["--match-time=".Length..], out int value)
+                && value is >= 1 and <= TeamMatchRules.MaxRoundTimeSeconds)
+            {
+                seconds = value;
+            }
+        }
+        return new TeamMatchRules(seconds);
     }
 
     private static int InitialHealthFromArgs()
@@ -208,75 +273,122 @@ public partial class BattleScene : Node2D
     }
 
     /// <summary>当前逻辑帧号（只读；调试工具读取权威值）。</summary>
-    public int CurrentLogicFrame => _match.CurrentBattleState?.Frame ?? 0;
+    public int CurrentLogicFrame => TeamActive
+        ? _team.CurrentBattleState?.Frame ?? 0
+        : _match.CurrentBattleState?.Frame ?? 0;
 
-    /// <summary>当前比赛状态（只读；供调试/自动化断言）。</summary>
+    /// <summary>当前 1v1 比赛状态（只读；供调试/自动化断言）。</summary>
     public MatchState CurrentMatchState => _match.State;
+
+    /// <summary>当前队伍赛状态（只读；供调试/自动化断言）。</summary>
+    public TeamMatchState CurrentTeamState => _team.State;
+
+    /// <summary>当前界面阶段名（只读；测试注入工具读取）。</summary>
+    public string CurrentStageName => _stage.ToString();
 
     // ── 输入 ────────────────────────────────────────────────────────
 
     public override void _Input(InputEvent @event)
     {
-        if (@event is not InputEventKey key || key.Echo || !key.Pressed)
+        if (@event is InputEventKey key && _diagnostics)
+        {
+            Trace("key",
+                $"{key.Keycode} {(key.Pressed ? "down" : "up")} echo={key.Echo} " +
+                $"held={DescribeHeldKeys()}");
+        }
+
+        if (@event is not InputEventKey pressed || pressed.Echo || !pressed.Pressed)
         {
             _inputMap.Handle(@event);
+            if (@event is InputEventKey && _diagnostics)
+                Trace("sample", DescribeHeldMasks());
             return;
         }
 
         // 全局调试键（所有阶段可用）。
-        if (key.Keycode == Key.F2)
+        if (pressed.Keycode == Key.F2)
         {
             _showDebugBoxes = !_showDebugBoxes;
             _debugBoxes.Enabled = _showDebugBoxes;
             _debugBoxes.Refresh();
             return;
         }
-        if (key.Keycode == Key.F1)
+        if (pressed.Keycode == Key.F1)
         {
             TogglePause();
             return;
         }
-        if (key.Keycode == Key.F5)
+        if (pressed.Keycode == Key.F3 && _diagnostics)
         {
-            Restart();
-            return;
-        }
-        if (key.Keycode == Key.Escape)
-        {
-            ReturnToSelection();
-            return;
-        }
-
-        MatchPhase phase = _match.State.Phase;
-
-        // 选人阶段：全部界面按键在此拦截，绝不进入战斗输入缓冲（D111）。
-        if (phase == MatchPhase.NotStarted)
-        {
-            HandleSelectionKey(key.Keycode);
-            return;
-        }
-
-        // 过渡阶段：只允许显式确认进入下一回合，不推进任何战斗帧。
-        if (phase == MatchPhase.BetweenRounds)
-        {
-            if (key.Keycode == Key.Space)
-                BeginNextRound();
-            else
-                SyncViewFromState();
-            return;
-        }
-
-        // 终局：不接收任何战斗输入。
-        if (phase == MatchPhase.MatchFinished)
-        {
+            GD.Print("[InputTrace]\n" + _trace.Dump());
             SyncViewFromState();
             return;
         }
 
-        _inputMap.Handle(@event);
+        switch (_stage)
+        {
+            case Stage.ModeSelect:
+                HandleModeKey(pressed.Keycode);
+                return;
+            case Stage.DuelSelect:
+                HandleDuelSelectKey(pressed.Keycode);
+                return;
+            case Stage.TeamSelect:
+                HandleTeamSelectKey(pressed.Keycode);
+                return;
+            case Stage.DuelBattle:
+                HandleDuelBattleKey(pressed.Keycode);
+                return;
+            case Stage.TeamBattle:
+                HandleTeamBattleKey(pressed.Keycode);
+                return;
+        }
     }
 
-    private void HandleSelectionKey(Key code)
+    private void HandleModeKey(Key code)
+    {
+        switch (code)
+        {
+            case Key.A or Key.Left:
+                _modeIndex = 0;
+                break;
+            case Key.D or Key.Right:
+                _modeIndex = 1;
+                break;
+            case Key.Key1:
+                _modeIndex = 0;
+                ConfirmMode();
+                return;
+            case Key.Key2:
+                _modeIndex = 1;
+                ConfirmMode();
+                return;
+            case Key.J or Key.Comma or Key.Enter:
+                ConfirmMode();
+                return;
+            case Key.Escape:
+                break;
+        }
+        SyncViewFromState();
+    }
+
+    private void ConfirmMode()
+    {
+        if (_modeIndex == 1)
+        {
+            _teamSelect.Reset();
+            _stage = Stage.TeamSelect;
+        }
+        else
+        {
+            _p1Confirmed = false;
+            _p2Confirmed = false;
+            _stage = Stage.DuelSelect;
+        }
+        SyncViewFromState();
+    }
+
+    private void HandleDuelSelectKey(Key code)
     {
         switch (code)
         {
@@ -294,80 +406,212 @@ public partial class BattleScene : Node2D
                 _p2Confirmed = true; break;
             case Key.Enter:
                 if (_p1Confirmed && _p2Confirmed)
-                    StartMatchFromSelection();
+                    StartDuel();
                 break;
+            case Key.Escape:
+                _stage = Stage.ModeSelect; break;
         }
         SyncViewFromState();
     }
+
+    private void HandleTeamSelectKey(Key code)
+    {
+        switch (code)
+        {
+            case Key.W:
+                _teamSelect.MoveCursor(TeamSelectionModel.Player1, -1); break;
+            case Key.S:
+                _teamSelect.MoveCursor(TeamSelectionModel.Player1, +1); break;
+            case Key.A:
+                _teamSelect.CycleCharacter(TeamSelectionModel.Player1, -1); break;
+            case Key.D:
+                _teamSelect.CycleCharacter(TeamSelectionModel.Player1, +1); break;
+            case Key.J:
+                _teamSelect.ToggleReady(TeamSelectionModel.Player1); break;
+            case Key.Up:
+                _teamSelect.MoveCursor(TeamSelectionModel.Player2, -1); break;
+            case Key.Down:
+                _teamSelect.MoveCursor(TeamSelectionModel.Player2, +1); break;
+            case Key.Left:
+                _teamSelect.CycleCharacter(TeamSelectionModel.Player2, -1); break;
+            case Key.Right:
+                _teamSelect.CycleCharacter(TeamSelectionModel.Player2, +1); break;
+            case Key.Comma:
+                _teamSelect.ToggleReady(TeamSelectionModel.Player2); break;
+            case Key.Enter:
+                if (_teamSelect.BothReady)
+                    StartTeamMatch();
+                break;
+            case Key.Escape:
+                _stage = Stage.ModeSelect; break;
+        }
+        SyncViewFromState();
+    }
+
+    private void HandleDuelBattleKey(Key code)
+    {
+        switch (code)
+        {
+            case Key.F5:
+                _match.RestartMatch();
+                BindDuelRound();
+                return;
+            case Key.Escape:
+                _match.ReturnToSelection();
+                _p1Confirmed = false;
+                _p2Confirmed = false;
+                RebindInput(_match.RoundInputBuffer);
+                _stage = Stage.DuelSelect;
+                SyncViewFromState();
+                return;
+        }
+
+        MatchPhase phase = _match.State.Phase;
+        if (phase == MatchPhase.BetweenRounds)
+        {
+            if (code == Key.Space)
+            {
+                _match.StartNextRound();
+                BindDuelRound();
+            }
+            else
+            {
+                SyncViewFromState();
+            }
+            return;
+        }
+
+        if (phase == MatchPhase.MatchFinished)
+        {
+            SyncViewFromState();
+            return;
+        }
+
+        _inputMap.Handle(BuildKeyEvent(code));
+        if (_diagnostics) Trace("sample", DescribeHeldMasks());
+        SyncViewFromState();
+    }
+
+    private void HandleTeamBattleKey(Key code)
+    {
+        switch (code)
+        {
+            case Key.F5:
+                _team.RestartMatch();
+                BindTeamBout();
+                return;
+            case Key.Escape:
+                _team.ReturnToSelection();
+                _teamSelect.ClearReady();
+                RebindInput(_team.BoutInputBuffer);
+                _stage = Stage.TeamSelect;
+                SyncViewFromState();
+                return;
+        }
+
+        TeamMatchPhase phase = _team.State.Phase;
+        if (phase == TeamMatchPhase.BetweenBouts)
+        {
+            if (code == Key.Space)
+            {
+                _team.StartNextBout();
+                BindTeamBout();
+            }
+            else
+            {
+                SyncViewFromState();
+            }
+            return;
+        }
+
+        if (phase == TeamMatchPhase.MatchFinished)
+        {
+            SyncViewFromState();
+            return;
+        }
+
+        _inputMap.Handle(BuildKeyEvent(code));
+        if (_diagnostics) Trace("sample", DescribeHeldMasks());
+        SyncViewFromState();
+    }
+
+    /// <summary>把「已按下的键」重新包装成按键事件交给键盘映射（战斗阶段统一路径）。</summary>
+    private static InputEventKey BuildKeyEvent(Key code) => new()
+    {
+        Keycode = code,
+        PhysicalKeycode = code,
+        Pressed = true,
+    };
+
+    private void Trace(string category, string detail)
+    {
+        _trace.Record(category, detail);
+        GD.Print($"[InputTrace] {category}: {detail}");
+    }
+
+    private string DescribeHeldKeys() =>
+        string.Join(",", _inputMap.HeldKeys.Select(k => k.ToString()));
+
+    private string DescribeHeldMasks() =>
+        $"P1={InputTrace.DescribeBits(_inputMap.HeldMask(0))} " +
+        $"P2={InputTrace.DescribeBits(_inputMap.HeldMask(1))}";
 
     private int Cycle(int index, int delta) =>
         (index + delta + _catalog.Entries.Count) % _catalog.Entries.Count;
 
     private void TogglePause()
     {
-        BattleSession? round = _match.CurrentRound;
-        if (round is null || !_match.State.IsRoundLive)
+        BattleSession? session = TeamActive ? _team.CurrentBout : _match.CurrentRound;
+        bool live = TeamActive ? _team.State.IsBoutLive : _match.State.IsRoundLive;
+        if (session is null || !live)
             return;
 
         _paused = !_paused;
-        if (_paused) round.Scheduler.Pause();
-        else round.Scheduler.Resume();
+        if (_paused) session.Scheduler.Pause();
+        else session.Scheduler.Resume();
         SyncViewFromState();
     }
 
-    private void StartMatchFromSelection()
+    private void StartDuel()
     {
         _match.SelectFighters(
             _catalog.Entries[_p1Index].FighterId,
             _catalog.Entries[_p2Index].FighterId);
         _match.StartMatch();
-        BindNewRound();
+        _stage = Stage.DuelBattle;
+        BindDuelRound();
     }
 
-    private void BeginNextRound()
+    private void StartTeamMatch()
     {
-        _match.StartNextRound();
-        BindNewRound();
+        _team.SelectTeams(
+            _teamSelect.BuildTeam(TeamSelectionModel.Player1, "P1"),
+            _teamSelect.BuildTeam(TeamSelectionModel.Player2, "P2"));
+        _team.StartMatch();
+        _stage = Stage.TeamBattle;
+        BindTeamBout();
     }
 
-    private void Restart()
+    private void BindDuelRound()
     {
-        if (_match.State.Phase == MatchPhase.NotStarted)
-        {
-            _p1Confirmed = false;
-            _p2Confirmed = false;
-        }
-        else
-        {
-            _match.RestartMatch(); // 保留角色组合，清零比分
-            BindNewRound();
-        }
-        SyncViewFromState();
-    }
-
-    private void ReturnToSelection()
-    {
-        _match.ReturnToSelection();
-        _p1Confirmed = false;
-        _p2Confirmed = false;
-        _inputMap = new KeyboardInputMap(_match.RoundInputBuffer);
-        _paused = false;
-        SyncViewFromState();
-    }
-
-    /// <summary>新回合：重新绑定输入映射与判定框绘制（会话/缓冲/配置全是新实例）。</summary>
-    private void BindNewRound()
-    {
-        _inputMap = new KeyboardInputMap(_match.RoundInputBuffer);
-        _paused = false;
+        RebindInput(_match.RoundInputBuffer);
         _backlogWarningIssued = false;
-
-        BattleSession? round = _match.CurrentRound;
-        if (round is not null && _match.State.P1FighterId is string p1
-            && _match.State.P2FighterId is string p2)
+        if (_match.CurrentRound is BattleSession round
+            && _match.State.P1FighterId is string p1 && _match.State.P2FighterId is string p2)
         {
-            _debugBoxes.Bind(round, _catalog.CreateRoster(p1, p2));
+            _debugBoxes.Bind(round, BuildRoster(p1, p2));
         }
+        SyncViewFromState();
+    }
+
+    private void BindTeamBout()
+    {
+        RebindInput(_team.BoutInputBuffer);
+        _backlogWarningIssued = false;
+        TeamSideState? p1 = _team.State.P1;
+        TeamSideState? p2 = _team.State.P2;
+        if (_team.CurrentBout is BattleSession bout && p1 is not null && p2 is not null)
+            _debugBoxes.Bind(bout, BuildRoster(p1.ActiveFighterId, p2.ActiveFighterId));
         SyncViewFromState();
     }
 
@@ -380,12 +624,19 @@ public partial class BattleScene : Node2D
 
     public override void _Process(double delta)
     {
-        // 比赛层在过渡/终局阶段返回 0，不推进任何战斗逻辑帧。
-        int steps = _match.Advance(delta);
+        int steps = TeamActive
+            ? _team.Advance(delta, _tracedSource)
+            : _match.Advance(delta, _tracedSource);
         if (steps > 0)
+        {
+            if (_diagnostics)
+                Trace("state", DescribeFrameState());
             SyncViewFromState();
+        }
 
-        long dropped = _match.CurrentRound?.Scheduler.DroppedStepCount ?? 0;
+        long dropped = TeamActive
+            ? _team.CurrentBout?.Scheduler.DroppedStepCount ?? 0
+            : _match.CurrentRound?.Scheduler.DroppedStepCount ?? 0;
         if (dropped > 0 && !_backlogWarningIssued)
         {
             _backlogWarningIssued = true;
@@ -395,18 +646,82 @@ public partial class BattleScene : Node2D
         }
     }
 
+    private string DescribeFrameState()
+    {
+        BattleState? state = TeamActive ? _team.CurrentBattleState : _match.CurrentBattleState;
+        if (state is null)
+            return "-";
+        FighterState p1 = state.Fighter(0);
+        FighterState p2 = state.Fighter(1);
+        return $"f{state.Frame} P1={p1.LogicState}/{p1.MoveId ?? "-"}/{p1.Health} " +
+            $"P2={p2.LogicState}/{p2.MoveId ?? "-"}/{p2.Health}";
+    }
+
     // ── 只读渲染 ────────────────────────────────────────────────────
 
     private void SyncViewFromState()
     {
-        MatchState matchState = _match.State;
-        BattleState? state = _match.CurrentBattleState;
+        switch (_stage)
+        {
+            case Stage.ModeSelect:
+                RenderSelection(null, null);
+                break;
+            case Stage.DuelSelect:
+                RenderSelection(
+                    FighterState.Create(0, 1000, -120, Facing.Right),
+                    FighterState.Create(1, 1000, 120, Facing.Left));
+                break;
+            case Stage.TeamSelect:
+                RenderSelection(
+                    FighterState.Create(0, 1000, -140, Facing.Right),
+                    FighterState.Create(1, 1000, 140, Facing.Left));
+                break;
+            case Stage.DuelBattle:
+                RenderBattle(_match.CurrentBattleState);
+                break;
+            case Stage.TeamBattle:
+                RenderBattle(_team.CurrentBattleState);
+                break;
+        }
+    }
 
-        const float originX = 640f;
-        const float groundY = 560f;
+    private void RenderSelection(FighterState? p1, FighterState? p2)
+    {
+        if (p1.HasValue && p2.HasValue)
+            PlaceFighters(p1.Value, p2.Value);
 
+        if (_hudLabel is not null)
+            _hudLabel.Text = BuildHud();
+        if (_resultLabel is not null)
+        {
+            _resultLabel.Text = BannerText();
+            _resultLabel.Visible = !string.IsNullOrEmpty(_resultLabel.Text);
+        }
+
+        _debugBoxes.Refresh();
+    }
+
+    private void RenderBattle(BattleState? state)
+    {
         FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
         FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
+        PlaceFighters(p1, p2);
+
+        if (_hudLabel is not null)
+            _hudLabel.Text = BuildHud();
+        if (_resultLabel is not null)
+        {
+            _resultLabel.Text = BannerText();
+            _resultLabel.Visible = !string.IsNullOrEmpty(_resultLabel.Text);
+        }
+
+        _debugBoxes.Refresh();
+    }
+
+    private void PlaceFighters(FighterState p1, FighterState p2)
+    {
+        const float originX = 640f;
+        const float groundY = 560f;
 
         if (_fighter1Node is not null)
             _fighter1Node.Position = new Vector2(
@@ -416,23 +731,74 @@ public partial class BattleScene : Node2D
             _fighter2Node.Position = new Vector2(
                 originX + (float)p2.PositionX.ToDouble(),
                 groundY - (float)p2.PositionY.ToDouble());
+    }
+}
 
-        if (_hudLabel is not null)
-            _hudLabel.Text = BuildHud(matchState, state, p1, p2);
+// ── 只读文本（HUD / 横幅）──────────────────────────────────────────
 
-        if (_resultLabel is not null)
-        {
-            _resultLabel.Text = ResultBanner(matchState);
-            _resultLabel.Visible = !string.IsNullOrEmpty(_resultLabel.Text);
-        }
+public partial class BattleScene
+{
+    private string BuildHud() => _stage switch
+    {
+        Stage.ModeSelect => BuildModeHud(),
+        Stage.DuelSelect => BuildDuelSelectHud(),
+        Stage.TeamSelect => BuildTeamSelectHud(),
+        Stage.DuelBattle => BuildDuelHud(),
+        _ => BuildTeamHud(),
+    };
 
-        _debugBoxes.Refresh();
+    private string BuildModeHud()
+    {
+        string one = _modeIndex == 0 ? "< 1v1 MATCH >" : "  1v1 MATCH  ";
+        string three = _modeIndex == 1 ? "< 3v3 TEAM >" : "  3v3 TEAM  ";
+        return $"=== NEWKOF ===\n" +
+            $"Mode:  {one}    {three}\n" +
+            $"A / D or LEFT / RIGHT : switch mode\n" +
+            $"J / ENTER : confirm     1 / 2 : quick select\n" +
+            $"Catalog: {string.Join(", ", _catalog.Entries.Select(e => e.FighterId))}\n" +
+            $"F1 pause  F2 hitboxes  F5 restart  ESC back\n" +
+            (_diagnostics ? "Diagnostics: ON (F3 dumps input trace)\n" : string.Empty);
     }
 
-    private string BuildHud(MatchState m, BattleState? state, FighterState p1, FighterState p2)
+    private string BuildDuelSelectHud()
     {
-        if (m.Phase == MatchPhase.NotStarted)
-            return BuildSelectionHud();
+        string p1Name = _catalog.Entries[_p1Index].DisplayName;
+        string p2Name = _catalog.Entries[_p2Index].DisplayName;
+        string p1Tag = _p1Confirmed ? "[CONFIRMED]" : "[choose]";
+        string p2Tag = _p2Confirmed ? "[CONFIRMED]" : "[choose]";
+
+        return $"=== CHARACTER SELECT (1v1) ===\n" +
+            $"P1: < {p1Name} >  {p1Tag}\n" +
+            $"P2: < {p2Name} >  {p2Tag}\n" +
+            $"Rules: first to {_rules.RoundsToWin} wins / max {_rules.MaxRounds} rounds / " +
+            $"{_rules.RoundTimeSeconds}s per round\n" +
+            $"A / D : P1 switch      LEFT / RIGHT : P2 switch\n" +
+            $"J : P1 confirm         , : P2 confirm\n" +
+            $"ENTER : start match (both confirmed)      ESC : back\n" +
+            $"Catalog: {string.Join(", ", _catalog.Entries.Select(e => e.FighterId))}\n";
+    }
+
+    private string BuildTeamSelectHud()
+    {
+        string p1Tag = _teamSelect.P1Ready ? "[READY]" : "[choose]";
+        string p2Tag = _teamSelect.P2Ready ? "[READY]" : "[choose]";
+
+        return $"=== 3v3 TEAM SELECT ===\n" +
+            $"P1: {_teamSelect.DescribeLine(TeamSelectionModel.Player1)}  {p1Tag}\n" +
+            $"P2: {_teamSelect.DescribeLine(TeamSelectionModel.Player2)}  {p2Tag}\n" +
+            $"Rules: {_teamRules.RoundTimeSeconds}s per bout / last fighter standing\n" +
+            $"P1: W/S slot  A/D fighter  J ready\n" +
+            $"P2: UP/DOWN slot  LEFT/RIGHT fighter  , ready\n" +
+            $"ENTER : start team match (both ready)      ESC : back\n" +
+            $"Catalog: {string.Join(", ", _catalog.Entries.Select(e => e.FighterId))}\n";
+    }
+
+    private string BuildDuelHud()
+    {
+        MatchState m = _match.State;
+        BattleState? state = _match.CurrentBattleState;
+        FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
+        FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
 
         string p1Name = m.P1FighterId is null ? "-" : _catalog.DisplayName(m.P1FighterId);
         string p2Name = m.P2FighterId is null ? "-" : _catalog.DisplayName(m.P2FighterId);
@@ -440,7 +806,7 @@ public partial class BattleScene : Node2D
         int seconds = (m.RemainingTimeFrames + BattleCoreInfo.LogicFrameRate - 1)
             / BattleCoreInfo.LogicFrameRate;
 
-        var text = new StringBuilder(512);
+        var text = new StringBuilder(640);
         text.Append($"=== MATCH (Round {m.RoundNumber}/{m.Rules.MaxRounds}) ===\n");
         text.Append($"Phase: {m.Phase}   Time: {seconds}s   Wins: P1 {m.P1Wins} / P2 {m.P2Wins}\n");
         text.Append($"P1 [{p1Name}]: {p1.Health}/{p1.MaxHealth}   P2 [{p2Name}]: {p2.Health}/{p2.MaxHealth}\n");
@@ -456,44 +822,154 @@ public partial class BattleScene : Node2D
         text.Append($"Projectiles: {DescribeProjectiles(state)}\n");
         text.Append($"Event: {DescribeLastMatchEvent(_match.LastEvents)}\n");
         text.Append(ControlsHint(m.Phase));
+        AppendDiagnostics(text);
         return text.ToString();
     }
 
-    private string BuildSelectionHud()
+    private string BuildTeamHud()
     {
-        string p1Name = _catalog.Entries[_p1Index].DisplayName;
-        string p2Name = _catalog.Entries[_p2Index].DisplayName;
-        string p1Tag = _p1Confirmed ? "[CONFIRMED]" : "[choose]";
-        string p2Tag = _p2Confirmed ? "[CONFIRMED]" : "[choose]";
+        TeamMatchState m = _team.State;
+        BattleState? state = _team.CurrentBattleState;
+        FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
+        FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
+        FrameInput last = _team.BoutInputBuffer.LastInput ?? FrameInput.Empty(state?.Frame ?? 0);
+        int seconds = (m.RemainingTimeFrames + BattleCoreInfo.LogicFrameRate - 1)
+            / BattleCoreInfo.LogicFrameRate;
 
-        return $"=== CHARACTER SELECT (1v1 debug) ===\n" +
-            $"P1: < {p1Name} >  {p1Tag}\n" +
-            $"P2: < {p2Name} >  {p2Tag}\n" +
-            $"Rules: first to {_rules.RoundsToWin} wins / max {_rules.MaxRounds} rounds / " +
-            $"{_rules.RoundTimeSeconds}s per round\n" +
-            $"A / D : P1 switch      LEFT / RIGHT : P2 switch\n" +
-            $"J : P1 confirm         , : P2 confirm\n" +
-            $"ENTER : start match (both confirmed)\n" +
-            $"F1 pause  F2 hitboxes  F5 restart  ESC back to select\n" +
-            $"Catalog: {string.Join(", ", _catalog.Entries.Select(e => e.FighterId))}\n";
+        var text = new StringBuilder(720);
+        int teamSize = m.P1?.Team.Count ?? TeamDefinition.TeamSize;
+        text.Append($"=== TEAM MATCH (Bout {m.BoutNumber}/{teamSize * 2 - 1}) ===\n");
+        text.Append($"Phase: {m.Phase}   Time: {seconds}s\n");
+        text.Append($"P1: {DescribeTeamSide(m.P1)}\n");
+        text.Append($"P2: {DescribeTeamSide(m.P2)}\n");
+        if (m.P1 is not null && m.P2 is not null)
+        {
+            text.Append($"Active: P1 [{m.P1.ActiveFighterId}] {p1.Health}/{p1.MaxHealth}   " +
+                $"P2 [{m.P2.ActiveFighterId}] {p2.Health}/{p2.MaxHealth}\n");
+            text.Append($"Left: P1 {m.P1.RemainingCount} / P2 {m.P2.RemainingCount}\n");
+        }
+        text.Append($"Last Bout: {DescribeBoutResult(m)}\n");
+        if (m.Phase == TeamMatchPhase.MatchFinished)
+            text.Append($"Team Result: {DescribeTeamOutcome(m.Outcome)}\n");
+        text.Append($"Logic Frame: {state?.Frame ?? 0}{(_paused ? "  [PAUSED · F1]" : string.Empty)}\n");
+        text.Append($"P1: {Describe(last.Player1)}  P2: {Describe(last.Player2)}\n");
+        text.Append($"P1 State: {DescribeState(p1)}   P2 State: {DescribeState(p2)}\n");
+        text.Append($"P1 Move: {DescribeMove(p1)}   P2 Move: {DescribeMove(p2)}\n");
+        text.Append($"Combo: P1 {p1.Combo} | P2 {p2.Combo}\n");
+        text.Append($"Projectiles: {DescribeProjectiles(state)}\n");
+        text.Append($"Event: {DescribeLastTeamEvent(_team.LastEvents)}\n");
+        text.Append(ControlsHint(m.Phase));
+        AppendDiagnostics(text);
+        return text.ToString();
+    }
+
+    private void AppendDiagnostics(StringBuilder text)
+    {
+        if (!_diagnostics)
+            return;
+
+        string[] lines = _trace.Lines.ToArray();
+        int start = Math.Max(0, lines.Length - 4);
+        text.Append("--- inputdiag (last 4) ---\n");
+        for (int i = start; i < lines.Length; i++)
+            text.Append(lines[i]).Append('\n');
     }
 
     private static string ControlsHint(MatchPhase phase) => phase switch
     {
-        MatchPhase.RoundInProgress => "Controls: P1 WASD + J/K/U/I | P2 arrows + , . / ; | F1/F2/F5/ESC",
-        MatchPhase.BetweenRounds => "SPACE : next round | F5 restart | ESC back to select",
-        MatchPhase.MatchFinished => "F5 restart match | ESC back to select",
+        MatchPhase.RoundInProgress => "Controls: P1 WASD + J/K/U/I | P2 arrows + , . / ; | F1/F2/F5/ESC\n",
+        MatchPhase.BetweenRounds => "SPACE : next round | F5 restart | ESC back to select\n",
+        MatchPhase.MatchFinished => "F5 restart match | ESC back to select\n",
         _ => string.Empty,
     };
 
-    private static string ResultBanner(MatchState m) => m.Phase switch
+    private static string ControlsHint(TeamMatchPhase phase) => phase switch
     {
-        MatchPhase.NotStarted => "CHARACTER SELECT",
+        TeamMatchPhase.BoutInProgress =>
+            "Controls: P1 WASD + J/K/U/I | P2 arrows + , . / ; | F1/F2/F5/ESC\n",
+        TeamMatchPhase.BetweenBouts => "SPACE : next fighter | F5 restart | ESC back to teams\n",
+        TeamMatchPhase.MatchFinished => "F5 restart team match | ESC back to teams\n",
+        _ => string.Empty,
+    };
+
+    private string BannerText() => _stage switch
+    {
+        Stage.ModeSelect => "NEWKOF\nSELECT MODE",
+        Stage.DuelSelect => "CHARACTER SELECT",
+        Stage.TeamSelect => "3v3 TEAM SELECT",
+        Stage.DuelBattle => DuelBanner(_match.State),
+        Stage.TeamBattle => TeamBanner(_team.State),
+        _ => string.Empty,
+    };
+
+    private static string DuelBanner(MatchState m) => m.Phase switch
+    {
         MatchPhase.BetweenRounds =>
             $"ROUND {m.RoundNumber} WINNER\n{DescribeRoundResult(m)}\nWINS  P1 {m.P1Wins} : P2 {m.P2Wins}",
         MatchPhase.MatchFinished => DescribeMatchResult(m),
         _ => string.Empty,
     };
+
+    private static string TeamBanner(TeamMatchState m) => m.Phase switch
+    {
+        TeamMatchPhase.BetweenBouts =>
+            $"BOUT {m.BoutNumber} RESULT\n{DescribeBoutResult(m)}\n" +
+            $"NEXT  P1 {m.P1?.ActiveFighterId ?? "-"} : P2 {m.P2?.ActiveFighterId ?? "-"}",
+        TeamMatchPhase.MatchFinished => DescribeTeamOutcome(m.Outcome),
+        _ => string.Empty,
+    };
+
+    private static string DescribeTeamOutcome(TeamMatchOutcome outcome) => outcome switch
+    {
+        TeamMatchOutcome.P1TeamWin => "P1 TEAM WIN",
+        TeamMatchOutcome.P2TeamWin => "P2 TEAM WIN",
+        TeamMatchOutcome.TeamDraw => "TEAM DRAW",
+        _ => string.Empty,
+    };
+
+    private static string DescribeBoutResult(TeamMatchState m)
+    {
+        if (m.LastBoutOutcome == RoundOutcome.None)
+            return "-";
+
+        string winner = m.LastBoutOutcome switch
+        {
+            RoundOutcome.P1Win => "P1 WIN",
+            RoundOutcome.P2Win => "P2 WIN",
+            RoundOutcome.DoubleKO => "DOUBLE KO",
+            RoundOutcome.Draw => "DRAW",
+            _ => "?",
+        };
+        string reason = m.LastBoutReason switch
+        {
+            RoundEndReason.Knockout => "KO",
+            RoundEndReason.DoubleKO => "DOUBLE KO",
+            RoundEndReason.TimeOver => "TIME OVER",
+            RoundEndReason.TimeOverDraw => "TIME OVER DRAW",
+            _ => "-",
+        };
+        return $"{winner} ({reason})";
+    }
+
+    /// <summary>把一侧队伍渲染成 <c>&gt; Kai(700) | Rei | X Kai(0)</c>（&gt; 出战、X 淘汰）。</summary>
+    private static string DescribeTeamSide(TeamSideState? side)
+    {
+        if (side is null)
+            return "-";
+
+        var parts = new List<string>(side.Team.Count);
+        for (int i = 0; i < side.Team.Count; i++)
+        {
+            string name = side.Team.MemberAt(i).FighterId;
+            if (side.Eliminated[i])
+                parts.Add($"X {name}({side.Health[i]})");
+            else if (i == side.ActiveSlot)
+                parts.Add($"> {name}({side.Health[i]})");
+            else
+                parts.Add($"  {name}({side.Health[i]})");
+        }
+        return string.Join(" | ", parts);
+    }
 
     private static string DescribeMatchResult(MatchState m) => m.Outcome switch
     {
@@ -543,13 +1019,25 @@ public partial class BattleScene : Node2D
         if (events.Count == 0)
             return "-";
         MatchEvent last = events[events.Count - 1];
-        BattleEvent e = last.RoundEvent;
+        return DescribeEvent(last.RoundEvent, $"R{last.RoundNumber}");
+    }
+
+    private static string DescribeLastTeamEvent(IReadOnlyList<TeamMatchEvent> events)
+    {
+        if (events.Count == 0)
+            return "-";
+        TeamMatchEvent last = events[events.Count - 1];
+        return DescribeEvent(last.BoutEvent, $"B{last.BoutNumber}");
+    }
+
+    private static string DescribeEvent(BattleEvent e, string scope)
+    {
         string actors = e.SourceFighterId == e.TargetFighterId
             ? $"P{e.SourceFighterId + 1}"
             : $"P{e.SourceFighterId + 1}→P{e.TargetFighterId + 1}";
         string amount = e.Amount > 0 ? $" {e.Amount}" : string.Empty;
         string move = e.MoveId is null ? string.Empty : $" {e.MoveId}";
-        return $"{e.Type} {actors}{move}{amount} (R{last.RoundNumber}:{e.EventId})";
+        return $"{e.Type} {actors}{move}{amount} ({scope}:{e.EventId})";
     }
 
     private static string DescribeState(FighterState fighter)

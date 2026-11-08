@@ -69,6 +69,12 @@ public sealed class KeyboardInputMap
 
     private void Publish() => _buffer.Sample(Read(0), Read(1));
 
+    /// <summary>取某玩家当前按住的输入位掩码（只读；诊断用，不改变任何状态）。</summary>
+    public InputBits HeldMask(int player) => Read(player);
+
+    /// <summary>当前按住键名的稳定快照（诊断用）。</summary>
+    public IReadOnlyList<Key> HeldKeys => _down.OrderBy(k => (int)k).ToArray();
+
     private InputBits Read(int player)
     {
         InputBits bits = InputBits.None;
