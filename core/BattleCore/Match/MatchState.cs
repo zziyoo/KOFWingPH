@@ -178,6 +178,9 @@ public sealed record MatchState
             throw new ArgumentOutOfRangeException(nameof(reason), reason,
                 "已结束回合必须给出结束原因。");
 
+        // D119：结果/原因组合的唯一权威校验（与 RoundState 共用同一实现，避免日后分叉）。
+        RoundState.ValidateOutcomeReasonPair(roundOutcome, reason);
+
         int p1 = P1Wins + (roundOutcome == RoundOutcome.P1Win ? 1 : 0);
         int p2 = P2Wins + (roundOutcome == RoundOutcome.P2Win ? 1 : 0);
         int played = RoundsPlayed + 1;
@@ -295,6 +298,7 @@ public sealed record MatchState
                         $"过渡阶段回合序号 {RoundNumber} 必须等于已结束回合数 {RoundsPlayed}。");
                 if (CurrentRoundOutcome == RoundOutcome.None || CurrentRoundReason == RoundEndReason.None)
                     throw new InvalidOperationException("过渡阶段必须携带刚结束回合的结果与原因。");
+                RoundState.ValidateOutcomeReasonPair(CurrentRoundOutcome, CurrentRoundReason);
                 if (Outcome != MatchOutcome.None)
                     throw new InvalidOperationException("过渡阶段不能已经决出比赛胜负。");
                 EnsureSelection();
@@ -306,6 +310,7 @@ public sealed record MatchState
                         $"终局回合序号 {RoundNumber} 必须等于已结束回合数 {RoundsPlayed}。");
                 if (CurrentRoundOutcome == RoundOutcome.None || CurrentRoundReason == RoundEndReason.None)
                     throw new InvalidOperationException("比赛终局必须携带最后回合的结果与原因。");
+                RoundState.ValidateOutcomeReasonPair(CurrentRoundOutcome, CurrentRoundReason);
                 if (Outcome == MatchOutcome.None)
                     throw new InvalidOperationException("比赛终局必须给出比赛结果。");
                 EnsureSelection();

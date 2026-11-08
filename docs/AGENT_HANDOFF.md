@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 821，已跳过: 0，总计: 821`
+期望：`失败: 0，通过: 908，已跳过: 0，总计: 908`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,27 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 09 最终专项补修（2026-11-08）批量推进 / 事件时序 / 结果原因一致性（D117–D119）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Simulation/BattleSession.cs` | `Advance` 新增可选 `stopAfterCommit`：整帧（状态/输入/记账/观察者）落定后判定是否停止本批次；未用整帧预算记 `RecordDroppedSteps` |
+| `core/BattleCore/Match/MatchSession.cs` | `Advance` 传 `() => !State.IsRoundLive`；`OnFrameCommitted` 改为「计时投影 → 计分 → Validate → 发布事件」；新增 `_publishing` 重入拒绝 |
+| `core/BattleCore/Match/MatchState.cs` | `RecordRoundResult` 与 `Validate` 共用 `RoundState.ValidateOutcomeReasonPair`（D119） |
+| `core/BattleCore/State/RoundState.cs` | 抽出公开谓词 `IsValidOutcomeReasonPair` + `internal ValidateOutcomeReasonPair`（纯提取，行为不变） |
+| `tests/BattleCore.Tests/Stage09EdgeCaseTests.cs` | **新增 52 项**：P1-A 12 / P1-B 8 / P2-A 22 / 跨系统场景 |
+
+**修复前实测**：5 帧预算下 KO 于第 2 帧 → `Advance` 返回 **5**（应 2）；`RoundEnded` 观察者读到
+`RoundInProgress`、`P1Wins = 0`；观察者抛异常时计分完全丢失（`P1Wins = 0`）；
+9 种非法结果/原因组合被 `RecordRoundResult` 接受。
+
+**验收**：**908/908**（Debug/Release）、四构建 0 警告 0 错误、Godot 无头导入 `[ DONE ]`、
+图形实测 `p09fix_round1_win.png` / `p09fix_match_win.png` / `p09fix_time_over.png`。
+变异验证 **3/3 捕获**、`RESTORED=True`。**StateVersion 13 / CoreVersion 14 不变**。
+
+**未完成（如实记录）**：图形层未构造出真 DoubleKO 截图（同渲染帧双按会被 `InputBuffer` 合并为一次采样），
+该项由单元测试覆盖；导出模板仍未安装。
 
 ### 阶段 09D（2026-11-08）角色与招式 JSON 数据外置（D113–D116）
 
@@ -924,8 +945,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K74 | **定点数别用 double 承载（D114）** | `1.5` 经 double 解析在不同平台/文化下可能末位不同，且会把非法值静默变成 0 | JSON 一律 `{numerator, denominator}` + `checked` 转 Q16.16；分母必须为正；越界即失败 |
 | K75 | **迁移必须证明「数值没变」（D115）** | 只验证「能加载」会漏掉悄悄改掉的伤害/帧数，直接污染旧基线 | 摊平全部战斗相关字段逐项比较 `DemoRoster`；保留 C# 演示配置作夹具与回退 |
 | K76 | **导出包不会自动带 `.json`（D116）** | Godot 只打包被识别的资源，`.json` 不在默认过滤器中，导出后角色会消失 | `export_presets.cfg` 写 `include_filter="*.json"`；用 `FileAccess` 从 `res://` 读，不写绝对路径 |
+| K77 | **批量 Advance 的终止点在「提交之后」，不在「预算之前」（D117）** | 只在批次入口检查一次比赛阶段，会让 KO 之后继续提交终局冻结帧：返回帧数虚高、`StepExact` 与 `Advance` 不一致、`LastEvents` 被空事件覆盖 | 用 `stopAfterCommit` 谓词在整帧落定后判定；剩余整帧预算记 `RecordDroppedSteps`，**不要**回滚累加器（会重复计费），也**不要**循环调 `StepExact` 绕开预算 |
+| K78 | **先落定权威 `MatchState`，再发布比赛事件（D118）** | 先发事件后计分会让 `RoundEnded` 观察者读到 `RoundInProgress`/旧胜场；观察者抛异常还会把唯一一次计分吞掉 | `OnFrameCommitted` 顺序固定为「计时投影 → `RecordRoundResult` → `Validate` → 发布」；观察者异常不回滚、不重发、原样上抛；回调里禁止重入修改比赛会话（`_publishing` 显式拒绝） |
+| K79 | **结果/原因组合只允许一份实现（D119）** | 比赛层自己写 switch 必然与 `RoundState` 分叉，`DoubleKO + Knockout`、`Draw + Knockout` 会被接受 | 一律调用 `RoundState.IsValidOutcomeReasonPair` / `ValidateOutcomeReasonPair`；新增结果或原因时**只改这一处**，并同步 `MatchState.Validate` |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 09D 验收时 **856/856** 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 09 最终补修验收时 **908/908** 测试通过，可正常启动运行。
 
 ---
 
@@ -1103,7 +1127,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
           tests/BattleCore.Tests/CombatEventTests.cs
           docs/ARCHITECTURE.md  docs/PROGRESS.md  docs/AGENT_HANDOFF.md
     ```
-  - **工作区：干净**（阶段 06 专项补修提交并推送后）。
+  - **阶段 09 最终专项补修：`fix(match): enforce terminal batch boundary and committed match events`**
+    （本轮提交，SHA 见 `git rev-parse HEAD`）。修改：`BattleSession.Advance` 增加提交后终止谓词、
+    `MatchSession` 调整事件发布顺序与重入拒绝、`MatchState` / `RoundState` 共享结果原因校验；
+    新增 `tests/BattleCore.Tests/Stage09EdgeCaseTests.cs`（52 项）。测试 856 → **908**。
+  - **工作区：干净**（阶段 09 最终专项补修提交并推送后）。
     `git status --porcelain` 应无输出；有输出说明有人动过工作区。
   - `f145275` 提交内容（12 文件）：
     ```
@@ -1211,7 +1239,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
 4e. **阶段 08 已结项**（08A–08D + 最终补修 D100–D103）；**阶段 09A–09D 已全部交付并结项**
-   （D104–D106 / D107–D109 / D110–D112 / D113–D116），**856 项测试**。
+   （D104–D106 / D107–D109 / D110–D112 / D113–D116），阶段 09 最终补修（D117–D119，批量推进边界 /
+   事件时序 / 结果原因一致性）已推送，**908 项测试**。
    阶段 10 安全入口（按依赖顺序）：① 正式比赛流程补全（3v3 队伍赛 / 选人立绘 / BGM 与演出）；
    ② 防御扩展（空中防御、拆投、防御反击）；③ AI（先做确定性脚本 AI，再做搜索式）；
    ④ 资源与动画管线（精灵/特效/音效，仍需保持 BattleCore 无 Godot 依赖）；
@@ -1253,8 +1282,14 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - [ ] `C:\Users\32360\Desktop\NewKOF` 存在，`project.godot` 可读
 - [ ] `dotnet build` 在项目根目录返回 0 错误
-- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 722」
+- [ ] `dotnet test` 在 `tests\BattleCore.Tests` 返回「通过: 908」
       （若数量变化，说明有 Agent 改过测试，需查 `PROGRESS.md` 是否同步）
+- [ ] `MatchSession.Advance` 仍传 `stopAfterCommit: () => !State.IsRoundLive`（D117）：
+      终局帧之后不得再提交冻结帧；`TotalSteps` 只随 `CommitStep` 增加
+- [ ] `MatchSession.OnFrameCommitted` 的计分与 `Validate` 仍在 `_eventsCommitted` 之前（D118）：
+      调换顺序会让观察者读到旧 `MatchState`，并让观察者异常吞掉计分
+- [ ] `MatchState.RecordRoundResult` / `Validate` 仍调用 `RoundState.ValidateOutcomeReasonPair`（D119）：
+      不要在比赛层另写一份结果/原因 switch
 - [ ] `core/BattleCore/BattleCore.csproj` 中**没有**任何 Godot 引用
 - [ ] `scripts/BattleScene.cs` 中**没有**累加器/补帧/取整代码（只有 `_session.Advance`）
 - [ ] `scripts/` 下**没有**任何权威判定逻辑、**没有**输入历史/SOCD 实现

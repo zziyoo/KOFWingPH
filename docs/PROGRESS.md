@@ -2116,6 +2116,65 @@ JSON 只覆盖角色与招式数据，不含动画/音效/资源引用；尚无�
 
 ---
 
+## 阶段 09 最终专项补修（2026-11-08）—— D117–D119
+
+审查基线 `76c1b203`（856 项，HEAD = origin/main，工作区干净）。三项审查疑点
+**全部真实复现**：先写 52 项失败复现测试，修复前 **28 失败 / 24 通过**，再逐项最小修复。
+
+### P1-A 批量推进越过回合终局（D117）
+
+修复前实测（5 帧预算）：第 2 帧 KO → `Advance` 返回 **5**（期望 2）；第 1 帧 KO → **5**（期望 1）；
+第 2 帧 DoubleKO → **5**（期望 2）；第 3 帧 Time Over → **5**（期望 3）。多出来的帧是 D89 的终局冻结帧，
+它们把 `LastEvents` 覆盖成空列表，并让 `StepExact` 与 `Advance` 的终局帧号不一致。
+
+修复：`BattleSession.Advance` 增加提交后终止谓词；`MatchSession.Advance` 传
+`() => !State.IsRoundLive`。提交 2 帧后立即停止，第 3–5 帧既不 `Prepare` 也不 `Commit`，
+`DroppedStepCount = 3`、`TotalSteps = 2`、`IsFrameSyncIntact = true`；
+直接驱动单回合 `BattleSession.Advance(5 帧)` 仍提交 5 帧（D89 不变）。
+
+### P1-B 比赛事件早于权威状态（D118）
+
+修复前实测：`RoundEnded` 观察者读到 `Phase = RoundInProgress`、`P1Wins = 0`、`RoundsPlayed = 0`；
+Time Over 的观察者读到 `Reason = None`；观察者抛异常时 `P1Wins` 停在 **0**（计分被事件投递挡住）。
+
+修复：`OnFrameCommitted` 改为「计时投影 → 唯一一次计分 → `Validate` → 包装并投递」。
+现在观察者读到 `BetweenRounds/MatchFinished`、胜场与回合数已加、剩余时间与已提交 `BattleState` 一致；
+异常时计分保留、异常原样上抛、`BattleSession` 故障封闭、不二次计分、不重发事件。
+`_publishing` 期间对 `StartNextRound` / `RestartMatch` / `ReturnToSelection` 等入口显式抛
+`InvalidOperationException`（回调重入拒绝）。
+
+### P2-A 结果/原因组合不自洽（D119）
+
+修复前实测：`RecordRoundResult(DoubleKO, Knockout)`、`(Draw, Knockout)`、`(P1Win, DoubleKO)`、
+`(P2Win, TimeOverDraw)`、`(DoubleKO, TimeOver)` 等 **9 种非法组合全部被接受**（「未抛出异常」）；
+`MatchState.Validate()` 对反射构造的非法状态同样不报错。
+
+修复：`RoundState.IsValidOutcomeReasonPair` 作为唯一权威谓词，`RoundState` 与 `MatchState`
+的入口与自检共用。合法六种组合（P1Win/P2Win × KO/TimeOver、DoubleKO + DoubleKO、
+Draw + TimeOverDraw）保持可用；未定义枚举仍抛 `ArgumentOutOfRangeException`。
+
+### 测试与验收
+
+新增 **52 项** `Stage09EdgeCaseTests`（12 项 P1-A、8 项 P1-B、22 项 P2-A、其余为跨系统场景）。
+既有 **856 项零改动零跳过**。变异验证 **3/3 捕获**：移除终止谓词 → 5 项失败；
+恢复「先发事件再计分」→ 10 项失败；移除共享组合校验 → 13 项失败；三次均 `RESTORED=True`。
+
+| 项 | 实际结果 |
+|---|---|
+| `dotnet test`（Debug / Release） | **908/908** / **908/908** |
+| 四构建（BattleCore + NewKOF，Debug/Release） | 全部 **0 警告 0 错误** |
+| Godot 无头导入 | `[ DONE ]`（无 ERROR / SCRIPT ERROR） |
+| Godot 图形运行 | `p09fix_round1_win.png`（`Phase: BetweenRounds`、`Wins 1:0`、`ROUND 1 WINNER`、`Logic Frame 13`）、`p09fix_match_win.png`（`Round 2/5`、`Wins 2:0`、`P1 MATCH WIN`、`Logic Frame 11` 证明下一回合重新从 0 计数）、`p09fix_time_over.png`（`Time 0s`、`DRAW (TIME OVER DRAW)`、双方 1000/1000） |
+| 版本 | **StateVersion 13 / CoreVersion 14 不变**（不改快照格式） |
+
+**已知限制**：图形层未能构造出真 DoubleKO 截图——调试注入器在同一渲染帧同时按下 J 与 `,` 时，
+`InputBuffer` 只保留后一次采样，P2 的攻击不会成立；DoubleKO 由单元测试
+（`BatchAdvance_DoubleKoStopsBatch`、`DoubleKoObserver_SeesCorrectScoring`、
+`MatchTests.DoubleKO_AddsNoWins_ButCountsAsPlayedRound`）覆盖，未用截图冒充。
+导出模板仍未安装，正式导出包未实测。
+
+---
+
 ## 阶段 09 总结（2026-11-08）—— 正式结项
 
 | 子阶段 | 内容 | 决策 | 测试 | Commit |
@@ -2125,6 +2184,7 @@ JSON 只覆盖角色与招式数据，不含动画/音效/资源引用；尚无�
 | 09C | 选人、回合过渡与完整比赛流程 | D110–D112 | 807 → 821 | `b0b0b42` |
 | 09D | 招式与角色 JSON 数据外置 | D113–D116 | 821 → 848 | `20d668e` |
 | 集成 | 场景 A–E + 长跑/帧率/路径一致性 | — | 848 → **856** | 同上 |
+| 补修 | 批量推进边界 / 事件时序 / 结果原因一致性 | D117–D119 | 856 → **908** | 本轮 |
 
 **分层结论**：`BattleState` 仍是唯一权威战斗快照；`RoundState` 回答「这一回合谁赢、为什么」；
 `MatchState` 回答「打到第几回合、各赢几场、整场谁赢」；Godot 只显示。计时器在 `BattleState` 内，

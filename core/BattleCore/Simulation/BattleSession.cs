@@ -124,6 +124,15 @@ public sealed class BattleSession
     /// 两阶段输入源（如 <see cref="InputBuffer"/>）。模拟成功后才提交输入，
     /// 失败时不会留下「输入已提交、战斗帧未提交」的幻影帧。与 <paramref name="inputProvider"/> 互斥。
     /// </param>
+    /// <param name="stopAfterCommit">
+    /// 可选的<b>提交后终止谓词</b>（阶段 09 最终补修，D117）：每帧<b>完整提交</b>
+    /// （权威状态、输入历史、调度器记账、提交观察者全部落定）之后调用一次；
+    /// 返回 <see langword="true"/> 时本批次立即停止，不再准备/提交后续帧。
+    /// 未使用的整帧预算记为丢弃预算（<see cref="FixedStepScheduler.DroppedStepCount"/>），
+    /// <b>不会</b>被记成已提交帧，也不会留给下一次调用。
+    /// 谓词自身抛异常时按既有异常策略处理（已提交帧保留、剩余预算记丢弃、异常原样上抛）。
+    /// 传 null 表示不提前终止（旧行为逐位不变）。
+    /// </param>
     /// <returns>本次实际提交的逻辑帧数（0 到 <see cref="FixedStepScheduler.MaxStepsPerAdvance"/>）。</returns>
     /// <exception cref="ArgumentException">同时传入两种输入来源。</exception>
     /// <exception cref="InvalidOperationException">
@@ -137,7 +146,8 @@ public sealed class BattleSession
     public int Advance(
         double deltaSeconds,
         Func<int, FrameInput>? inputProvider = null,
-        IInputSource? inputSource = null)
+        IInputSource? inputSource = null,
+        Func<bool>? stopAfterCommit = null)
     {
         ThrowIfFaulted();
         RejectTwoInputSources(inputProvider, inputSource);
@@ -148,6 +158,7 @@ public sealed class BattleSession
             return 0;
 
         int committed = 0;
+        bool stoppedEarly = false;
         try
         {
             for (int i = 0; i < budget; i++)
@@ -197,6 +208,15 @@ public sealed class BattleSession
                     MarkFaulted(input.Frame);
                     throw;
                 }
+
+                // 提交后终止判定（D117）：本帧的状态、输入、记账与观察者都已落定，
+                // 此时才允许调用方要求停止本批次——比赛层据此在回合终局帧收手，
+                // 不再把终局冻结帧当成本批次的有效推进（D89 的直接 Step 语义不变）。
+                if (stopAfterCommit is not null && stopAfterCommit())
+                {
+                    stoppedEarly = true;
+                    break;
+                }
             }
         }
         catch
@@ -208,6 +228,16 @@ public sealed class BattleSession
                 Scheduler.RecordDroppedSteps(uncommitted);
 
             throw;
+        }
+
+        if (stoppedEarly)
+        {
+            // 提前终止时未使用的整帧预算同样是「已过去但不再模拟」的时间，
+            // 记为丢弃预算而不是已提交帧（TotalSteps 只在 CommitStep 增加）。
+            // 累加器已在 Scheduler.Advance 中扣除了整批预算，因此不会留给下一次调用。
+            int unused = budget - committed;
+            if (unused > 0)
+                Scheduler.RecordDroppedSteps(unused);
         }
 
         return committed;

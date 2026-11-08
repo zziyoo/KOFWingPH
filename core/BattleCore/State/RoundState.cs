@@ -226,9 +226,16 @@ public sealed record RoundState
             "回合结果必须是 P1Win / P2Win / DoubleKO / Draw。"),
     };
 
-    private static void ValidateOutcomeReasonPair(RoundOutcome outcome, RoundEndReason reason)
-    {
-        bool valid = outcome switch
+    /// <summary>
+    /// 判定「回合结果 + 结束原因」组合是否<b>自洽</b>（D119 的唯一权威实现）。
+    ///
+    /// <para>合法组合只有六种：P1Win/P2Win × Knockout/TimeOver、DoubleKO + DoubleKO、
+    /// Draw + TimeOverDraw。单回合层（<see cref="ForOutcome(RoundOutcome, RoundEndReason)"/>、
+    /// <see cref="Validate"/>）与比赛层（<c>MatchState.RecordRoundResult</c>、
+    /// <c>MatchState.Validate</c>）都必须调用同一份规则，避免两处 switch 日后分叉。</para>
+    /// </summary>
+    public static bool IsValidOutcomeReasonPair(RoundOutcome outcome, RoundEndReason reason) =>
+        outcome switch
         {
             RoundOutcome.P1Win or RoundOutcome.P2Win =>
                 reason is RoundEndReason.Knockout or RoundEndReason.TimeOver,
@@ -236,7 +243,12 @@ public sealed record RoundState
             RoundOutcome.Draw => reason == RoundEndReason.TimeOverDraw,
             _ => false,
         };
-        if (!valid)
+
+    /// <summary>组合不自洽时抛出（与 <see cref="IsValidOutcomeReasonPair"/> 同一份规则）。</summary>
+    /// <exception cref="InvalidOperationException">结果与原因不自洽。</exception>
+    internal static void ValidateOutcomeReasonPair(RoundOutcome outcome, RoundEndReason reason)
+    {
+        if (!IsValidOutcomeReasonPair(outcome, reason))
             throw new InvalidOperationException(
                 $"回合结果 {outcome} 与结束原因 {reason} 不自洽（Time Over 胜利不得伪装成 KO，平局不得伪装成 DoubleKO）。");
     }
