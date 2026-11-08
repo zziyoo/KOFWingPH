@@ -2175,6 +2175,44 @@ Draw + TimeOverDraw）保持可用；未定义枚举仍抛 `ArgumentOutOfRangeEx
 
 ---
 
+## 阶段 10C 成果（状态驱动动画管线，2026-11-08）—— D125
+
+### 核心规则
+
+- **数据流单向**：`FighterState → AnimationResolver → ResolvedPose → 表现节点`；
+  动画不回写命中、硬直、取消窗口、位置与速度（有测试断言 `FighterState` 逐位不变）。
+- **表现配置独立**：`data/presentation/{Kai,Rei}.json`，`schemaVersion = 1`，
+  内含 `animations`（姿态帧）、`states`（逻辑状态 → 动画）、`moves`（招式 → 三段动画）。
+  与 `data/fighters/*.json` 完全分离，不改动已冻结的战斗 schema。
+- **姿态格式**：`width / height / offsetX / offsetY / rotation / color`（脚在原点、Y 向上），
+  缺省 `offsetX/offsetY/rotation` 为 0、`color` 为中性灰、`framesPerStep` 为 6。
+- **状态映射**：Standing→idle、Walking→walk（仅贴地且有水平速度）、Crouching→crouch、
+  PreJump/Airborne→jump、Startup/Active/Recovery→按 MoveId 的三段动画、
+  Hitstun→hurt、Blockstun→guard、AirHitstun→air_hurt、Knockdown→knockdown、Wakeup→wakeup。
+- **Hitstop**：`FighterVisualClock` 在 `HitstopRemainingFrames > 0` 时停止推进；
+  招式动画用权威 `MoveElapsedFrames`，冻结期间本就不前进；同一逻辑帧重复渲染不推进。
+- **降级链**：招式缺配置 → 该阶段通用动画；某状态缺映射 → `idle`；整份配置缺失 →
+  `AnimationSet.CreateFallback`（按角色 ID 稳定取色）。**配置格式非法仍报错**（带文件与字段路径）。
+- **镜像与换人**：两个角色各有独立 `FighterVisualClock` 与 `AnimationSet` 引用；换人时重新绑定。
+
+### 测试与验收
+
+新增 **27 项** `AnimationTests`：配置加载、各状态映射、招式三段与有效帧、Hitstop 冻结、
+逻辑帧幂等、状态切换归零、缺招式/缺状态/缺整份配置的降级、配置非法（版本/必填/重复名/
+引用不存在/尺寸/颜色/旋转/帧时长/未知字段/JSON 语法）、Stream 与字符串等价、目录重复 ID、
+镜像时钟互不影响、`FighterState` 不被动画修改。
+
+| 项 | 实际结果 |
+|---|---|
+| `dotnet test`（Debug） | **978/978**（951 + 27） |
+| 表现层构建 | 0 警告 0 错误 |
+| Godot 图形 | `p10c_attack.png`（P1 `Active/StandLightPunch` 色块明显变宽变亮、P2 `Hitstun` 倾斜）、`p10c_hurt.png`（P1 `Recovery` 收窄、P2 仍倾斜） |
+
+**已知限制**：素材为几何占位（无正式立绘，符合 C6）；没有逐招独立美术；
+导出模板未安装。
+
+---
+
 ## 阶段 10B 成果（选队、接替与输入诊断，2026-11-08）—— D123–D124
 
 ### 核心规则

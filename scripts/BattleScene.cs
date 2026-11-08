@@ -56,6 +56,9 @@ public partial class BattleScene : Node2D
 
     private Node2D? _fighter1Node;
     private Node2D? _fighter2Node;
+    private FighterVisual? _visual1;
+    private FighterVisual? _visual2;
+    private Dictionary<string, AnimationSet> _presentationSets = new(StringComparer.Ordinal);
     private Label? _hudLabel;
     private Label? _resultLabel;
     private DebugBoxDrawer _debugBoxes = null!;
@@ -90,6 +93,8 @@ public partial class BattleScene : Node2D
         _trace.Enabled = _diagnostics;
 
         _catalog = LoadFighterCatalog();
+        _presentationSets = LoadPresentationSets();
+        CreateFighterVisuals();
         _rules = RulesFromArgs();
         _teamRules = TeamRulesFromArgs();
         _teamSelect = new TeamSelectionModel(_catalog);
@@ -600,6 +605,10 @@ public partial class BattleScene : Node2D
             && _match.State.P1FighterId is string p1 && _match.State.P2FighterId is string p2)
         {
             _debugBoxes.Bind(round, BuildRoster(p1, p2));
+            _visual1?.SetAnimationSet(SetFor(p1));
+            _visual2?.SetAnimationSet(SetFor(p2));
+            _visual1?.Reset();
+            _visual2?.Reset();
         }
         SyncViewFromState();
     }
@@ -611,7 +620,13 @@ public partial class BattleScene : Node2D
         TeamSideState? p1 = _team.State.P1;
         TeamSideState? p2 = _team.State.P2;
         if (_team.CurrentBout is BattleSession bout && p1 is not null && p2 is not null)
+        {
             _debugBoxes.Bind(bout, BuildRoster(p1.ActiveFighterId, p2.ActiveFighterId));
+            _visual1?.SetAnimationSet(SetFor(p1.ActiveFighterId));
+            _visual2?.SetAnimationSet(SetFor(p2.ActiveFighterId));
+            _visual1?.Reset();
+            _visual2?.Reset();
+        }
         SyncViewFromState();
     }
 
@@ -687,6 +702,7 @@ public partial class BattleScene : Node2D
 
     private void RenderSelection(FighterState? p1, FighterState? p2)
     {
+        BindSelectionVisuals();
         if (p1.HasValue && p2.HasValue)
             PlaceFighters(p1.Value, p2.Value);
 
@@ -705,7 +721,7 @@ public partial class BattleScene : Node2D
     {
         FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
         FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
-        PlaceFighters(p1, p2);
+        PlaceFighters(p1, p2, state?.Frame ?? 0);
 
         if (_hudLabel is not null)
             _hudLabel.Text = BuildHud();
@@ -718,7 +734,7 @@ public partial class BattleScene : Node2D
         _debugBoxes.Refresh();
     }
 
-    private void PlaceFighters(FighterState p1, FighterState p2)
+    private void PlaceFighters(FighterState p1, FighterState p2, int logicFrame = 0)
     {
         const float originX = 640f;
         const float groundY = 560f;
@@ -731,6 +747,10 @@ public partial class BattleScene : Node2D
             _fighter2Node.Position = new Vector2(
                 originX + (float)p2.PositionX.ToDouble(),
                 groundY - (float)p2.PositionY.ToDouble());
+
+        // 只读投影：状态 → 动画 → 姿态（不写回任何战斗状态）。
+        _visual1?.Apply(p1, logicFrame);
+        _visual2?.Apply(p2, logicFrame);
     }
 }
 
@@ -1071,5 +1091,107 @@ public partial class BattleScene
         if ((bits & InputBits.LightKick) != 0) text.Append("C ");
         if ((bits & InputBits.HeavyKick) != 0) text.Append("D ");
         return text.ToString(0, text.Length - 1);
+    }
+}
+
+// ── 表现资源（阶段 10C，D125）─────────────────────────────────────
+
+public partial class BattleScene
+{
+    /// <summary>
+    /// 一次性加载 <c>res://data/presentation/*.json</c>。
+    /// <b>目录缺失 = 允许降级</b>（用内置 fallback 姿态）；<b>配置非法 = 明确报错</b>（带路径与字段）。
+    /// </summary>
+    private static Dictionary<string, AnimationSet> LoadPresentationSets()
+    {
+        const string directory = "res://data/presentation";
+        var sets = new Dictionary<string, AnimationSet>(StringComparer.Ordinal);
+        if (!DirAccess.DirExistsAbsolute(directory))
+            return sets;
+
+        DirAccess? dir = DirAccess.Open(directory);
+        if (dir is null)
+            return sets;
+
+        var documents = new List<PresentationDataDocument>();
+        foreach (string file in dir.GetFiles())
+        {
+            if (!file.EndsWith(".json", StringComparison.Ordinal))
+                continue;
+
+            string path = $"{directory}/{file}";
+            Godot.FileAccess? access = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+            if (access is null)
+                throw new InvalidOperationException(
+                    $"[BattleScene] 无法读取表现配置：{path}" +
+                    $"（错误码 {(int)Godot.FileAccess.GetOpenError()}）。");
+
+            documents.Add(new PresentationDataDocument(path, access.GetAsText()));
+        }
+
+        if (documents.Count == 0)
+            return sets;
+
+        try
+        {
+            return new Dictionary<string, AnimationSet>(
+                PresentationDataLoader.LoadCatalog(documents), StringComparer.Ordinal);
+        }
+        catch (PresentationDataException ex)
+        {
+            throw new InvalidOperationException($"[BattleScene] 表现配置非法：{ex.Message}", ex);
+        }
+    }
+
+    private void CreateFighterVisuals()
+    {
+        if (_fighter1Node?.GetNodeOrNull<ColorRect>("Body") is ColorRect body1)
+            _visual1 = new FighterVisual(_fighter1Node, body1, SetFor(DefaultFighterId(0)));
+        if (_fighter2Node?.GetNodeOrNull<ColorRect>("Body") is ColorRect body2)
+            _visual2 = new FighterVisual(_fighter2Node, body2, SetFor(DefaultFighterId(1)));
+    }
+
+    private string DefaultFighterId(int player) =>
+        _catalog.Entries[Math.Min(player, _catalog.Entries.Count - 1)].FighterId;
+
+    /// <summary>按角色取表现配置；缺失时用显式 fallback（不改变战斗结果）。</summary>
+    private AnimationSet SetFor(string fighterId) =>
+        _presentationSets.TryGetValue(fighterId, out AnimationSet? set)
+            ? set
+            : AnimationSet.CreateFallback(fighterId, FallbackColor(fighterId));
+
+    /// <summary>缺资源时的稳定可区分颜色（同一角色每次相同）。</summary>
+    private static string FallbackColor(string fighterId)
+    {
+        int hash = 0;
+        foreach (char c in fighterId)
+            hash = (hash * 31 + c) & 0xFFFFFF;
+
+        int r = 96 + (hash & 0x7F);
+        int g = 96 + ((hash >> 8) & 0x7F);
+        int b = 96 + ((hash >> 16) & 0x7F);
+        return $"#{r:X2}{g:X2}{b:X2}";
+    }
+
+    /// <summary>选人/选队阶段：把当前槽位角色对应的表现配置绑到两个角色节点上。</summary>
+    private void BindSelectionVisuals()
+    {
+        switch (_stage)
+        {
+            case Stage.ModeSelect:
+                _visual1?.SetAnimationSet(SetFor(_catalog.Entries[0].FighterId));
+                _visual2?.SetAnimationSet(SetFor(_catalog.Entries[^1].FighterId));
+                break;
+            case Stage.DuelSelect:
+                _visual1?.SetAnimationSet(SetFor(_catalog.Entries[_p1Index].FighterId));
+                _visual2?.SetAnimationSet(SetFor(_catalog.Entries[_p2Index].FighterId));
+                break;
+            case Stage.TeamSelect:
+                _visual1?.SetAnimationSet(
+                    SetFor(_teamSelect.CharacterAt(TeamSelectionModel.Player1, _teamSelect.P1Cursor).FighterId));
+                _visual2?.SetAnimationSet(
+                    SetFor(_teamSelect.CharacterAt(TeamSelectionModel.Player2, _teamSelect.P2Cursor).FighterId));
+                break;
+        }
     }
 }

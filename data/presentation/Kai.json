@@ -1,0 +1,331 @@
+{
+  "schemaVersion": 1,
+  "fighterId": "Kai",
+  "animations": [
+    {
+      "name": "idle",
+      "loop": true,
+      "framesPerStep": 8,
+      "frames": [
+        {
+          "width": 60,
+          "height": 120,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#D93A45"
+        },
+        {
+          "width": 60,
+          "height": 118,
+          "offsetX": 0,
+          "offsetY": 1,
+          "rotation": 0,
+          "color": "#D93A45"
+        }
+      ]
+    },
+    {
+      "name": "walk",
+      "loop": true,
+      "framesPerStep": 5,
+      "frames": [
+        {
+          "width": 62,
+          "height": 118,
+          "offsetX": 4,
+          "offsetY": 0,
+          "rotation": 4,
+          "color": "#D93A45"
+        },
+        {
+          "width": 60,
+          "height": 120,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#D93A45"
+        },
+        {
+          "width": 62,
+          "height": 118,
+          "offsetX": -4,
+          "offsetY": 0,
+          "rotation": -4,
+          "color": "#D93A45"
+        }
+      ]
+    },
+    {
+      "name": "crouch",
+      "loop": true,
+      "framesPerStep": 8,
+      "frames": [
+        {
+          "width": 68,
+          "height": 72,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#D93A45"
+        }
+      ]
+    },
+    {
+      "name": "jump",
+      "loop": true,
+      "framesPerStep": 8,
+      "frames": [
+        {
+          "width": 58,
+          "height": 116,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotation": -6,
+          "color": "#D93A45"
+        }
+      ]
+    },
+    {
+      "name": "atk_startup",
+      "loop": false,
+      "framesPerStep": 4,
+      "frames": [
+        {
+          "width": 58,
+          "height": 118,
+          "offsetX": -8,
+          "offsetY": 0,
+          "rotation": -6,
+          "color": "#D93A45"
+        }
+      ]
+    },
+    {
+      "name": "atk_active",
+      "loop": false,
+      "framesPerStep": 3,
+      "frames": [
+        {
+          "width": 98,
+          "height": 116,
+          "offsetX": 20,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#FF7A84"
+        },
+        {
+          "width": 88,
+          "height": 116,
+          "offsetX": 16,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#FF7A84"
+        }
+      ]
+    },
+    {
+      "name": "atk_recovery",
+      "loop": false,
+      "framesPerStep": 4,
+      "frames": [
+        {
+          "width": 72,
+          "height": 118,
+          "offsetX": 6,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#D93A45"
+        }
+      ]
+    },
+    {
+      "name": "heavy_startup",
+      "loop": false,
+      "framesPerStep": 5,
+      "frames": [
+        {
+          "width": 56,
+          "height": 120,
+          "offsetX": -12,
+          "offsetY": 0,
+          "rotation": -10,
+          "color": "#D93A45"
+        }
+      ]
+    },
+    {
+      "name": "heavy_active",
+      "loop": false,
+      "framesPerStep": 3,
+      "frames": [
+        {
+          "width": 112,
+          "height": 120,
+          "offsetX": 28,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#FF7A84"
+        },
+        {
+          "width": 100,
+          "height": 118,
+          "offsetX": 22,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#FF7A84"
+        }
+      ]
+    },
+    {
+      "name": "heavy_recovery",
+      "loop": false,
+      "framesPerStep": 4,
+      "frames": [
+        {
+          "width": 78,
+          "height": 118,
+          "offsetX": 10,
+          "offsetY": 0,
+          "rotation": 0,
+          "color": "#D93A45"
+        }
+      ]
+    },
+    {
+      "name": "hurt",
+      "loop": true,
+      "framesPerStep": 4,
+      "frames": [
+        {
+          "width": 64,
+          "height": 112,
+          "offsetX": -10,
+          "offsetY": 0,
+          "rotation": -14,
+          "color": "#FF7A84"
+        },
+        {
+          "width": 62,
+          "height": 114,
+          "offsetX": -6,
+          "offsetY": 0,
+          "rotation": -8,
+          "color": "#FF7A84"
+        }
+      ]
+    },
+    {
+      "name": "guard",
+      "loop": true,
+      "framesPerStep": 8,
+      "frames": [
+        {
+          "width": 56,
+          "height": 118,
+          "offsetX": -10,
+          "offsetY": 0,
+          "rotation": 6,
+          "color": "#FF7A84"
+        }
+      ]
+    },
+    {
+      "name": "air_hurt",
+      "loop": true,
+      "framesPerStep": 6,
+      "frames": [
+        {
+          "width": 64,
+          "height": 110,
+          "offsetX": -6,
+          "offsetY": 6,
+          "rotation": 24,
+          "color": "#FF7A84"
+        }
+      ]
+    },
+    {
+      "name": "knockdown",
+      "loop": true,
+      "framesPerStep": 8,
+      "frames": [
+        {
+          "width": 120,
+          "height": 50,
+          "offsetX": -10,
+          "offsetY": 0,
+          "rotation": -78,
+          "color": "#FF7A84"
+        }
+      ]
+    },
+    {
+      "name": "wakeup",
+      "loop": true,
+      "framesPerStep": 6,
+      "frames": [
+        {
+          "width": 66,
+          "height": 78,
+          "offsetX": -4,
+          "offsetY": 0,
+          "rotation": -20,
+          "color": "#D93A45"
+        }
+      ]
+    }
+  ],
+  "states": {
+    "Standing": "idle",
+    "Walking": "walk",
+    "Crouching": "crouch",
+    "PreJump": "jump",
+    "Airborne": "jump",
+    "Startup": "atk_startup",
+    "Active": "atk_active",
+    "Recovery": "atk_recovery",
+    "Hitstun": "hurt",
+    "Blockstun": "guard",
+    "AirHitstun": "air_hurt",
+    "Knockdown": "knockdown",
+    "Wakeup": "wakeup"
+  },
+  "moves": {
+    "StandLightPunch": {
+      "startup": "atk_startup",
+      "active": "atk_active",
+      "recovery": "atk_recovery"
+    },
+    "BackDraft": {
+      "startup": "atk_startup",
+      "active": "atk_active",
+      "recovery": "atk_recovery"
+    },
+    "StandingThrow": {
+      "startup": "atk_startup",
+      "active": "atk_active",
+      "recovery": "atk_recovery"
+    },
+    "FireballPrototype": {
+      "startup": "heavy_startup",
+      "active": "heavy_active",
+      "recovery": "heavy_recovery"
+    },
+    "DragonPunchPrototype": {
+      "startup": "heavy_startup",
+      "active": "heavy_active",
+      "recovery": "heavy_recovery"
+    },
+    "Fireball": {
+      "startup": "heavy_startup",
+      "active": "heavy_active",
+      "recovery": "heavy_recovery"
+    },
+    "SweepPrototype": {
+      "startup": "heavy_startup",
+      "active": "heavy_active",
+      "recovery": "heavy_recovery"
+    }
+  }
+}

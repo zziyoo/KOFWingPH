@@ -61,7 +61,7 @@ dotnet build
 cd /d C:\Users\32360\Desktop\NewKOF\tests\BattleCore.Tests
 dotnet test
 ```
-期望：`失败: 0，通过: 951，已跳过: 0，总计: 951`
+期望：`失败: 0，通过: 978，已跳过: 0，总计: 978`
 
 ### 3.3 仅编译核心模块（验证核心独立可构建）
 
@@ -161,6 +161,22 @@ cd /d C:\Users\32360\Desktop\NewKOF
 623A 的三段方向无法用注入构造（K20 的严格连续规则），图形验收用 P2 的 214B。
 
 ## 4. 最近完成的修改
+
+### 阶段 10C（2026-11-08）状态驱动动画管线（D125）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Presentation/AnimationSet.cs` | **新增**：`PoseFrame` / `AnimationClip` / `AnimationSet` / `MoveAnimation` |
+| `core/BattleCore/Presentation/AnimationResolver.cs` | **新增**：`FighterVisualClock` + `AnimationResolver`（状态→动画→姿态） |
+| `core/BattleCore/Data/PresentationDataLoader.cs` | **新增**：表现配置严格加载器（schema v1，未知字段拒绝，错误带路径） |
+| `data/presentation/Kai.json` / `Rei.json` | **新增**：各 15 段姿态动画（idle/walk/crouch/jump/三段攻击/受击/防御/击飞/倒地/起身） |
+| `scripts/FighterVisual.cs` | **新增**：把 `ResolvedPose` 应用到 `ColorRect`（尺寸/偏移/旋转/颜色/镜像） |
+| `scripts/BattleScene.cs` | 加载 `res://data/presentation/*.json`；选人/换人/每回合绑定动画集合并重置时钟 |
+| `tests/BattleCore.Tests/AnimationTests.cs` | **新增 27 项** |
+| `tests/BattleCore.Tests/BattleCore.Tests.csproj` | 复制 `data/presentation` 到测试输出 |
+
+**验收**：978/978（Debug）、表现层 0 警告 0 错误、`p10c_attack.png` / `p10c_hurt.png` 显示姿态随状态变化。
+**StateVersion 13 / CoreVersion 14 不变**（动画完全在快照之外）。
 
 ### 阶段 10B（2026-11-08）选队、接替流程与输入诊断（D123–D124）
 
@@ -983,8 +999,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K82 | **跨交锋事件必须带交锋号（D122）** | 每场 Frame 从 0 开始，裸 EventId 必然重号，特效去重/回放会把旧事件当新事件 | 用 `TeamMatchEventId(BoutNumber, EventId)`；不要假设裸 EventId 全场唯一 |
 | K83 | **选队规则放纯 C#，别写进 Godot 节点（D123）** | 槽位游标、换人回绕、改阵容取消确认这些确定性逻辑写成节点脚本后只能手点验证 | 用 `TeamSelectionModel`；BattleScene 只把按键转成方法调用、把结果画出来 |
 | K84 | **双人同帧先看采样掩码，再怀疑输入链路（D124）** | 直接改 `KeyboardInputMap`/`InputBuffer` 会把健康链路改坏，还掩盖真正的配置缺口 | 开 `--inputdiag` 看 `sample: P1=… P2=…` 与 `state: fN …`；本轮真因是 **Rei 无裸 5A**，不是输入缺陷 |
+| K85 | **动画只能读权威状态，绝不能反过来写（D125）** | 用 AnimationPlayer 回调扣血/结束硬直/开判定框，会让掉帧与缺素材改变胜负 | 单向流 `FighterState → AnimationResolver → Pose`；招式帧用 `MoveElapsedFrames`，不用动画时钟 |
+| K86 | **表现配置独立于战斗 JSON（D125）** | fighter schema 已声明未知字段拒绝，往里加动画字段会直接破坏已发布格式 | 放 `data/presentation/*.json`；缺素材允许降级（`CreateFallback`），格式非法必须带路径报错 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10B 验收时 **951/951** 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 10C 验收时 **978/978** 测试通过，可正常启动运行。
 
 ---
 
