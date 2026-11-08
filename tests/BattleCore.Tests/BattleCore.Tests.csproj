@@ -20,4 +20,10 @@
     <ProjectReference Include="..\..\core\BattleCore\BattleCore.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 09D：角色 JSON 作为测试数据复制到输出目录，供加载器与等价性测试读取。 -->
+    <Content Include="..\..\data\fighters\*.json" Link="data\fighters\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

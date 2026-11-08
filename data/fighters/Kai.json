@@ -1,0 +1,407 @@
+{
+  "schemaVersion": 1,
+  "fighterId": "Kai",
+  "displayName": "Kai",
+  "movement": {
+    "walkForwardSpeed": {
+      "numerator": 2,
+      "denominator": 1
+    },
+    "walkBackwardSpeed": {
+      "numerator": 3,
+      "denominator": 2
+    },
+    "preJumpFrames": {
+      "numerator": 3,
+      "denominator": 1
+    },
+    "shortHopInitialVelocity": {
+      "numerator": 4,
+      "denominator": 1
+    },
+    "highJumpInitialVelocity": {
+      "numerator": 13,
+      "denominator": 2
+    },
+    "jumpGravity": {
+      "numerator": 1,
+      "denominator": 2
+    },
+    "horizontalJumpSpeed": {
+      "numerator": 3,
+      "denominator": 1
+    }
+  },
+  "commands": [
+    {
+      "commandId": "236A",
+      "directions": [
+        "Down",
+        "DownForward",
+        "Forward"
+      ],
+      "buttons": [
+        "LightPunch"
+      ],
+      "maxSequenceFrames": 20,
+      "buttonToleranceFrames": 3,
+      "priority": 10,
+      "bufferLifetimeFrames": 8,
+      "chargeHoldFrames": 0,
+      "chargeReleaseToleranceFrames": 3
+    },
+    {
+      "commandId": "623A",
+      "directions": [
+        "Forward",
+        "Down",
+        "DownForward"
+      ],
+      "buttons": [
+        "LightPunch"
+      ],
+      "maxSequenceFrames": 20,
+      "buttonToleranceFrames": 3,
+      "priority": 20,
+      "bufferLifetimeFrames": 8,
+      "chargeHoldFrames": 0,
+      "chargeReleaseToleranceFrames": 3
+    },
+    {
+      "commandId": "5A",
+      "directions": [],
+      "buttons": [
+        "LightPunch"
+      ],
+      "maxSequenceFrames": 20,
+      "buttonToleranceFrames": 3,
+      "priority": 5,
+      "bufferLifetimeFrames": 8,
+      "chargeHoldFrames": 0,
+      "chargeReleaseToleranceFrames": 3
+    },
+    {
+      "commandId": "5D",
+      "directions": [],
+      "buttons": [
+        "HeavyKick"
+      ],
+      "maxSequenceFrames": 20,
+      "buttonToleranceFrames": 3,
+      "priority": 5,
+      "bufferLifetimeFrames": 8,
+      "chargeHoldFrames": 0,
+      "chargeReleaseToleranceFrames": 3
+    },
+    {
+      "commandId": "5C",
+      "directions": [],
+      "buttons": [
+        "LightKick"
+      ],
+      "maxSequenceFrames": 20,
+      "buttonToleranceFrames": 3,
+      "priority": 5,
+      "bufferLifetimeFrames": 8,
+      "chargeHoldFrames": 0,
+      "chargeReleaseToleranceFrames": 3
+    }
+  ],
+  "moves": [
+    {
+      "moveId": "StandLightPunch",
+      "commandId": "5A",
+      "startupFrames": 3,
+      "activeFrames": 2,
+      "recoveryFrames": 6,
+      "allowedFrom": "Standing",
+      "attacks": [
+        {
+          "offsetForward": {
+            "numerator": 45,
+            "denominator": 1
+          },
+          "offsetUp": {
+            "numerator": 70,
+            "denominator": 1
+          },
+          "halfWidth": {
+            "numerator": 20,
+            "denominator": 1
+          },
+          "halfHeight": {
+            "numerator": 20,
+            "denominator": 1
+          },
+          "firstActiveFrame": 0,
+          "lastActiveFrame": null,
+          "height": "Mid",
+          "damage": 30,
+          "hitstunFrames": 12,
+          "blockstunFrames": 8,
+          "groundKnockback": {
+            "numerator": 2,
+            "denominator": 1
+          },
+          "groundKnockbackFriction": {
+            "numerator": 1,
+            "denominator": 2
+          },
+          "blockKnockback": {
+            "numerator": 3,
+            "denominator": 2
+          },
+          "launchVelocityX": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "launchVelocityY": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "knockdownFrames": 0,
+          "wakeupFrames": 0,
+          "hitstopFrames": 4
+        }
+      ],
+      "cancels": [
+        {
+          "targetMoveId": "FireballPrototype",
+          "windowFirstFrame": 3,
+          "windowLastFrame": 10,
+          "phases": "Active,Recovery",
+          "requiresHitConfirm": true,
+          "requiresBlockConfirm": false,
+          "allowWhiff": false
+        }
+      ],
+      "throws": [],
+      "projectiles": []
+    },
+    {
+      "moveId": "FireballPrototype",
+      "commandId": "236A",
+      "startupFrames": 4,
+      "activeFrames": 3,
+      "recoveryFrames": 8,
+      "allowedFrom": "GroundIdle",
+      "attacks": [
+        {
+          "offsetForward": {
+            "numerator": 50,
+            "denominator": 1
+          },
+          "offsetUp": {
+            "numerator": 60,
+            "denominator": 1
+          },
+          "halfWidth": {
+            "numerator": 25,
+            "denominator": 1
+          },
+          "halfHeight": {
+            "numerator": 25,
+            "denominator": 1
+          },
+          "firstActiveFrame": 0,
+          "lastActiveFrame": null,
+          "height": "Mid",
+          "damage": 50,
+          "hitstunFrames": 16,
+          "blockstunFrames": 10,
+          "groundKnockback": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "groundKnockbackFriction": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "blockKnockback": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "launchVelocityX": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "launchVelocityY": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "knockdownFrames": 0,
+          "wakeupFrames": 0,
+          "hitstopFrames": 0
+        }
+      ],
+      "cancels": [],
+      "throws": [],
+      "projectiles": []
+    },
+    {
+      "moveId": "DragonPunchPrototype",
+      "commandId": "623A",
+      "startupFrames": 3,
+      "activeFrames": 5,
+      "recoveryFrames": 10,
+      "allowedFrom": "GroundIdle",
+      "attacks": [
+        {
+          "offsetForward": {
+            "numerator": 35,
+            "denominator": 1
+          },
+          "offsetUp": {
+            "numerator": 95,
+            "denominator": 1
+          },
+          "halfWidth": {
+            "numerator": 22,
+            "denominator": 1
+          },
+          "halfHeight": {
+            "numerator": 30,
+            "denominator": 1
+          },
+          "firstActiveFrame": 0,
+          "lastActiveFrame": null,
+          "height": "High",
+          "damage": 60,
+          "hitstunFrames": 18,
+          "blockstunFrames": 12,
+          "groundKnockback": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "groundKnockbackFriction": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "blockKnockback": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "launchVelocityX": {
+            "numerator": 3,
+            "denominator": 2
+          },
+          "launchVelocityY": {
+            "numerator": 6,
+            "denominator": 1
+          },
+          "knockdownFrames": 12,
+          "wakeupFrames": 8,
+          "hitstopFrames": 0
+        }
+      ],
+      "cancels": [],
+      "throws": [],
+      "projectiles": []
+    },
+    {
+      "moveId": "StandingThrow",
+      "commandId": "5D",
+      "startupFrames": 2,
+      "activeFrames": 2,
+      "recoveryFrames": 8,
+      "allowedFrom": "Standing",
+      "attacks": [],
+      "cancels": [],
+      "throws": [
+        {
+          "throwId": "Throw",
+          "range": {
+            "numerator": 70,
+            "denominator": 1
+          },
+          "firstActiveFrame": 0,
+          "lastActiveFrame": null,
+          "damage": 60,
+          "knockdownFrames": 12,
+          "wakeupFrames": 8,
+          "pushDistance": {
+            "numerator": 20,
+            "denominator": 1
+          },
+          "hitstopFrames": 6,
+          "targetStates": "All"
+        }
+      ],
+      "projectiles": []
+    },
+    {
+      "moveId": "Fireball",
+      "commandId": "5C",
+      "startupFrames": 5,
+      "activeFrames": 2,
+      "recoveryFrames": 10,
+      "allowedFrom": "Standing",
+      "attacks": [],
+      "cancels": [],
+      "throws": [],
+      "projectiles": [
+        {
+          "projectileTypeId": "Fireball",
+          "hit": {
+            "offsetForward": {
+              "numerator": 45,
+              "denominator": 1
+            },
+            "offsetUp": {
+              "numerator": 60,
+              "denominator": 1
+            },
+            "halfWidth": {
+              "numerator": 14,
+              "denominator": 1
+            },
+            "halfHeight": {
+              "numerator": 14,
+              "denominator": 1
+            },
+            "firstActiveFrame": 0,
+            "lastActiveFrame": null,
+            "height": "Mid",
+            "damage": 40,
+            "hitstunFrames": 14,
+            "blockstunFrames": 10,
+            "groundKnockback": {
+              "numerator": 0,
+              "denominator": 1
+            },
+            "groundKnockbackFriction": {
+              "numerator": 0,
+              "denominator": 1
+            },
+            "blockKnockback": {
+              "numerator": 0,
+              "denominator": 1
+            },
+            "launchVelocityX": {
+              "numerator": 0,
+              "denominator": 1
+            },
+            "launchVelocityY": {
+              "numerator": 0,
+              "denominator": 1
+            },
+            "knockdownFrames": 0,
+            "wakeupFrames": 0,
+            "hitstopFrames": 4
+          },
+          "speedX": {
+            "numerator": 6,
+            "denominator": 1
+          },
+          "speedY": {
+            "numerator": 0,
+            "denominator": 1
+          },
+          "lifetimeFrames": 90,
+          "maxAlive": 1,
+          "spawnAtActiveFrame": 0
+        }
+      ]
+    }
+  ]
+}

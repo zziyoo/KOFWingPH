@@ -162,6 +162,23 @@ cd /d C:\Users\32360\Desktop\NewKOF
 
 ## 4. 最近完成的修改
 
+### 阶段 09D（2026-11-08）角色与招式 JSON 数据外置（D113–D116）
+
+| 文件 | 变更 |
+|---|---|
+| `core/BattleCore/Data/FighterDataDtos.cs` | **新增**：Schema v1 DTO（fighter / movement / command / move / attack / cancel / throw / projectile / fraction） |
+| `core/BattleCore/Data/FighterDataException.cs` | **新增**：带 `SourcePath` / `FieldPath` / `Reason` 的加载错误 |
+| `core/BattleCore/Data/FighterDataLoader.cs` | **新增**：纯 C# 加载器（字符串/Stream → 严格校验 → `FighterDefinition` / `FighterCatalog`），不依赖 Godot |
+| `data/fighters/Kai.json` / `Rei.json` | **新增**：与 `DemoRoster` 逐字段等价的招式数据（含取消/投技/飞行道具） |
+| `scripts/BattleScene.cs` | 开赛前经 `FileAccess` 一次性加载 `res://data/fighters/*.json` 构建目录（失败即明确报错） |
+| `export_presets.cfg` / `.gitignore` | 导出预设加入 `*.json` 过滤器；预设文件纳入版本管理 |
+| `tests/BattleCore.Tests/FighterDataTests.cs` | **新增 27 项**：加载、等价性、战斗行为、错误处理 |
+| `tests/BattleCore.Tests/Stage09AcceptanceTests.cs` | **新增 8 项**：阶段 09 场景 A–E、10000 帧确定性、30/60/144fps、StepExact/Advance |
+
+**验收**：856/856 Debug/Release、四构建 0 错误、Godot 无头导入 `[ DONE ]`、图形运行
+`p09d_json_loaded.png` / `p09d_json_fight.png`（P2 970/1000、Hitstun、Combo 1）。
+**StateVersion 13 / CoreVersion 14 不变**。**导出模板未安装**，未做真实导出包实测（已配置 `include_filter=*.json`）。
+
 ### 阶段 09C（2026-11-08）选人、回合过渡与完整比赛流程（D110–D112）
 
 | 文件 | 变更 |
@@ -903,8 +920,12 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 | K70 | **角色选择走目录，不要在模拟里写死名字（D110）** | 在 `BattleSimulation` 里按角色名分支会让新增角色必须改内核；镜像共用不可变配置是安全的 | 只改 `FighterCatalog` 条目；战斗状态永远在每回合独立的 `BattleState` 里 |
 | K71 | **界面按键必须拦截（D111）** | J / `,` 同时是选人确认键与战斗轻拳键；不拦截会变成开局首帧攻击 | 选人/过渡/终局阶段 `_Input` 直接 return；每回合新建 `InputBuffer` 并重建 `KeyboardInputMap` |
 | K72 | **过渡与终局不推进战斗帧（D111）** | 继续推进会重复投递 `RoundEnded`、重复扣分、让旧弹进入新回合 | `MatchSession.Advance/StepExact` 在 `!IsRoundLive` 时返回 0；HUD 只读 `MatchState` |
+| K73 | **JSON 只是数据，不能变成第二套战斗算法（D113）** | 让模拟层读文件或按配置分支，会把「文件内容」变成隐式输入，破坏确定性 | 只有 `FighterDataLoader` 认识 JSON；`BattleSimulation` 永远只吃 `FightRoster`；开赛前一次性加载 |
+| K74 | **定点数别用 double 承载（D114）** | `1.5` 经 double 解析在不同平台/文化下可能末位不同，且会把非法值静默变成 0 | JSON 一律 `{numerator, denominator}` + `checked` 转 Q16.16；分母必须为正；越界即失败 |
+| K75 | **迁移必须证明「数值没变」（D115）** | 只验证「能加载」会漏掉悄悄改掉的伤害/帧数，直接污染旧基线 | 摊平全部战斗相关字段逐项比较 `DemoRoster`；保留 C# 演示配置作夹具与回退 |
+| K76 | **导出包不会自动带 `.json`（D116）** | Godot 只打包被识别的资源，`.json` 不在默认过滤器中，导出后角色会消失 | `export_presets.cfg` 写 `include_filter="*.json"`；用 `FileAccess` 从 `res://` 读，不写绝对路径 |
 
-**无阻塞性问题。** 编译 0 警告 0 错误，阶段 09C 验收时 821/821 测试通过，可正常启动运行。
+**无阻塞性问题。** 编译 0 警告 0 错误，阶段 09D 验收时 **856/856** 测试通过，可正常启动运行。
 
 ---
 
@@ -1189,11 +1210,12 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
    （`Airborne` 状态转换）与 `PositionX` 真实运动；判定框与事件流是阶段 06 入口。
    **不得**在 `BattleScene._Process` 重新引入时间累积；运动数值进 `FighterState` 时
    必须保持不可变快照契约（D57）。
-4e. **阶段 08 已结项**（08A–08D + 最终补修 D100–D103）；**阶段 09A/09B/09C 已交付**
-   （D104–D106 / D107–D109 / D110–D112），821 项测试。09D（JSON 外置）仍待完成。
-   阶段 09 安全入口（按依赖顺序）：① 比赛规则（多回合/计时/选人，建在 `RoundState` 上）；
-   ② 招式数据外置 JSON（`MoveDefinition` 已含攻击/取消/投技/投掷物四类数据）；
-   ③ 空中防御/拆投等防御扩展；④ AI；⑤ 联机回滚（需先做序列化）。
+4e. **阶段 08 已结项**（08A–08D + 最终补修 D100–D103）；**阶段 09A–09D 已全部交付并结项**
+   （D104–D106 / D107–D109 / D110–D112 / D113–D116），**856 项测试**。
+   阶段 10 安全入口（按依赖顺序）：① 正式比赛流程补全（3v3 队伍赛 / 选人立绘 / BGM 与演出）；
+   ② 防御扩展（空中防御、拆投、防御反击）；③ AI（先做确定性脚本 AI，再做搜索式）；
+   ④ 资源与动画管线（精灵/特效/音效，仍需保持 BattleCore 无 Godot 依赖）；
+   ⑤ 联机回滚（必须先做 `BattleState` 序列化与版本迁移，当前**完全没有**）。
    **不要**在没有新决策的情况下改动 D96 的冻结语义、D97 的冲突表、D98 的相杀分界、D99 的实体顺序、
    D100–D103 的实例核账 / 冻结锚点 / 快照顺序 / 远程停顿入口。
    阶段 08 安全入口（按依赖顺序，详见 `PROGRESS.md` 阶段 07 总结）：① 比赛规则（多回合/计时/选人，
@@ -1320,7 +1342,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
       `TimeOver` 只在归零帧一条、`RoundEnded` 恰好一次、`RoundState.Reason` 区分 KO 与超时
 - [ ] 多回合比赛（D104–D106）：每回合独立 BattleSession、跨回合事件身份 `(RoundNumber, EventId)`、
       计分只在 `RecordRoundResult` 一次发生、DoubleKO 不加分、终局禁止再开回合、新回合全新 InputBuffer
-- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D112）与代码实现一致
+- [ ] JSON 加载（D113–D116）：Schema v1、整数分数、未知字段/缺失必填/重复 ID/非法窗口全部报错并带路径、
+      `FighterDataLoader` 不引用 Godot、Kai/Rei 与 `DemoRoster` 逐字段等价、导出预设含 `*.json`
+- [ ] 阶段 09 集成（场景 A–E）：完整比赛→重开、Time Over 比例裁决、连续 DoubleKO、镜像双弹对撞、
+      改 JSON 伤害改变结果、10000 帧确定性、30/60/144fps 一致、`StepExact`/`Advance` 等价
+- [ ] `docs/ARCHITECTURE.md` 第 4 节决策（D1–D116）与代码实现一致
 - [ ] `docs/PROGRESS.md` 已完成项与实际代码一致
 
 **工作结束时必须做的事：**

@@ -1,7 +1,7 @@
 # Godot
 .godot/
 export.cfg
-export_presets.cfg
+# export_presets.cfg 需随仓库提交：09D 起角色 JSON 必须靠 include_filter 随导出打包。
 *.translation
 
 # .NET / C#

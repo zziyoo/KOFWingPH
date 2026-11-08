@@ -2,6 +2,7 @@ using System.Text;
 using Godot;
 using NewKOF.BattleCore;
 using NewKOF.BattleCore.Combat;
+using NewKOF.BattleCore.Data;
 using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Match;
@@ -74,7 +75,8 @@ public partial class BattleScene : Node2D
         _debugBoxes = new DebugBoxDrawer { Enabled = _showDebugBoxes };
         AddChild(_debugBoxes);
 
-        _catalog = FighterCatalog.CreateDemo();
+        // 正常游戏优先使用外部 JSON 配置；仅在开赛前加载一次，运行中绝不重读文件。
+        _catalog = LoadFighterCatalog();
         _rules = RulesFromArgs();
         _p1Index = 0;
         _p2Index = _catalog.Entries.Count > 1 ? 1 : 0;
@@ -83,6 +85,42 @@ public partial class BattleScene : Node2D
 
         CreateMatchSession();
         SyncViewFromState();
+    }
+
+    /// <summary>
+    /// 从 <c>res://data/fighters/*.json</c> 一次性加载全部角色配置（D115）。
+    /// Godot 只负责打开实际文件；合法性判断全在纯 C# 加载器里。
+    /// 目录缺失、读取失败、JSON 非法都<b>立即抛出明确错误</b>，绝不悄悄回退到演示配置
+    /// 假装加载成功；纯内存 <c>FighterCatalog.CreateDemo()</c> 只作为测试夹具与回退路径。
+    /// </summary>
+    private static FighterCatalog LoadFighterCatalog()
+    {
+        const string directory = "res://data/fighters";
+        DirAccess? dir = DirAccess.Open(directory);
+        if (dir is null)
+            throw new InvalidOperationException(
+                $"[BattleScene] 角色数据目录不存在：{directory}（错误码 {(int)DirAccess.GetOpenError()}）。");
+
+        var documents = new List<FighterDataDocument>();
+        foreach (string file in dir.GetFiles())
+        {
+            if (!file.EndsWith(".json", StringComparison.Ordinal))
+                continue;
+
+            string path = $"{directory}/{file}";
+            Godot.FileAccess? access = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+            if (access is null)
+                throw new InvalidOperationException(
+                    $"[BattleScene] 无法读取角色数据：{path}（错误码 {(int)Godot.FileAccess.GetOpenError()}）。");
+
+            documents.Add(new FighterDataDocument(path, access.GetAsText()));
+        }
+
+        if (documents.Count == 0)
+            throw new InvalidOperationException(
+                $"[BattleScene] 角色数据目录没有 JSON 文件：{directory}。");
+
+        return FighterDataLoader.LoadCatalog(documents);
     }
 
     private void CreateMatchSession()

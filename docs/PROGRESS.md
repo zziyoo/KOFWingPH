@@ -2072,3 +2072,62 @@ F5→ESC→改选 Rei vs Kai）、暂停不跨过渡、跨回合事件身份、�
 角色配置仍来自 C# `DemoRoster`（09D 外置 JSON 后正常游戏改用外部配置）。
 
 ---
+
+## 阶段 09D 成果（角色与招式 JSON 数据外置，2026-11-08）—— D113–D116
+
+### 核心规则
+
+1. **Schema v1**：`schemaVersion` / `fighterId` / `displayName` / `movement` / `commands` / `moves`；
+   每条 Move 覆盖 `attacks` / `cancels` / `throws` / `projectiles` 四类能力，不是只导出普通攻击。
+   未知字段拒绝、缺失必填拒绝、`schemaVersion != 1` 拒绝。
+2. **定点数表示**：所有战斗数值使用 `{ "numerator": n, "denominator": d }` 整数分数，加载时
+   `checked` 转 Q16.16；分母必须为正，越界/非法立即失败，不做静默 0 填充。
+3. **加载器**：`FighterDataLoader` 纯 C#，接受字符串或 `Stream`，不读文件、不依赖 Godot；
+   校验在构造 `FighterDefinition` 之前逐字段给出 `文件:字段路径:原因`，并保留全部原有构造器不变式。
+4. **数据迁移**：Kai / Rei 迁到 `data/fighters/Kai.json` / `Rei.json`，与 `DemoRoster` 全覆盖逐字段
+   等价（指令、招式帧数、攻击框、伤害、硬直、Hitstop、击退/击飞/倒地、取消、投技、飞行道具、运动）。
+   `DemoRoster` 保留为测试夹具与回退路径。
+5. **Godot 集成**：`BattleScene` 开赛前经 `FileAccess` 一次性读取 `res://data/fighters/*.json` 构建
+   `FighterCatalog`；`export_presets.cfg` 的 `include_filter` 加入 `*.json`，保证导出包内可用。
+   运行中的比赛不再读文件。
+
+### 测试与验收
+
+新增 **27 项** `FighterDataTests`（821 → **848**）：Kai/Rei 加载与逐字段等价、JSON 下 5A/236A/623A/
+214B/取消/投技/飞行道具/Hitstop/相杀、修改伤害只影响该招式、同 JSON 两次加载一致、同输入逐位一致、
+非法 JSON / 版本 / 重复 ID / 缺失引用 / 非法枚举 / 负伤害 / 越界 Hitstop / 非法定点数 / 攻击窗口 /
+空必填字段 / 未知字段全部报错并带路径、Stream 与字符串等价、加载器不引用 Godot、目录重复 ID 拒绝。
+
+另新增 **8 项** `Stage09AcceptanceTests`（阶段 09 统一集成）：
+场景 A 完整比赛（两回合 → MATCH WIN → 重开保留选人）、场景 B Time Over 比例裁决与单次计分、
+场景 C 连续 DoubleKO 不悬置、场景 D 镜像 Kai vs Kai 双弹对撞、场景 E 改 JSON 伤害即改变比赛结果、
+10000 帧比赛级确定性（组合事件身份全唯一）、30/60/144fps 相同逻辑帧一致、`StepExact`/`Advance` 整回合等价。
+
+| 项 | 实际结果 |
+|---|---|
+| `dotnet test`（Debug / Release） | **856/856** / **856/856** |
+| 四构建（BattleCore + NewKOF，Debug/Release） | 全部 **0 错误** |
+| Godot 无头导入 | `[ DONE ]`（4 个阶段） |
+| Godot 图形运行 | `p09d_json_loaded.png`（`Catalog: Kai, Rei`）、`p09d_json_fight.png`（P2 `970/1000`、`Hitstun(5)`、`Combo 1`，与 JSON 的 30 点伤害一致） |
+| 版本 | **StateVersion 13 / CoreVersion 14 不变**（只新增数据加载层，不改快照格式） |
+
+**已知限制**：导出模板未安装，未做真实导出包实测（`include_filter` 已配置并记录）；
+JSON 只覆盖角色与招式数据，不含动画/音效/资源引用；尚无跨版本迁移（schema v1 only）。
+
+---
+
+## 阶段 09 总结（2026-11-08）—— 正式结项
+
+| 子阶段 | 内容 | 决策 | 测试 | Commit |
+|---|---|---|---|---|
+| 09A | 多回合比赛与胜场统计 | D104–D106 | 763 → 783 | `f2a756f` |
+| 09B | 逻辑帧计时与 Time Over | D107–D109 | 783 → 807 | `b1398da` |
+| 09C | 选人、回合过渡与完整比赛流程 | D110–D112 | 807 → 821 | `b0b0b42` |
+| 09D | 招式与角色 JSON 数据外置 | D113–D116 | 821 → 848 | 本轮提交 |
+| 集成 | 场景 A–E + 长跑/帧率/路径一致性 | — | 848 → **856** | 同上 |
+
+**分层结论**：`BattleState` 仍是唯一权威战斗快照；`RoundState` 回答「这一回合谁赢、为什么」；
+`MatchState` 回答「打到第几回合、各赢几场、整场谁赢」；Godot 只显示。计时器在 `BattleState` 内，
+JSON 只提供不可变配置。旧单回合 API（`BattleSimulation.Step` / `BattleSession`）语义未变。
+
+**仍不支持**：正式 KOF 3v3 队伍赛、空中防御/拆投、AI、联机回滚与 `BattleState` 序列化。
