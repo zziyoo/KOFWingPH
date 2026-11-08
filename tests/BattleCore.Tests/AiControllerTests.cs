@@ -272,4 +272,35 @@ public class AiControllerTests
         Assert.Equal(InputBits.Left | InputBits.HeavyPunch, result.Bits);
         Assert.Equal(5u, result.State.RandomState);
     }
+
+    private static InputBits[] Stream(AiDifficulty difficulty, AiTactic tactic)
+    {
+        var roster = Roster();
+        var session = new BattleSession(Duel(160), simulation: new BattleSimulation(roster));
+        var source = new AiInputSource(() => session.CurrentState, roster, new InputBuffer(),
+            new AiController(AiDifficultyProfile.For(difficulty), tactic), seed: 1977);
+        session.StepExact(300, inputSource: source);
+        return source.History.Select(f => f.Player1).ToArray();
+    }
+
+    [Fact]
+    public void ThreeTacticsProduceDistinctReproducibleInputStreams()
+    {
+        var balanced = Stream(AiDifficulty.Normal, AiTactic.Balanced);
+        var offensive = Stream(AiDifficulty.Normal, AiTactic.Offensive);
+        var defensive = Stream(AiDifficulty.Normal, AiTactic.Defensive);
+        Assert.False(balanced.SequenceEqual(offensive));
+        Assert.False(balanced.SequenceEqual(defensive));
+        Assert.False(offensive.SequenceEqual(defensive));
+        Assert.Equal(offensive, Stream(AiDifficulty.Normal, AiTactic.Offensive));
+    }
+
+    [Fact]
+    public void DifficultyProducesDistinctReproducibleInputStreams()
+    {
+        var easy = Stream(AiDifficulty.Easy, AiTactic.Balanced);
+        var expert = Stream(AiDifficulty.Expert, AiTactic.Balanced);
+        Assert.False(easy.SequenceEqual(expert));
+        Assert.Equal(expert, Stream(AiDifficulty.Expert, AiTactic.Balanced));
+    }
 }

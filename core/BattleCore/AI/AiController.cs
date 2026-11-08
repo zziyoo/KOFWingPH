@@ -75,6 +75,7 @@ public sealed class AiController : IAiPolicy
 
         var seen = committed.Observations.LastOrDefault(o =>
             o.Frame <= current.Frame - Math.Max(1, _profile.ObservationDelayFrames));
+        var tuning = Tune(seen);
         var height = seen is null ? null : ThreatHeight(seen);
         bool threat = height.HasValue;
         int since = threat ? (committed.ThreatSinceFrame < 0 || committed.Action is "Grabbed" or "Tech" or "TechMiss"
@@ -94,7 +95,7 @@ public sealed class AiController : IAiPolicy
                 bool guard = committed.Action == "AirGuard";
                 if (current.Frame >= committed.NextDecisionFrame)
                 {
-                    guard = Roll(_profile.GuardChance);
+                    guard = Roll(tuning.GuardChance);
                     next = next with { NextDecisionFrame = current.Frame + _profile.DecisionIntervalFrames };
                 }
                 next = next with { Action = guard ? "AirGuard" : "AirObserve" };
@@ -128,15 +129,15 @@ public sealed class AiController : IAiPolicy
         Clear("Observe");
         next = next with { NextDecisionFrame = current.Frame + _profile.DecisionIntervalFrames };
         if (Roll(_profile.MistakeChance)) return Result(InputBits.None);
-        if (threat && current.Frame - since >= _profile.ReactionDelayFrames && Roll(_profile.GuardChance))
+        if (threat && current.Frame - since >= _profile.ReactionDelayFrames && Roll(tuning.GuardChance))
         {
             next = next with { Action = "Guard" };
             return Result(Direction(height == AttackHeight.Low ? CommandDirection.DownBack : CommandDirection.Back));
         }
 
         bool punish = seen.Opponent.LogicState == FighterLogicState.Recovery && Roll(_profile.CounterChance);
-        bool throwAttempt = Roll(_profile.ThrowChance);
-        bool attack = punish || Roll(_profile.AttackChance);
+        bool throwAttempt = Roll(tuning.ThrowChance);
+        bool attack = punish || Roll(tuning.AttackChance);
         MoveDefinition? best = null;
         int bestScore = int.MinValue;
         if (attack || throwAttempt)
@@ -148,7 +149,7 @@ public sealed class AiController : IAiPolicy
                 bool isThrow = move.Throws.Any(t => t.AllowsTarget(seen.Opponent.LogicState) && seen.Distance <= t.Range);
                 if (move.Throws.Count > 0 && (!throwAttempt || !isThrow)) continue;
                 if (move.Throws.Count == 0 && !attack) continue;
-                int score = Score(move, seen, punish);
+                int score = Score(move, seen, punish, tuning.PreferredDistance);
                 if (score < 0) continue;
                 // Bounded per-candidate variation, independent of iteration/hash implementation.
                 next = next with { RandomState = AiRandom.Next(next.RandomState) };
@@ -171,7 +172,7 @@ public sealed class AiController : IAiPolicy
 
         // A failed attack roll still closes distance. Defensive retreat is bounded by distance
         // and alternates with approach, so a policy can never back away forever.
-        var preferred = _profile.PreferredDistance;
+        var preferred = tuning.PreferredDistance;
         if (seen.Distance > preferred + FixedPoint.FromInt(12) || committed.Action == "Reposition")
         {
             next = next with { Action = "Approach" };
@@ -186,7 +187,29 @@ public sealed class AiController : IAiPolicy
         return Result(Direction(CommandDirection.Forward));
     }
 
-    private int Score(MoveDefinition move, AiObservation seen, bool punish)
+    private readonly record struct Tuning(int AttackChance, int GuardChance, int ThrowChance, FixedPoint PreferredDistance);
+
+    // All tactic modifiers live here. They change decision preferences, never fighter attributes.
+    // Balanced adds pressure when behind on public health or when the visible clock is nearly out.
+    private Tuning Tune(AiObservation? seen)
+    {
+        bool pressure = _tactic == AiTactic.Balanced && seen is not null &&
+            ((long)seen.Self.Health * seen.Opponent.MaxHealth < (long)seen.Opponent.Health * seen.Self.MaxHealth ||
+             seen.Timer is <= 600);
+        var adjustments = _tactic switch
+        {
+            AiTactic.Offensive => (attack: 140, guard: -70, grab: 80, distance: -15),
+            AiTactic.Defensive => (attack: -100, guard: 100, grab: -50, distance: 20),
+            _ => (attack: pressure ? 80 : 0, guard: 0, grab: 0, distance: pressure ? -20 : 0)
+        };
+        var preferred = _profile.PreferredDistance + FixedPoint.FromInt(adjustments.distance);
+        return new(Math.Clamp(_profile.AttackChance + adjustments.attack, 0, 1000),
+            Math.Clamp(_profile.GuardChance + adjustments.guard, 0, 1000),
+            Math.Clamp(_profile.ThrowChance + adjustments.grab, 0, 1000),
+            preferred < FixedPoint.Zero ? FixedPoint.Zero : preferred);
+    }
+
+    private int Score(MoveDefinition move, AiObservation seen, bool punish, FixedPoint preferredDistance)
     {
         if (move.Throws.Count > 0) return 650 - Math.Min(100, move.StartupFrames);
         bool projectile = move.Projectiles.Count > 0;
@@ -196,8 +219,8 @@ public sealed class AiController : IAiPolicy
         bool inRange = seen.Distance <= reach;
         if (!projectile && !inRange) return -1;
         int damage = Math.Min(200, move.Attacks.Select(a => a.Damage).Concat(move.Projectiles.Select(p => p.Hit.Damage)).DefaultIfEmpty().Max());
-        int score = 300 + damage - Math.Min(120, move.StartupFrames * 3) - Math.Min(60, move.RecoveryFrames);
-        if (projectile) score += seen.Distance > _profile.PreferredDistance + FixedPoint.FromInt(40) ? 230 : -100;
+        int score = 300 + damage - Math.Min(40, move.StartupFrames) * 3 - Math.Min(60, move.RecoveryFrames);
+        if (projectile) score += seen.Distance > preferredDistance + FixedPoint.FromInt(40) ? 230 : -100;
         if (punish && inRange) score += move.StartupFrames < seen.Opponent.PhaseRemainingFrames ? 300 : -120;
         if (_tactic == AiTactic.Offensive) score += Math.Min(80, damage / 2);
         if (_tactic == AiTactic.Defensive && projectile) score += 50;
