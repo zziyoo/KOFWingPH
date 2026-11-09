@@ -1547,3 +1547,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 本阶段未修改FighterState/BattleState/BattleSimulation/伤害与比赛计分规则，StateVersion15/CoreVersion16不变；AI策略v1。后续恢复仍要求相同不可变角色定义和Profile/Tactic，比较策略内容使用ContentEquals。
 - GitHub中途网络超时曾阻塞推送，随后网络恢复，12A `bd744078f4c193624fbfe1e3d86e32ca3b33367c`、12B `bcbb500f3bf7a64a379e00eec390d4fa3bc1649f`、12C `9eea512e132ea1b5e2438294d65927818870736f` 已成功推送。12D最终提交用git log核实，交付时再次检查本地/远程HEAD。
 - 阶段12开发与本地验收完成；没有已知重大回归。阶段13未启动，已有统一输入接口与独立策略快照可供后续需求使用；不提前假设其范围。
+
+### 阶段13A 交接
+- 本地输入与导出位于 Git 忽略的 `local-mugen/` 和 `data/imported-characters/`；第三方资源禁止直接推送。导入与预览命令见 `docs/MUGEN_IMPORT.md`。
+- SFF v1 视觉数据和 AIR 的分析、图集、预览与可选表现绑定已实现；SFF v2 未实现。重复 Action 和 Sprite 使用首条并记录诊断，缺图不进入判定。Terry 只有视觉数据，不是可操作角色。
+- 基线 StateVersion 15 / CoreVersion 16 不变。13B 的角色战斗配置、规则映射及授权素材交付尚未开展。

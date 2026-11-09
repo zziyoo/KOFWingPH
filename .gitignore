@@ -23,3 +23,9 @@ Thumbs.db
 desktop.ini
 .DS_Store
 TestResults/
+
+# Third-party MUGEN material: local input and generated output only.
+local-mugen/
+data/imported-characters/
+__pycache__/
+*.pyc

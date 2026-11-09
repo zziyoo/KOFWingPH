@@ -21,6 +21,7 @@ public sealed class FighterVisual
     private readonly FighterVisualClock _clock = new();
 
     private AnimationSet _set;
+    private MugenSpriteVisual? _sprite;
     private int _flashUntilFrame = -1;
 
     public FighterVisual(Node2D root, ColorRect body, AnimationSet set)
@@ -28,6 +29,7 @@ public sealed class FighterVisual
         _root = root ?? throw new System.ArgumentNullException(nameof(root));
         _body = body ?? throw new System.ArgumentNullException(nameof(body));
         _set = set ?? throw new System.ArgumentNullException(nameof(set));
+        _sprite = MugenSpriteVisual.TryLoad(_root, _set.FighterId);
     }
 
     /// <summary>当前使用的表现配置。</summary>
@@ -45,6 +47,8 @@ public sealed class FighterVisual
             return;
 
         _set = set;
+        _sprite?.Dispose();
+        _sprite = MugenSpriteVisual.TryLoad(_root, _set.FighterId);
         _clock.Reset();
     }
 
@@ -87,6 +91,15 @@ public sealed class FighterVisual
         CurrentClip = $"{pose.ClipName}#{pose.FrameIndex}";
 
         bool facingLeft = fighter.Facing == Facing.Left;
+        int elapsed = fighter.IsInMove ? System.Math.Max(0, fighter.MoveElapsedFrames) : visualFrame;
+        bool usedSprite = _sprite?.Apply(pose.ClipName, elapsed, facingLeft) == true;
+        _body.Visible = !usedSprite;
+        if (usedSprite)
+        {
+            _root.RotationDegrees = 0;
+            return;
+        }
+        _sprite?.Hide();
         int offsetX = facingLeft ? -frame.OffsetX : frame.OffsetX;
 
         _body.Size = new Vector2(frame.Width, frame.Height);

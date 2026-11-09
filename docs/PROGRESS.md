@@ -2549,3 +2549,8 @@ HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本�
 - 本阶段未修改FighterState/BattleState/BattleSimulation/伤害与比赛计分规则，StateVersion15/CoreVersion16不变；AI策略v1。后续恢复仍要求相同不可变角色定义和Profile/Tactic，比较策略内容使用ContentEquals。
 - GitHub中途网络超时曾阻塞推送，随后网络恢复，12A `bd744078f4c193624fbfe1e3d86e32ca3b33367c`、12B `bcbb500f3bf7a64a379e00eec390d4fa3bc1649f`、12C `9eea512e132ea1b5e2438294d65927818870736f` 已成功推送。12D最终提交用git log核实，交付时再次检查本地/远程HEAD。
 - 阶段12开发与本地验收完成；没有已知重大回归。阶段13未启动，已有统一输入接口与独立策略快照可供后续需求使用；不提前假设其范围。
+
+### 阶段13A 验证记录
+- Terry 样本解析 2276 图片（含 68 链接）、611 组；856 个 Action 区块、854 个不同编号、3788 帧；重复 Action 5061、5910，重复 Sprite 30583,0。126 条非负缺图引用涉及 10 个键，主要是 8300,99（104 条），本地 SFF 不包含这些键。
+- 18 个 ACT 均解码样本帧；act01 完整导出 8 页图集。Godot Vulkan 预览待机、行走及出拳，另在对局中临时绑定验证 Sprite 与几何回退；未加入 Terry 战斗配置。
+- Debug/Release 测试各 1175 项通过，0 跳过；原 1172 项保留。导入器原创夹具 12 项通过；视觉时间线覆盖 30/60/144 和 Hitstop。
