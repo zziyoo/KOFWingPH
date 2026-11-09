@@ -2554,3 +2554,11 @@ HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本�
 - Terry 样本解析 2276 图片（含 68 链接）、611 组；856 个 Action 区块、854 个不同编号、3788 帧；重复 Action 5061、5910，重复 Sprite 30583,0。126 条非负缺图引用涉及 10 个键，主要是 8300,99（104 条），本地 SFF 不包含这些键。
 - 18 个 ACT 均解码样本帧；act01 完整导出 8 页图集。Godot Vulkan 预览待机、行走及出拳，另在对局中临时绑定验证 Sprite 与几何回退；未加入 Terry 战斗配置。
 - Debug/Release 测试各 1175 项通过，0 跳过；原 1172 项保留。导入器原创夹具 12 项通过；视觉时间线覆盖 30/60/144 和 Hitstop。
+
+### 阶段13B 验证记录
+- 原有 1175 项保留；Debug/Release 各 **1188 项通过**、0 跳过（新增 13 项）。Debug/Release 宿主及核心构建通过；Godot 无头扫描未发现重复 UID。Godot 原创 4×4 PNG/Manifest/Binding 的运行时和 Vulkan 像素烟测通过，包含资源读取失败、缺图、空白、轴点、镜像、透明和闪白恢复。
+- Terry 本地临时绑定：idle 0、walk 20、crouch 11、jump 41、轻攻击 200、重攻击临时 210、guard 120、hurt 5000、air hurt 5050、air guard 150、knockdown 5110、wakeup 5120；Kai 的飞行道具及升龙临时映射 1000/1100。投技、部分重攻击/防御和空中动作仍是技术代用，需人工复核；未声称实现 Terry 战斗规则。
+- 真实 Vulkan：`shots/13b_projectile_flash.png` 投射物受击闪白；`13b_throwhit.png` 投技命中、倒地与闪白；`13b_throwtech_event.png` 拆投；`13b_airguard.png` 与 `13b_team_airguard.png` 空防；`13b_team_tech.png` 队伍拆投；`13b_team_swap_rei.png` / `13b_team_swap_back.png` 换人视觉；`13b_terminal_recovered.png` 终局恢复原色。
+- `shots/13b_live_walk.png`、`13b_live_crouch.png`、`13b_live_jump.png`、`13b_live_attack.png` 验证真实战斗基本动作，`13b_p2_mirror.png` 验证第二席反向显示。`13b_human_ai.png`、`13b_ai_human.png` 分别运行到 MATCH WIN。
+- 完整 AI 1v1、3v3 与 Human/AI 双方向均运行至终局；启用/关闭视觉覆盖的逐提交帧审计，1v1 **1777** 帧、3v3 **3138** 帧的 HP、原始坐标、状态、招式及事件逐条一致。既有 30/60/144 与 10000 帧确定性测试包含在全量回归中。
+- 本机未安装 Godot 导出模板，正式发布包内贴图加载未实测；默认导出预设可能包含本地第三方图集，分发前必须确认授权及资源排除规则。StateVersion 15 / CoreVersion 16 未变。

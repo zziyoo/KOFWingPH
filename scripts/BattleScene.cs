@@ -696,7 +696,15 @@ public partial class BattleScene : Node2D
         // 再渲染最终权威状态。一次 Advance 提交几帧就消费几帧，绝不只看最后一帧。
         DrainPresentationFrames();
 
-        if (steps > 0)
+        bool terminal = _stage == Stage.DuelBattle && !_match.State.IsRoundLive ||
+                        _stage == Stage.TeamBattle && !_team.State.IsBoutLive;
+        bool flashChanged = false;
+        if (terminal && !_paused)
+        {
+            flashChanged = (_visual1?.AdvanceTerminalFlash(CurrentLogicFrame, delta) ?? false) |
+                           (_visual2?.AdvanceTerminalFlash(CurrentLogicFrame, delta) ?? false);
+        }
+        if (steps > 0 || flashChanged)
         {
             if (_diagnostics)
                 Trace("state", DescribeFrameState());
@@ -1206,10 +1214,12 @@ public partial class BattleScene
 
     private void CreateFighterVisuals()
     {
+        static string? Option(string name) => OS.GetCmdlineUserArgs()
+            .FirstOrDefault(arg => arg.StartsWith(name + "=", StringComparison.Ordinal))?[(name.Length + 1)..];
         if (_fighter1Node?.GetNodeOrNull<ColorRect>("Body") is ColorRect body1)
-            _visual1 = new FighterVisual(_fighter1Node, body1, SetFor(DefaultFighterId(0)));
+            _visual1 = new FighterVisual(_fighter1Node, body1, SetFor(DefaultFighterId(0)), Option("--p1-visual"), Option("--p1-visual-fighter"));
         if (_fighter2Node?.GetNodeOrNull<ColorRect>("Body") is ColorRect body2)
-            _visual2 = new FighterVisual(_fighter2Node, body2, SetFor(DefaultFighterId(1)));
+            _visual2 = new FighterVisual(_fighter2Node, body2, SetFor(DefaultFighterId(1)), Option("--p2-visual"), Option("--p2-visual-fighter"));
     }
 
     private string DefaultFighterId(int player) =>
@@ -1282,6 +1292,16 @@ public partial class BattleScene
         {
             _visual1?.ObserveFrame(frames[i], 0);
             _visual2?.ObserveFrame(frames[i], 1);
+            if (HasArg("--visual-audit"))
+            {
+                var frame = frames[i];
+                var a = frame.StateAfter.Fighter(0);
+                var b = frame.StateAfter.Fighter(1);
+                string events = string.Join(";", frame.Events.Select(e => e.ToString()));
+                GD.Print($"[VisualAudit] scope={frame.Scope} frame={frame.LogicFrame} " +
+                    $"p1={a.Health},{a.PositionX.RawValue},{a.PositionY.RawValue},{a.LogicState},{a.MoveId} " +
+                    $"p2={b.Health},{b.PositionX.RawValue},{b.PositionY.RawValue},{b.LogicState},{b.MoveId} events={events}");
+            }
         }
 
         if (!_fxEnabled)
@@ -1318,7 +1338,7 @@ public partial class BattleScene
         _shake.Trigger(shake);
 
         // 闪白按逻辑帧计时；取「事件帧 / 当前渲染帧」较大值，低帧率下也不会整段跳过。
-        if (cue.Kind is FeedbackKind.Hit or FeedbackKind.ThrowImpact)
+        if (VisualFlash.IsImpact(cue.Kind))
             TargetVisual(cue.TargetFighterId)?.FlashUntil(
                 Math.Max(frame.LogicFrame, CurrentLogicFrame) + 5);
     }

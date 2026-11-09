@@ -1552,3 +1552,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 本地输入与导出位于 Git 忽略的 `local-mugen/` 和 `data/imported-characters/`；第三方资源禁止直接推送。导入与预览命令见 `docs/MUGEN_IMPORT.md`。
 - SFF v1 视觉数据和 AIR 的分析、图集、预览与可选表现绑定已实现；SFF v2 未实现。重复 Action 和 Sprite 使用首条并记录诊断，缺图不进入判定。Terry 只有视觉数据，不是可操作角色。
 - 基线 StateVersion 15 / CoreVersion 16 不变。13B 的角色战斗配置、规则映射及授权素材交付尚未开展。
+
+### 阶段13B 交接
+- 视觉覆盖 `--p1-visual=terry98` / `--p2-visual=terry98`；可使用对应 `--p1-visual-fighter=Kai` 限定队员。本地绑定仍在忽略目录，Terry 视觉只是 Kai 战斗配置的技术验证。
+- v2 绑定、纹理缓存、闪白、镜像与回退见 `docs/MUGEN_IMPORT.md`；原创资源烟测 `res://tests/fixtures/mugen/SpriteSmoke.tscn`，附加 `-- --gpu-pixels` 验证实际渲染颜色与透明。
+- 现有 1175 项全部保留，Debug/Release 各 1188 通过；实际 1v1 / 3v3、换人、空防、拆投、投中及人机运行记录见 PROGRESS。导出模板缺失，发布包加载尚未验证。
+- 13C 可继续人工确认临时代用动作、角色专属动画与战斗配置及素材授权；本轮不实现 13C。

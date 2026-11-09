@@ -9,6 +9,21 @@ namespace NewKOF.BattleCore.Tests;
 public class SpriteTimelineTests
 {
     [Fact]
+    public void SameLogicStateChangingVisualClipStartsNewClock()
+    {
+        var clock = new FighterVisualClock();
+        clock.Observe(0, FighterLogicState.Standing, null, false, "idle");
+        clock.Observe(1, FighterLogicState.Standing, null, false, "idle");
+        Assert.Equal(1, clock.VisualFrame);
+        clock.Observe(2, FighterLogicState.Standing, null, false, "walk");
+        Assert.Equal(0, clock.VisualFrame);
+        clock.Observe(3, FighterLogicState.Standing, null, false, "walk");
+        Assert.Equal(1, clock.VisualFrame);
+        clock.Observe(4, FighterLogicState.Standing, null, false, "idle");
+        Assert.Equal(0, clock.VisualFrame);
+    }
+
+    [Fact]
     public void TimelineHonorsDurationsAndLoopStart()
     {
         var clip = new SpriteTimeline(new[] { 2, 3, 1 }, 1);

@@ -22,14 +22,19 @@ public sealed class FighterVisual
 
     private AnimationSet _set;
     private MugenSpriteVisual? _sprite;
-    private int _flashUntilFrame = -1;
+    private readonly VisualFlash _flash = new();
 
-    public FighterVisual(Node2D root, ColorRect body, AnimationSet set)
+    private readonly string? _visualOverride;
+    private readonly string? _overrideFighter;
+
+    public FighterVisual(Node2D root, ColorRect body, AnimationSet set, string? visualOverride = null, string? overrideFighter = null)
     {
         _root = root ?? throw new System.ArgumentNullException(nameof(root));
         _body = body ?? throw new System.ArgumentNullException(nameof(body));
         _set = set ?? throw new System.ArgumentNullException(nameof(set));
-        _sprite = MugenSpriteVisual.TryLoad(_root, _set.FighterId);
+        _visualOverride = visualOverride;
+        _overrideFighter = overrideFighter;
+        _sprite = MugenSpriteVisual.TryLoad(_root, VisualId(set), OverrideApplies(set));
     }
 
     /// <summary>当前使用的表现配置。</summary>
@@ -48,20 +53,28 @@ public sealed class FighterVisual
 
         _set = set;
         _sprite?.Dispose();
-        _sprite = MugenSpriteVisual.TryLoad(_root, _set.FighterId);
+        _sprite = MugenSpriteVisual.TryLoad(_root, VisualId(set), OverrideApplies(set));
         _clock.Reset();
+        _flash.Reset();
     }
+
+    private string VisualId(AnimationSet set) => SpriteBinding.SelectVisualId(set.FighterId, _visualOverride, _overrideFighter);
+    private bool OverrideApplies(AnimationSet set) => _visualOverride is not null &&
+        (_overrideFighter is null || _overrideFighter == set.FighterId);
 
     /// <summary>重置动画时钟（新回合/新交锋）。</summary>
     public void Reset()
     {
         _clock.Reset();
-        _flashUntilFrame = -1;
+        _flash.Reset();
+        _sprite?.SetFlash(false);
     }
 
     /// <summary>受击闪白：在指定逻辑帧之前把姿态染成白色（纯表现，不改任何状态）。</summary>
     public void FlashUntil(int logicFrame) =>
-        _flashUntilFrame = System.Math.Max(_flashUntilFrame, logicFrame);
+        _flash.Until(logicFrame);
+
+    public bool AdvanceTerminalFlash(int logicFrame, double delta) => _flash.AdvanceTerminal(logicFrame, delta);
 
     /// <summary>
     /// 观察一个已提交逻辑帧（阶段 10 最终补修，D127/D128）：推进动画时钟。
@@ -77,7 +90,8 @@ public sealed class FighterVisual
             frame.LogicFrame,
             after.LogicState,
             after.MoveId,
-            before.HitstopRemainingFrames > 0);
+            before.HitstopRemainingFrames > 0,
+            AnimationResolver.ResolveClipName(after, _set));
     }
 
     /// <summary>按权威状态刷新一次画面（只读投影；不再自行推进时钟）。</summary>
@@ -91,8 +105,9 @@ public sealed class FighterVisual
         CurrentClip = $"{pose.ClipName}#{pose.FrameIndex}";
 
         bool facingLeft = fighter.Facing == Facing.Left;
-        int elapsed = fighter.IsInMove ? System.Math.Max(0, fighter.MoveElapsedFrames) : visualFrame;
-        bool usedSprite = _sprite?.Apply(pose.ClipName, elapsed, facingLeft) == true;
+        bool usedSprite = _sprite?.Apply(pose.ClipName, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, facingLeft,
+            fighter.MoveId, fighter.LogicState.ToString()) == true;
+        _sprite?.SetFlash(_flash.ActiveAt(logicFrame));
         _body.Visible = !usedSprite;
         if (usedSprite)
         {
@@ -106,7 +121,7 @@ public sealed class FighterVisual
         _body.Position = new Vector2(
             offsetX - frame.Width / 2f,
             -(frame.OffsetY + frame.Height));
-        _body.Color = logicFrame < _flashUntilFrame
+        _body.Color = _flash.ActiveAt(logicFrame)
             ? Colors.White
             : Color.FromHtml(frame.Color);
         _root.RotationDegrees = facingLeft ? -frame.RotationDegrees : frame.RotationDegrees;

@@ -29,6 +29,7 @@ public sealed class FighterVisualClock
 {
     private string _lastState = string.Empty;
     private string _lastMove = string.Empty;
+    private string _lastClip = string.Empty;
 
     /// <summary>动画已经过的逻辑帧数（Hitstop 期间不增长）。</summary>
     public int VisualFrame { get; private set; }
@@ -50,19 +51,21 @@ public sealed class FighterVisualClock
     /// 该帧是否整体冻结——取<b>帧开始状态</b>的 <c>HitstopRemainingFrames &gt; 0</c>
     /// （见类型注释：递减到 0 的那一帧仍是冻结帧）。
     /// </param>
-    public int Observe(int logicFrame, FighterLogicState state, string? moveId, bool frozenThisFrame)
+    public int Observe(int logicFrame, FighterLogicState state, string? moveId, bool frozenThisFrame, string? clipName = null)
     {
         if (logicFrame < 0)
             throw new ArgumentOutOfRangeException(nameof(logicFrame), logicFrame, "逻辑帧号不能为负。");
 
         string stateKey = state.ToString();
         string moveKey = moveId ?? string.Empty;
-        if (stateKey != _lastState || moveKey != _lastMove)
+        string clipKey = clipName ?? string.Empty;
+        if (stateKey != _lastState || moveKey != _lastMove || clipKey != _lastClip)
         {
             // 状态/招式切换：新动画从第 0 帧开始（即使在冻结帧里切换也一样）。
             VisualFrame = 0;
             _lastState = stateKey;
             _lastMove = moveKey;
+            _lastClip = clipKey;
         }
         else if (!frozenThisFrame && LastLogicFrame >= 0 && logicFrame > LastLogicFrame)
         {
@@ -93,6 +96,7 @@ public sealed class FighterVisualClock
         LastLogicFrame = -1;
         _lastState = string.Empty;
         _lastMove = string.Empty;
+        _lastClip = string.Empty;
     }
 }
 

@@ -650,3 +650,10 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 ### 阶段13A 视觉导入
 - `tools/MugenImporter` 将 SFF v1/PCX/ACT 与 AIR 转为有界分页图集和确定性 Manifest；详细规则见 `docs/MUGEN_IMPORT.md`。Clsn 仅作为参考文本，战斗状态和规则没有改变。
 - `SpriteTimeline` 接受逻辑帧时钟；`FighterVisual` 可选加载绑定与 Sprite2D，资源缺失回退原几何姿态。独立预览场景不引入可操作 Terry。StateVersion 15 / CoreVersion 16 不变。
+
+### 阶段13B 决策 D153–D157
+- D153：战斗 FighterId 与可选 VisualId 分离；每席可覆盖或限制到某个战斗角色。1v1/3v3 换人重新解析，默认不改变既有选择。
+- D154：绑定 schema v2 支持动作、片段、循环、起始 tick、move/phase 时钟和按招式阶段映射；兼容 13A 整数绑定。缺失或非法资源退回几何图，合法空白帧保持透明。
+- D155：res 图集经 ResourceLoader 缓存，注入式加载接口为后续外部资源保留边界；轴点 = AIR 偏移与 SFF 原点按 localcoord、全局偏移、比例及翻转组合，权威状态只读。
+- D156：角色状态、动作名称切换驱动视觉时钟；招式可用 MoveElapsedFrames 跨逻辑阶段连续播放。Hitstop 沿用提交帧的帧前状态；已停止的回合只让闪白余时收尾，不推进角色动画。
+- D157：Hit、ProjectileHit、ThrowHit 使用保留 alpha 的白色 shader，回合及换人复位。Godot 像素夹具验证白色、透明和恢复；原始第三方素材及本地绑定不纳入 Git。
