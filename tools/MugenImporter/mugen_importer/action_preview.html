@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>MUGEN action audit</title>
+<style>
+body{font:16px system-ui;background:#20232a;color:#eee;margin:24px}button,select,label{margin:4px;padding:6px}select{max-width:92vw}canvas{background:#484c54;image-rendering:pixelated;border:1px solid #aaa}pre{white-space:pre-wrap}#error{color:#ffc685}#diagnostics{max-height:240px;overflow:auto}small{display:block;color:#bbb}
+</style>
+<h1>MUGEN action audit</h1>
+<select id="action" aria-label="Action"></select>
+<button id="pause">Pause</button><button id="step">Next frame</button><button id="tick">One tick</button>
+<label><input id="mirror" type="checkbox">Mirror</label><label><input id="loop" type="checkbox" checked>Loop</label>
+<small>Playback: 60 ticks/second. Zero-duration frames are skipped; -1 holds indefinitely. Next frame pauses and advances to the next positive-duration frame (or -1).</small>
+<p id="info"></p><p id="error" role="status"></p>
+<canvas id="view" width="640" height="480"></canvas>
+<h2>Frame sequence</h2><pre id="frames"></pre><h2>Diagnostics</h2><pre id="diagnostics"></pre>
+<script>
+'use strict';
+const data = DATA;
+const select=document.getElementById('action'), canvas=document.getElementById('view'), ctx=canvas.getContext('2d');
+const info=document.getElementById('info'), error=document.getElementById('error'), listing=document.getElementById('frames');
+const pause=document.getElementById('pause'), loop=document.getElementById('loop');
+let images={}, ticks=0, startIndex=0, paused=false, last=performance.now(), remainder=0;
+data.actions.forEach((a,i)=>{let o=document.createElement('option');o.value=i;o.textContent=`Action ${a.action} — ${a.name??'unnamed (Manifest has no label)'} (${a.frames.length} frames)`;select.appendChild(o)});
+document.getElementById('diagnostics').textContent=data.diagnostics.map(d=>JSON.stringify(d)).join('\n')||'No diagnostics';
+function current(){return data.actions[+select.value]}
+function setPaused(value){paused=value;pause.textContent=paused?'Play':'Pause'}
+function frameAt(a,t){
+  const f=a.frames; if(!f.length)return -1;
+  if(f.some(x=>!Number.isInteger(x.time)||x.time < -1))return -1;
+  const start=Number.isInteger(a.loop_start)&&a.loop_start>=0&&a.loop_start<f.length?a.loop_start:0;
+  let final=-1;
+  for(let i=startIndex;i<f.length;i++){if(f[i].time===0)continue;final=i;if(f[i].time===-1||t<f[i].time)return i;t-=f[i].time}
+  if(!loop.checked)return final;
+  const cycle=f.slice(start).reduce((s,x)=>s+Math.max(0,x.time),0);
+  if(!f.slice(start).some(x=>x.time===-1)&&cycle>0)t%=cycle;
+  for(let i=start;i<f.length;i++){if(f[i].time===0)continue;final=i;if(f[i].time===-1||t<f[i].time)return i;t-=f[i].time}
+  return final;
+}
+function reset(){ticks=0;startIndex=0;remainder=0;last=performance.now();let a=current();listing.textContent=a?a.frames.map((f,i)=>`${i}: ${f.group},${f.image} | ${f.time} ticks | offset ${f.x},${f.y} | ${f.flip}`).join('\n'):'No actions';paint()}
+pause.onclick=()=>setPaused(!paused);
+document.getElementById('tick').onclick=()=>{setPaused(true);ticks++;paint()};
+document.getElementById('step').onclick=()=>{
+  setPaused(true);const a=current();if(!a)return;
+  const index=frameAt(a,ticks);let next=index+1;
+  for(let visited=0;visited<a.frames.length;visited++,next++){
+    if(next>=a.frames.length){if(!loop.checked)return;next=Number.isInteger(a.loop_start)?a.loop_start:0}
+    if(next<0||next>=a.frames.length)return;
+    if(a.frames[next].time>0||a.frames[next].time===-1){startIndex=next;ticks=0;remainder=0;paint();return}
+  }
+};
+select.onchange=reset;document.getElementById('mirror').onchange=paint;loop.onchange=()=>{ticks=0;startIndex=0;paint()};
+function paint(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);let a=current(),index=a?frameAt(a,ticks):-1,f=a?.frames[index];
+  info.textContent=a?`Action ${a.action} | frame ${index} / ${a.frames.length} | tick ${ticks} | duration ${f?.time??'—'}`:'No actions';
+  info.dataset.frame=index;info.dataset.tick=ticks;
+  error.textContent='';canvas.dataset.drawn='false';
+  if(!f){error.textContent='No playable frames (empty, zero duration only, or invalid duration).';return}
+  if(f.malformed){error.textContent='Malformed frame; see diagnostics.';return}
+  if(f.group<0||f.image<0){error.textContent='Intentional blank frame';return}
+  const s=Number.isInteger(f.sprite_index)?data.sprites[f.sprite_index]:null;
+  if(!s?.region){error.textContent=`Missing sprite ${f.group},${f.image}`;return}
+  if(s.group!==f.group||s.image!==f.image){error.textContent='Sprite index does not match frame identifiers';return}
+  const r=s.region,p='atlas-'+String(r.page).padStart(3,'0')+'.png';
+  if(!images[p]){const img=new Image();images[p]=img;img.onload=paint;img.onerror=()=>{img.failed=true;paint()};img.src=data.assets[p]??data.base+p}
+  const img=images[p];
+  if(img.failed){error.textContent='Missing or corrupt atlas: '+p;return}
+  if(!img.complete||!img.naturalWidth){error.textContent='Loading '+p;return}
+  if(![r.x,r.y,r.w,r.h].every(Number.isInteger)||r.x<0||r.y<0||r.w<=0||r.h<=0||r.x+r.w>img.naturalWidth||r.y+r.h>img.naturalHeight){error.textContent='Invalid atlas region: '+p;return}
+  const face=document.getElementById('mirror').checked?-1:1;
+  ctx.save();ctx.translate(320+face*f.x,400+f.y);ctx.scale(face*(f.flip.includes('H')?-1:1),f.flip.includes('V')?-1:1);
+  ctx.drawImage(img,r.x,r.y,r.w,r.h,-s.origin_x,-s.origin_y,r.w,r.h);ctx.restore();canvas.dataset.drawn='true';
+}
+function draw(now){const elapsed=Math.max(0,Math.min(now-last,250));last=now;if(!paused){remainder+=elapsed*60/1000;const advance=Math.floor(remainder);ticks+=advance;remainder-=advance;paint()}requestAnimationFrame(draw)}
+reset();requestAnimationFrame(draw);
+</script>

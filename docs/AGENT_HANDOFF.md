@@ -3,6 +3,8 @@
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
 > 最后更新：2026-11-08（阶段12确定性AI；Debug/Release各1172项通过；StateVersion15/CoreVersion16保持）
 
+> 2026-11-10 阶段补记：13C-A 动作审查/浏览器交互预览通过（Python30项、独立有窗口Edge35项），详见 PROGRESS.md 最终13C-A记录及 MUGEN_IMPORT.md。13C-B/C和完整13C尚未通过，不沿用浏览器验收当作Godot战斗图形验收。
+
 ---
 
 ## 1. 当前项目绝对路径
@@ -1558,3 +1560,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - v2 绑定、纹理缓存、闪白、镜像与回退见 `docs/MUGEN_IMPORT.md`；原创资源烟测 `res://tests/fixtures/mugen/SpriteSmoke.tscn`，附加 `-- --gpu-pixels` 验证实际渲染颜色与透明。
 - 现有 1175 项全部保留，Debug/Release 各 1188 通过；实际 1v1 / 3v3、换人、空防、拆投、投中及人机运行记录见 PROGRESS。导出模板缺失，发布包加载尚未验证。
 - 13C 可继续人工确认临时代用动作、角色专属动画与战斗配置及素材授权；本轮不实现 13C。
+
+### 13C-A 续接（2026-11-10）
+- 工具：`tools/MugenImporter/mugen_importer/action_audit.py` 与 `action_preview.html`，命令及限制见 `docs/MUGEN_IMPORT.md`。预览为独立本地 HTML，含内嵌图集，无需接管现有浏览器 URL。`browser_acceptance.py` 主动启动独立有窗口 Edge，先跑原创异常夹具再读真实 Terry；使用 Playwright 控件与像素断言，非静态页面烟测。
+- 最终命令从 tools/MugenImporter 执行：`python -m unittest discover -s tests -v`（30通过）；`python browser_acceptance.py --manifest ../../data/imported-characters/terry98/manifest.json --evidence ../../shots/13c-a`（35通过）。本地图片/自动化结果/HTML在shots/13c-a，不提交第三方图片。
+- Terry仍有126个缺图帧、4个透明图片引用、104个原点警告、重复动作5061/5910和重复Sprite30583,0；工具准确显示这些缺陷，不意味着原素材修复。对合法共享不报错；异常原点/超大图片仅警告需人工复查。所有原资源文件哈希在重复生成前后相同。
+- 开始B前审查现有Terry binding：重攻击210、特殊1000/1100、下段430及投技-999仍是13B临时映射/回退。必须从原素材确认语义后绑定，不能增加Terry战斗规则；StateVersion15/CoreVersion16保持。保留project.godot既有工作区修改，阶段提交只纳入相应文件。

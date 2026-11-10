@@ -2563,3 +2563,16 @@ HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本�
 - `shots/13b_p2_sweep_corrected.png` 验证 Rei 下段的临时 Action 430；`13b_throw_fallback.png` 验证投技无可靠映射时的几何回退，日志同时记录原因。
 - 完整 AI 1v1、3v3 与 Human/AI 双方向均运行至终局；启用/关闭视觉覆盖的逐提交帧审计，1v1 **1777** 帧、3v3 **3138** 帧的 HP、原始坐标、状态、招式及事件逐条一致。既有 30/60/144 与 10000 帧确定性测试包含在全量回归中。
 - 本机未安装 Godot 导出模板，正式发布包内贴图加载未实测；默认导出预设可能包含本地第三方图集，分发前必须确认授权及资源排除规则。StateVersion 15 / CoreVersion 16 未变。
+
+### 13C 核查记录（2026-11-10，未验收）
+- 13B 文档提交 fd067ff 已推送；远端 main 经 ls-remote 核实为 fd067ffc0e7750b04f32154c5aca9a0a66016b61。
+- 在 tools/MugenImporter 目录执行 `python -m unittest discover -s tests -v`：13 项通过，其中动作审查仅 1 项合成测试。仓库根目录直接运行因模块路径错误，4 个测试模块导入失败，不计为有效测试。
+- 当前未提交审查工具对本地 Terry manifest 生成 856 个 action 条目，标记 126 个缺图帧和 4 个重复编号条目；尚未逐项校验，也没有可浏览预览，不能判定 13C-A 通过。13C-B、13C-C 及最终图形验收未执行。保留原工作区文件，未创建 13C 阶段提交。
+
+### 13C-A 最终验收（2026-11-10）
+- 动作审查工具与交互预览验收 PASS；这是工具验收，不代表 Terry 原始资源完整，也不代表 13C-B/C 或完整 13C 通过。
+- `tools/MugenImporter` 下 `python -m unittest discover -s tests -v`：30/30 通过，其中动作审查18项，原导入器12项保留。覆盖损坏/截断 PNG、透明、尺寸/越界、异常原点、重复编号、链接共享、缺图/空白、畸形帧、BOM 绑定名称、稳定输出与拒绝覆盖原资源。
+- `python browser_acceptance.py --manifest ../../data/imported-characters/terry98/manifest.json --evidence ../../shots/13c-a`：有窗口 Edge 157.0.4341.42，35项交互断言通过，无 JavaScript 异常。含暂停像素/tick不变、60Hz播放、不同帧时长、连续零帧、单帧/单tick、镜像像素与偏移、循环/终帧、中间-1保持帧的手动跨越、异常动作隔离及恢复。
+- 真实 Terry：856动作区块、854不同编号、3788帧；编号/帧数/全部时长/偏移/尺寸/原点与原 Manifest 逐项一致。243条可定位诊断：缺图126、原点复查警告104、允许空白4、重复动作条目4（5061/5910）、全透明4、重复Sprite1。无缺页、损坏图集、越界区域、索引不匹配或非法链接。上述素材缺陷未伪造补齐。
+- 两次生成 JSON/HTML 字节相同，原资源目录全部文件 SHA-256 保持。预览 HTML 嵌入本地图集；真实入口 `file:///C:/Users/32360/Desktop/NewKOF/shots/13c-a/terry-preview.html`。截图逐张检查：`shots/13c-a/terry-idle.png`、`terry-attack-mirrored.png`、`terry-missing.png`；原始自动化结果在 `browser-results.json`。这是浏览器真实交互验收，不是 Godot 战斗图形验收。
+- 只读复核发现中间-1帧阻塞手动单步，已修复并补浏览器用例，复核确认无未解决重要问题。13C-B/C 后续仍须独立实现和 Godot 图形验收；本阶段没有更改权威战斗或 project.godot 原有修改。
