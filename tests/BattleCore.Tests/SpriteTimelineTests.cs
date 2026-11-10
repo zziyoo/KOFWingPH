@@ -9,6 +9,14 @@ namespace NewKOF.BattleCore.Tests;
 public class SpriteTimelineTests
 {
     [Fact]
+    public void NonLoopingTimelineHoldsLastVisibleFrameWhenTrailingFramesHaveZeroDuration()
+    {
+        var clip = new SpriteTimeline(new[] { 2, 3, 0, 0 }, 0, loop: false);
+        Assert.Equal(1, clip.FrameAt(5));
+        Assert.Equal(1, clip.FrameAt(100));
+    }
+
+    [Fact]
     public void SameLogicStateChangingVisualClipStartsNewClock()
     {
         var clock = new FighterVisualClock();

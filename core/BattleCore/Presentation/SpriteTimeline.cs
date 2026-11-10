@@ -36,6 +36,10 @@ public sealed class SpriteTimeline
             if (duration == -1 || t < duration) return _first + i;
             t -= duration;
         }
+        // Zero-duration frames are never displayed, including at the end of
+        // a non-looping clip. Preserve the existing fallback for all-zero clips.
+        for (int i = _durations.Length - 1; i >= 0; i--)
+            if (_durations[i] != 0) return _first + i;
         return _first + _durations.Length - 1;
     }
 }
