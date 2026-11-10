@@ -36,6 +36,9 @@ public partial class CaptureHelper : Node
     private string? _targetPath;
     private int _renderFramesToWait = 30;
     private int _renderFrame;
+    private string? _captureDir;
+    private int _captureStart, _captureEnd;
+    private readonly List<(int Render, int Logic, Image Image)> _captured = new();
 
     private readonly List<KeyStep> _keyScript = new();
 
@@ -52,6 +55,12 @@ public partial class CaptureHelper : Node
                 _renderFramesToWait = f;
             else if (arg.StartsWith("--renderkey="))
                 ParseKeyStep(arg["--renderkey=".Length..]);
+            else if (arg.StartsWith("--capture-dir="))
+                _captureDir = arg["--capture-dir=".Length..];
+            else if (arg.StartsWith("--capture-start=") && int.TryParse(arg["--capture-start=".Length..], out int start))
+                _captureStart = start;
+            else if (arg.StartsWith("--capture-end=") && int.TryParse(arg["--capture-end=".Length..], out int end))
+                _captureEnd = end;
             else if (arg.StartsWith("--maxfps=")
                      && int.TryParse(arg["--maxfps=".Length..], out int maxFps) && maxFps > 0)
             {
@@ -71,14 +80,52 @@ public partial class CaptureHelper : Node
             return;
         }
 
+        if (_captureDir is not null)
+        {
+            if (_captureStart < 1 || _captureEnd < _captureStart || _captureEnd >= _renderFramesToWait || _captureEnd - _captureStart >= 90)
+            {
+                GD.PushError("Frame capture requires 1 <= start <= end < shotframes and at most 90 images.");
+                _captureDir = null;
+                return;
+            }
+            System.IO.Directory.CreateDirectory(_captureDir);
+            RenderingServer.FramePostDraw += CaptureRenderedFrame;
+        }
+
         GD.Print($"[CaptureHelper] 将在第 {_renderFramesToWait} 个渲染帧截图到 {_targetPath}" +
                  "（渲染帧计数，不是逻辑帧）");
+    }
+
+    public override void _ExitTree()
+    {
+        if (_captureDir is not null) RenderingServer.FramePostDraw -= CaptureRenderedFrame;
+        foreach (var capture in _captured) capture.Image.Dispose();
+        _captured.Clear();
+    }
+
+    private void CaptureRenderedFrame()
+    {
+        if (_captureDir is null || _renderFrame < _captureStart || _renderFrame > _captureEnd) return;
+        int logic = LogicFrame();
+        _captured.Add((_renderFrame, logic, GetViewport().GetTexture().GetImage()));
     }
 
     public override void _Process(double delta)
     {
         _renderFrame++;
         InjectScheduledKeys();
+
+        if (_captureDir is not null && _renderFrame == _captureEnd + 1)
+        {
+            foreach (var capture in _captured)
+            {
+                string path = System.IO.Path.Combine(_captureDir, $"render-{capture.Render:D5}-state-{capture.Logic:D5}.png");
+                Error result = capture.Image.SavePng(path);
+                GD.Print($"[FrameCapture] render={capture.Render} state={capture.Logic} path={path} result={result}");
+                capture.Image.Dispose();
+            }
+            _captured.Clear();
+        }
 
         if (_targetPath is null) return;
 
