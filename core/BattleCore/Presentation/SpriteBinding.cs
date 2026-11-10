@@ -2,7 +2,17 @@ using System.Text.Json;
 
 namespace NewKOF.BattleCore.Presentation;
 
-public sealed record SpriteClipBinding(int Action, bool MoveClock, int StartTick, int FirstFrame, int? LastFrame, bool Loop);
+public sealed record SpriteClipBinding(int Action, bool MoveClock, int StartTick, int FirstFrame, int? LastFrame, bool Loop,
+    IReadOnlyList<int>? FrameSchedule = null)
+{
+    public int FrameAt(SpriteTimeline timeline, int elapsed, int frameCount)
+    {
+        if (FrameSchedule is null) return timeline.FrameAt(elapsed);
+        int index = FrameSchedule[Math.Min(Math.Max(0, elapsed), FrameSchedule.Count - 1)];
+        if (index >= frameCount) throw new ArgumentException("Scheduled frame is outside the action.");
+        return index;
+    }
+}
 
 /// <summary>Validated visual-only mapping. Version 1 integer clips remain supported.</summary>
 public sealed class SpriteBinding
@@ -47,7 +57,15 @@ public sealed class SpriteBinding
             int? last = c.ValueKind == JsonValueKind.Object && c.TryGetProperty("lastFrame", out var la) ? la.GetInt32() : null;
             bool loop = !(c.ValueKind == JsonValueKind.Object && c.TryGetProperty("loop", out var lp)) || lp.GetBoolean();
             if (start < 0 || first < 0 || (last.HasValue && last < first)) throw new ArgumentException("Invalid clip range.");
-            clips.Add(item.Name, new SpriteClipBinding(action, clock == "move", start, first, last, loop));
+            IReadOnlyList<int>? schedule = null;
+            if (c.ValueKind == JsonValueKind.Object && c.TryGetProperty("frameSchedule", out var fs))
+            {
+                var values = fs.EnumerateArray().Select(v => v.GetInt32()).ToArray();
+                if (values.Length is < 1 or > 4096 || values.Any(v => v < 0) || clock != "move" || loop || start != 0 || first != 0 || last.HasValue)
+                    throw new ArgumentException("Invalid frame schedule.");
+                schedule = Array.AsReadOnly(values);
+            }
+            clips.Add(item.Name, new SpriteClipBinding(action, clock == "move", start, first, last, loop, schedule));
         }
         if (fallback is not null && !clips.ContainsKey(fallback)) throw new ArgumentException("Unknown fallback clip.");
         var moves = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);

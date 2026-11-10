@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "visualId": "terry98",
+  "scale": 1.0,
+  "clips": {
+    "idle": {
+      "action": 0
+    },
+    "walk": {
+      "action": 20
+    },
+    "crouch": {
+      "action": 11
+    },
+    "jump": {
+      "action": 41,
+      "loop": false
+    },
+    "atk_startup": {
+      "action": 200,
+      "clock": "move",
+      "loop": false
+    },
+    "atk_active": {
+      "action": 200,
+      "clock": "move",
+      "loop": false
+    },
+    "atk_recovery": {
+      "action": 200,
+      "clock": "move",
+      "loop": false
+    },
+    "heavy_startup": {
+      "action": 210,
+      "clock": "move",
+      "loop": false
+    },
+    "heavy_active": {
+      "action": 210,
+      "clock": "move",
+      "loop": false
+    },
+    "heavy_recovery": {
+      "action": 210,
+      "clock": "move",
+      "loop": false
+    },
+    "guard": {
+      "action": 150
+    },
+    "hurt": {
+      "action": 5000,
+      "loop": false
+    },
+    "air_hurt": {
+      "action": 5050,
+      "loop": false
+    },
+    "air_guard": {
+      "action": 132
+    },
+    "air_guard_hurt": {
+      "action": 152
+    },
+    "knockdown": {
+      "action": 5110,
+      "loop": false
+    },
+    "wakeup": {
+      "action": 5120,
+      "loop": false
+    },
+    "temp_fireball": {
+      "action": 1000,
+      "clock": "move",
+      "loop": false
+    },
+    "temp_rising": {
+      "action": 1200,
+      "clock": "move",
+      "loop": false,
+      "frameSchedule": [
+        0,
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        10,
+        11,
+        11,
+        12,
+        12,
+        12
+      ]
+    },
+    "temp_sweep": {
+      "action": 430,
+      "clock": "move",
+      "loop": false
+    },
+    "unmapped_throw": {
+      "action": -999,
+      "clock": "move",
+      "loop": false
+    }
+  },
+  "moves": {
+    "FireballPrototype": {
+      "Startup": "temp_fireball",
+      "Active": "temp_fireball",
+      "Recovery": "temp_fireball"
+    },
+    "Fireball": {
+      "Startup": "temp_fireball",
+      "Active": "temp_fireball",
+      "Recovery": "temp_fireball"
+    },
+    "DragonPunchPrototype": {
+      "Startup": "temp_rising",
+      "Active": "temp_rising",
+      "Recovery": "temp_rising"
+    },
+    "SweepPrototype": {
+      "Startup": "temp_sweep",
+      "Active": "temp_sweep",
+      "Recovery": "temp_sweep"
+    },
+    "StandingThrow": {
+      "Startup": "unmapped_throw",
+      "Active": "unmapped_throw",
+      "Recovery": "unmapped_throw"
+    }
+  }
+}

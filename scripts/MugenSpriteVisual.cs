@@ -20,6 +20,20 @@ internal sealed class MugenSpriteVisual
     private readonly Func<string, Texture2D?> _loadTexture;
     private sealed record ActionData(JsonElement[] Frames, int LoopStart);
 
+    // Read-only projection for correlating committed battle frames with AIR data.
+    public string Describe(string clip, int visualFrame, int moveFrame, bool inMove, string? moveId, string phase)
+    {
+        if (inMove) clip = _binding.ResolveClip(clip, moveId, phase);
+        if (!_clips.TryGetValue(clip, out var mapped) &&
+            (_binding.Fallback is null || !_clips.TryGetValue(_binding.Fallback, out mapped)))
+            return $"clip={clip} fallback=geometry";
+        int elapsed = inMove && mapped.Clip.MoveClock ? moveFrame : visualFrame;
+        int tick = (int)Math.Min(int.MaxValue, (long)Math.Max(0, elapsed) + mapped.Clip.StartTick);
+        int index = mapped.Clip.FrameAt(mapped.Timeline, tick, mapped.Action.Frames.Length);
+        JsonElement frame = mapped.Action.Frames[index];
+        return $"clip={clip} action={mapped.Clip.Action} tick={tick} frame={index} sprite={frame.GetProperty("group").GetInt32()},{frame.GetProperty("image").GetInt32()} sprite_index={frame.GetProperty("sprite_index")} duration={frame.GetProperty("time").GetInt32()}";
+    }
+
     private MugenSpriteVisual(Node2D root, string directory, float scale,
         SpriteBinding binding, Dictionary<int, ActionData> actions, JsonElement[] sprites, Func<string, Texture2D?> loadTexture)
     {
@@ -28,6 +42,8 @@ internal sealed class MugenSpriteVisual
         foreach (var (name, clip) in binding.Clips)
         {
             if (!actions.TryGetValue(clip.Action, out var action)) continue;
+            if (clip.FrameSchedule is not null && clip.FrameSchedule.Any(index => index >= action.Frames.Length))
+                throw new ArgumentException($"Scheduled frame outside action {clip.Action}.");
             var timeline = new SpriteTimeline(action.Frames.Select(f => f.GetProperty("time").GetInt32()),
                 action.LoopStart, clip.Loop, clip.FirstFrame, clip.LastFrame);
             _clips.Add(name, (clip, action, timeline));
@@ -106,7 +122,7 @@ internal sealed class MugenSpriteVisual
         {
             int elapsed = inMove && mapped.Clip.MoveClock ? moveFrame : visualFrame;
             long shifted = (long)Math.Max(0, elapsed) + mapped.Clip.StartTick;
-            JsonElement frame = mapped.Action.Frames[mapped.Timeline.FrameAt((int)Math.Min(int.MaxValue, shifted))];
+            JsonElement frame = mapped.Action.Frames[mapped.Clip.FrameAt(mapped.Timeline, (int)Math.Min(int.MaxValue, shifted), mapped.Action.Frames.Length)];
             var index = frame.GetProperty("sprite_index");
             if (index.ValueKind == JsonValueKind.Null)
             {

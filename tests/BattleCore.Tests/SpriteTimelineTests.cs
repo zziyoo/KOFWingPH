@@ -9,6 +9,18 @@ namespace NewKOF.BattleCore.Tests;
 public class SpriteTimelineTests
 {
     [Fact]
+    public void ConsecutiveZeroFramesAreSkippedAndAllZeroTimelineTerminates()
+    {
+        var mixed = new SpriteTimeline(new[] { 0, 0, 2, 0, 0, 1 }, 0, loop: false);
+        Assert.Equal(2, mixed.FrameAt(0));
+        Assert.Equal(5, mixed.FrameAt(2));
+        Assert.Equal(5, mixed.FrameAt(100));
+        var allZero = new SpriteTimeline(new[] { 0, 0, 0 }, 0);
+        Assert.Equal(2, allZero.FrameAt(0));
+        Assert.Equal(2, allZero.FrameAt(int.MaxValue));
+    }
+
+    [Fact]
     public void NonLoopingTimelineHoldsLastVisibleFrameWhenTrailingFramesHaveZeroDuration()
     {
         var clip = new SpriteTimeline(new[] { 2, 3, 0, 0 }, 0, loop: false);

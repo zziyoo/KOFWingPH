@@ -92,6 +92,12 @@ public sealed class FighterVisual
             after.MoveId,
             before.HitstopRemainingFrames > 0,
             AnimationResolver.ResolveClipName(after, _set));
+        if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
+        {
+            string clip = AnimationResolver.ResolveClipName(after, _set);
+            GD.Print($"[SpriteFrameAudit] fighter={fighterIndex} logic={frame.LogicFrame} state={after.LogicState} move={after.MoveId ?? "-"} frozen={before.HitstopRemainingFrames > 0} facing={after.Facing} " +
+                _sprite.Describe(clip, _clock.VisualFrame, after.MoveElapsedFrames, after.IsInMove, after.MoveId, after.LogicState.ToString()));
+        }
     }
 
     /// <summary>按权威状态刷新一次画面（只读投影；不再自行推进时钟）。</summary>
@@ -107,6 +113,9 @@ public sealed class FighterVisual
         bool facingLeft = fighter.Facing == Facing.Left;
         bool usedSprite = _sprite?.Apply(pose.ClipName, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, facingLeft,
             fighter.MoveId, fighter.LogicState.ToString()) == true;
+        if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
+            GD.Print($"[SpriteRenderAudit] fighter={fighter.Id} logic={logicFrame} state={fighter.LogicState} sprite_selected={usedSprite} " +
+                _sprite.Describe(pose.ClipName, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, fighter.MoveId, fighter.LogicState.ToString()));
         _sprite?.SetFlash(_flash.ActiveAt(logicFrame));
         _body.Visible = !usedSprite;
         if (usedSprite)

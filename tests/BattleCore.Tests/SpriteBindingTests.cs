@@ -6,6 +6,22 @@ namespace NewKOF.BattleCore.Tests;
 public class SpriteBindingTests
 {
     [Fact]
+    public void ExplicitFrameScheduleUsesMoveTicksAndLeavesDefaultTimelineUnchanged()
+    {
+        var binding = SpriteBinding.Parse("""
+            {"schemaVersion":2,"visualId":"x","clips":{
+              "rising":{"action":1200,"clock":"move","loop":false,"frameSchedule":[0,0,1,2,3,4,5,6,7,8,9,10,10,11,11,12,12,12]},
+              "normal":{"action":200,"loop":false}}}
+            """, "x");
+        var native = new SpriteTimeline(new[] {2,3,4,1,2,2,2,2,2,1,5,6,9}, 0, false);
+        var clip = binding.Clips["rising"];
+        Assert.Equal(new[] {0,0,1,2,3,4,5,6,7,8,9,10,10,11,11,12,12,12},
+            Enumerable.Range(0,18).Select(t => clip.FrameAt(native,t,13)));
+        Assert.Equal(12, clip.FrameAt(native,100,13));
+        Assert.Equal(native.FrameAt(6), binding.Clips["normal"].FrameAt(native,6,13));
+    }
+
+    [Fact]
     public void OverrideIsPerSeatAndCanBeLimitedToOneFighter()
     {
         Assert.Equal("Kai", SpriteBinding.SelectVisualId("Kai", null, null));
