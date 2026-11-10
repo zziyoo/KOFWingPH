@@ -19,6 +19,7 @@ internal sealed class MugenSpriteVisual
     private readonly HashSet<int> _missingPages = new();
     private readonly Func<string, Texture2D?> _loadTexture;
     private sealed record ActionData(JsonElement[] Frames, int LoopStart);
+    public bool HasClip(string clip) => _clips.ContainsKey(clip);
 
     // Read-only projection for correlating committed battle frames with AIR data.
     public string Describe(string clip, int visualFrame, int moveFrame, bool inMove, string? moveId, string phase)

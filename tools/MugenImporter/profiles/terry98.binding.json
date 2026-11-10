@@ -110,6 +110,9 @@
       "action": -999,
       "clock": "move",
       "loop": false
+    },
+    "guard_crouch": {
+      "action": 151
     }
   },
   "moves": {

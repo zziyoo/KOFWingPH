@@ -1,6 +1,8 @@
 using Godot;
 using NewKOF.BattleCore.Presentation;
 using NewKOF.BattleCore.State;
+using NewKOF.BattleCore.Combat;
+using NewKOF.BattleCore.Simulation;
 
 namespace NewKOF;
 
@@ -23,6 +25,7 @@ public sealed class FighterVisual
     private AnimationSet _set;
     private MugenSpriteVisual? _sprite;
     private readonly VisualFlash _flash = new();
+    private readonly GuardVisualPose _guardPose = new();
 
     private readonly string? _visualOverride;
     private readonly string? _overrideFighter;
@@ -56,17 +59,22 @@ public sealed class FighterVisual
         _sprite = MugenSpriteVisual.TryLoad(_root, VisualId(set), OverrideApplies(set));
         _clock.Reset();
         _flash.Reset();
+        _guardPose.Reset();
     }
 
     private string VisualId(AnimationSet set) => SpriteBinding.SelectVisualId(set.FighterId, _visualOverride, _overrideFighter);
     private bool OverrideApplies(AnimationSet set) => _visualOverride is not null &&
         (_overrideFighter is null || _overrideFighter == set.FighterId);
+    private string SpriteClip(FighterState fighter, string clip) =>
+        fighter.LogicState == FighterLogicState.Blockstun && _guardPose.Crouching &&
+        _sprite?.HasClip("guard_crouch") == true ? "guard_crouch" : clip;
 
     /// <summary>重置动画时钟（新回合/新交锋）。</summary>
     public void Reset()
     {
         _clock.Reset();
         _flash.Reset();
+        _guardPose.Reset();
         _sprite?.SetFlash(false);
     }
 
@@ -86,6 +94,11 @@ public sealed class FighterVisual
     {
         FighterState before = frame.StateBefore.Fighter(fighterIndex);
         FighterState after = frame.StateAfter.Fighter(fighterIndex);
+        bool blocked = frame.Events.Any(e => e.TargetFighterId == fighterIndex &&
+            e.Type is BattleEventType.Blocked or BattleEventType.ProjectileBlocked);
+        var directions = after.RecognitionState.Directions;
+        _guardPose.Observe(before.LogicState, after.LogicState, before.HitstopRemainingFrames > 0,
+            directions.Count > 0 ? directions[^1].Direction : null, blocked);
         _clock.Observe(
             frame.LogicFrame,
             after.LogicState,
@@ -94,7 +107,7 @@ public sealed class FighterVisual
             AnimationResolver.ResolveClipName(after, _set));
         if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
         {
-            string clip = AnimationResolver.ResolveClipName(after, _set);
+            string clip = SpriteClip(after, AnimationResolver.ResolveClipName(after, _set));
             GD.Print($"[SpriteFrameAudit] fighter={fighterIndex} logic={frame.LogicFrame} state={after.LogicState} move={after.MoveId ?? "-"} frozen={before.HitstopRemainingFrames > 0} facing={after.Facing} " +
                 _sprite.Describe(clip, _clock.VisualFrame, after.MoveElapsedFrames, after.IsInMove, after.MoveId, after.LogicState.ToString()));
         }
@@ -108,14 +121,15 @@ public sealed class FighterVisual
 
         ResolvedPose pose = AnimationResolver.Resolve(fighter, _set, visualFrame);
         PoseFrame frame = pose.Frame;
+        string spriteClip = SpriteClip(fighter, pose.ClipName);
         CurrentClip = $"{pose.ClipName}#{pose.FrameIndex}";
 
         bool facingLeft = fighter.Facing == Facing.Left;
-        bool usedSprite = _sprite?.Apply(pose.ClipName, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, facingLeft,
+        bool usedSprite = _sprite?.Apply(spriteClip, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, facingLeft,
             fighter.MoveId, fighter.LogicState.ToString()) == true;
         if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
             GD.Print($"[SpriteRenderAudit] fighter={fighter.Id} logic={logicFrame} state={fighter.LogicState} sprite_selected={usedSprite} " +
-                _sprite.Describe(pose.ClipName, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, fighter.MoveId, fighter.LogicState.ToString()));
+                _sprite.Describe(spriteClip, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, fighter.MoveId, fighter.LogicState.ToString()));
         _sprite?.SetFlash(_flash.ActiveAt(logicFrame));
         _body.Visible = !usedSprite;
         if (usedSprite)
