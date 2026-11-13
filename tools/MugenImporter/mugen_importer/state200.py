@@ -78,12 +78,12 @@ def state(sections, number):
 def timeline(action, first_element, next_element):
     times = [frame['time'] for frame in action['frames']]
     require(action.get('loop_start') is None and all(type(value) is int and value > 0 for value in times),
-            'Action 200 must have positive finite durations and no explicit loop')
+            f"Action {action.get('action', 200)} must have positive finite durations and no explicit loop")
     require(1 < first_element < next_element <= len(times), 'invalid HitDef element bounds')
     return (sum(times[:first_element-1]), sum(times[first_element-1:next_element-1]), sum(times[next_element-1:]))
 
 
-def collision_boxes(action, number):
+def collision_boxes(action, number, *, normalize_edges=False):
     declaration = re.compile(rf'Clsn{number}(Default)?\s*:\s*(\d+)', re.I)
     box = re.compile(rf'Clsn{number}\[\s*(\d+)\s*\]\s*=\s*(.*)', re.I)
     groups, current = {}, None
@@ -107,6 +107,10 @@ def collision_boxes(action, number):
         target = groups[current][1]
         require(int(index) == len(target), f'Clsn{number} indices must be contiguous')
         values = [int(edge.strip()) for edge in edges.split(',')]
+        if normalize_edges and len(values) == 4:
+            left, right = sorted(values[::2])
+            top, bottom = sorted(values[1::2])
+            values = [left, top, right, bottom]
         require(len(values) == 4 and values[0] < values[2] and values[1] < values[3],
                 f'Clsn{number} must have positive area on element {element+1}')
         target.append(values)
@@ -245,21 +249,22 @@ def validate_manifest(path, source_hashes, action):
     require(manifest.get('format') == 1 and manifest.get('character') == 'terry98' and manifest.get('localcoord') == 320,
             'expected terry98 Manifest v1 in localcoord 320')
     require(all(manifest['sources'].get(key) == value for key, value in source_hashes.items()), 'Manifest source hash mismatch')
-    target = unique((entry for entry in manifest['actions'] if entry['action'] == 200), 'Manifest Action 200')
+    number = action['action']
+    target = unique((entry for entry in manifest['actions'] if entry['action'] == number), f'Manifest Action {number}')
     require(target['collisions'] == action['collisions'] and target.get('loop_start') == action['loop_start'],
-            'Manifest Action 200 collision or loop data differs from AIR')
+            f'Manifest Action {number} collision or loop data differs from AIR')
     require([{key: frame[key] for key in FRAME_KEYS} for frame in target['frames']] == action['frames'],
-            'Manifest Action 200 frames differ from AIR')
+            f'Manifest Action {number} frames differ from AIR')
     for index, frame in enumerate(target['frames']):
-        require(frame['group'] >= 0 and frame['image'] >= 0, f'Manifest Action 200 frame {index}: blank sprite')
+        require(frame['group'] >= 0 and frame['image'] >= 0, f'Manifest Action {number} frame {index}: blank sprite')
     indexes = {frame.get('sprite_index') for frame in target['frames']}
     diagnostics = [item for item in audit_assets({**manifest, 'actions': [target]}, path.parent)
-                   if item.get('action') == 200 or item.get('sprite_index') in indexes or item.get('first_index') in indexes]
-    require(not diagnostics, f'Manifest Action 200 resource audit failed: {json.dumps(diagnostics, ensure_ascii=True)}')
+                   if item.get('action') == number or item.get('sprite_index') in indexes or item.get('first_index') in indexes]
+    require(not diagnostics, f'Manifest Action {number} resource audit failed: {json.dumps(diagnostics, ensure_ascii=True)}')
     return [frame['sprite_index'] for frame in target['frames']]
 
 
-def inspect_source(zip_path, manifest_path, expected_zip=SOURCE_SHA256):
+def read_terry_archive(zip_path, expected_zip=SOURCE_SHA256):
     zip_sha = archive_digest(zip_path)
     require(zip_sha == expected_zip, f'unreviewed character archive SHA-256: {zip_sha}')
     with zipfile.ZipFile(zip_path) as archive:
@@ -268,7 +273,20 @@ def inspect_source(zip_path, manifest_path, expected_zip=SOURCE_SHA256):
         files = unique((section for section in definition if section.title == 'files'), 'DEF Files section')
         source_files = {key: files.one(key) for key in ('cmd', 'cns', 'st1', 'anim', 'stcommon', 'sprite')}
         contents = {key: archive_member(archive, name) for key, name in source_files.items()}
-    require(localcoord(def_file) == 320, 'State 200 conversion requires source localcoord 320')
+    require(localcoord(def_file) == 320, 'Terry conversion requires source localcoord 320')
+    hashes = {key: digest(value) for key, value in contents.items()}
+    members = {'def': {'name': 'Terry-KOF98.def', 'sha256': digest(def_file)},
+               **{key: {'name': name, 'sha256': hashes[key]} for key, name in source_files.items()}}
+    return zip_sha, members, contents
+
+
+def manifest_hashes(zip_sha, members):
+    return {'zip_sha256': zip_sha, 'def_sha256': members['def']['sha256'],
+            'sff_sha256': members['sprite']['sha256'], 'air_sha256': members['anim']['sha256']}
+
+
+def inspect_source(zip_path, manifest_path, expected_zip=SOURCE_SHA256):
+    zip_sha, members, contents = read_terry_archive(zip_path, expected_zip)
     actions, diagnostics = parse_air(contents['anim'].decode('latin-1'))
     action = unique((entry for entry in actions if entry['action'] == 200), 'AIR Action 200')
     require(not any(re.search(r'duplicate action 200\b', item) for item in diagnostics), 'duplicate AIR Action 200')
@@ -277,16 +295,13 @@ def inspect_source(zip_path, manifest_path, expected_zip=SOURCE_SHA256):
     strike = collision_boxes(action, 1)
     require(following == first+1 and len(strike[first-1]) == 1 and sum(map(len, strike)) == 1,
             'State 200 requires one Clsn1 rectangle on the sole active element')
-    hashes = {key: digest(value) for key, value in contents.items()}
-    indexes = validate_manifest(manifest_path, {'zip_sha256': zip_sha, 'def_sha256': digest(def_file),
-                                               'sff_sha256': hashes['sprite'], 'air_sha256': hashes['anim']}, action)
+    indexes = validate_manifest(manifest_path, manifest_hashes(zip_sha, members), action)
     movement = movement_rules(read_sections(contents['cns'].decode('latin-1')),
                               read_sections(contents['stcommon'].decode('latin-1')), actions)
     command = command_rules(read_sections(contents['cmd'].decode('latin-1')))
     return {
         'format': 1, 'zipSha256': zip_sha, 'manifestSha256': archive_digest(manifest_path), 'localcoord': 320,
-        'members': {'def': {'name': 'Terry-KOF98.def', 'sha256': digest(def_file)},
-                    **{key: {'name': name, 'sha256': hashes[key]} for key, name in source_files.items()}},
+        'members': members,
         'state': {'id': 200, **move}, 'command': command, 'movement': movement,
         'groundHurtboxes': idle_hurtboxes(actions),
         'action': {'id': 200, 'startup': startup, 'active': active, 'recovery': recovery,
@@ -296,7 +311,7 @@ def inspect_source(zip_path, manifest_path, expected_zip=SOURCE_SHA256):
     }
 
 
-def trace_rows(path, name):
+def trace_rows(path, name, frame_count=66):
     with path.open(encoding='utf-8') as stream:
         rows = [json.loads(line) for line in stream]
     phases = ('before-command', 'after-collision', 'end', 'hitdef')
@@ -306,11 +321,12 @@ def trace_rows(path, name):
     groups = {phase: [row for row in rows if row['phase'] == phase] for phase in phases}
     for phase in phases[:-1]:
         ticks = [row['frame'] for row in groups[phase]]
-        require(ticks == list(range(66)), f'{name}: {phase} trace incomplete or out of order')
+        require(ticks == list(range(frame_count)), f'{name}: {phase} trace incomplete or out of order')
     return groups
 
 
-def verify_attack_timeline(action, collisions, entry, exit_frame, pause):
+def verify_attack_timeline(action, collisions, entry, exit_frame, pause, *, state_id=200, normalize_edges=False):
+    action_id = action.get('id', state_id)
     expected = [(element, tick) for element, duration in enumerate(action['durations'])
                 for tick in range(duration)]
     freeze_start = action['startup'] + 1
@@ -319,25 +335,30 @@ def verify_attack_timeline(action, collisions, entry, exit_frame, pause):
     for row in collisions[entry:exit_frame]:
         character = row['chars'][0]
         element = character['elem']
-        require(character['state'] == 200 and character['anim'] == 200
+        require(character['state'] == state_id and character['anim'] == action_id
                 and type(element) is int and 0 <= element < len(action['durations']),
-                f"frame {row['frame']}: unexpected State/Action 200 visual element")
+                f"frame {row['frame']}: unexpected State {state_id}/Action {action_id} visual element")
         require(character['frame']['sprite'] == action['spriteKeys'][element]
                 and character['frame']['duration'] == action['durations'][element],
-                f"frame {row['frame']}: reference Action 200 sprite or duration disagrees with AIR")
-        require(all((character['frame'][key] or []) == action[key][element] for key in ('clsn1', 'clsn2')),
-                f"frame {row['frame']}: reference collision boxes disagree with AIR")
+                f"frame {row['frame']}: reference Action {action_id} sprite or duration disagrees with AIR")
+        for key in ('clsn1', 'clsn2'):
+            actual_boxes = character['frame'][key] or []
+            if normalize_edges:
+                actual_boxes = [[min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
+                                for x1, y1, x2, y2 in actual_boxes]
+            require(actual_boxes == action[key][element],
+                    f"frame {row['frame']}: reference collision boxes disagree with AIR")
         actual.append((element, character['elemTime']))
-    require(actual == expected, f'Action 200 reference timeline differs from AIR and observed pause: {actual}')
+    require(actual == expected, f'Action {action_id} reference timeline differs from AIR and observed pause: {actual}')
 
 
-def verify_contact(name, groups, contact, end):
+def verify_contact(name, groups, contact, end, *, blocked=None, crouching=None, verify_late_crouch=True):
     frame = contact['frame']
     attacker, target = contact['chars']
     definition = unique((row['chars'][0]['hitDef'] for row in groups['hitdef'] if row['frame'] == frame),
                         f'{name} contact HitDef')
-    crouching = name == 'crouch-guard-late'
-    blocked = name == 'guard' or crouching
+    crouching = name == 'crouch-guard-late' if crouching is None else crouching
+    blocked = (name == 'guard' or crouching) if blocked is None else blocked
     require(target['guarded'] is blocked and target['damage'] >= 0, f'{name}: unexpected contact outcome')
     atk_pause, target_pause = definition['guardPause' if blocked else 'hitPause']
     require(type(atk_pause) is int and type(target_pause) is int and 0 < atk_pause <= 60 and 0 < target_pause <= 60,
@@ -361,7 +382,8 @@ def verify_contact(name, groups, contact, end):
             f'{name}: unsupported ground contact velocity')
     speed = abs(horizontal)
     origin = target['pos'][0]
-    movement = [row for row in end[frame+1:restored_frame] if row['chars'][1]['pos'][0] != origin]
+    movement = [row for row in end[frame+1:restored_frame]
+                if row['chars'][1]['pos'][0] != end[row['frame']-1]['chars'][1]['pos'][0]]
     require(len(movement) >= 2, f'{name}: missing ground push trajectory')
     first = movement[0]['chars'][1]
     coefficient = first['friction'][1 if crouching else 0]
@@ -372,7 +394,7 @@ def verify_contact(name, groups, contact, end):
     previous = movement[-2]['chars'][1]
     last_step = abs(last_moved - previous['pos'][0])
     last_step_scale = Fraction(str(last_step / abs(previous['vel'][0]))).limit_denominator(1000)
-    if crouching:
+    if crouching and verify_late_crouch:
         require(groups['before-command'][frame-1]['chars'][1]['state'] == 0
                 and groups['before-command'][frame-1]['chars'][1]['raw'] == 0
                 and end[frame]['chars'][1]['state'] == 152 and end[frame+1]['chars'][1]['anim'] == 151
