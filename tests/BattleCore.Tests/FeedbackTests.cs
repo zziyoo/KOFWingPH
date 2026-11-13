@@ -10,6 +10,28 @@ namespace NewKOF.BattleCore.Tests;
 /// </summary>
 public class FeedbackTests
 {
+    [Fact]
+    public void EffectsUseIndependentCommittedAgesAndCanFinishAfterTerminal()
+    {
+        Assert.Equal(0, FeedbackTiming.Progress(24, 24));
+        Assert.Equal(4f / 9, FeedbackTiming.Progress(24, 28));
+        Assert.Equal(1f / 9, FeedbackTiming.Progress(27, 28));
+        Assert.Equal(1, FeedbackTiming.Progress(24, 33));
+        Assert.Equal(1, FeedbackTiming.Progress(24, 24, 0.15));
+    }
+
+    [Fact]
+    public void ThrowImpactUsesGroundAnchorForEitherSeat()
+    {
+        var state = NewKOF.BattleCore.State.BattleState.CreateDefault();
+        var right = new FeedbackCue(FeedbackKind.ThrowImpact, 0, 1, 60, 1, BattleEventType.ThrowHit);
+        var left = right with { SourceFighterId = 1, TargetFighterId = 0 };
+        var a = FeedbackGeometry.Anchor(right, state);
+        var b = FeedbackGeometry.Anchor(left, state);
+        Assert.Equal(a.X, -b.X);
+        Assert.Equal(12, a.Y);
+        Assert.Equal(a.Y, b.Y);
+    }
     private static BattleEvent Event(
         BattleEventType type, int frame = 10, int seq = 0,
         int source = 0, int target = 1, int amount = 0) =>

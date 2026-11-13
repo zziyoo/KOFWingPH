@@ -337,6 +337,8 @@ public partial class BattleScene : Node2D
             if (!_fxEnabled)
             {
                 _fx.Clear();
+                _visual1?.ClearFlash();
+                _visual2?.ClearFlash();
                 _shake.Reset();
                 _shakeOffset = (0, 0);
             }
@@ -690,8 +692,6 @@ public partial class BattleScene : Node2D
     public override void _Process(double delta)
     {
         AdvanceAiBoutIfRequested();
-        _shakeOffset = _shake.Tick();
-
         int steps = TeamActive
             ? _team.Advance(delta, _tracedSource)
             : _match.Advance(delta, _tracedSource);
@@ -705,7 +705,17 @@ public partial class BattleScene : Node2D
         bool flashChanged = false;
         if (terminal && !_paused)
         {
-            flashChanged = (_visual1?.AdvanceTerminalFlash(CurrentLogicFrame, delta) ?? false) |
+            if (steps == 0)
+            {
+                _fx.AdvanceTerminal(delta);
+                if (_shakeOffset != (0, 0))
+                {
+                    _shake.Reset();
+                    _shakeOffset = (0, 0);
+                    flashChanged = true;
+                }
+            }
+            flashChanged |= (_visual1?.AdvanceTerminalFlash(CurrentLogicFrame, delta) ?? false) |
                            (_visual2?.AdvanceTerminalFlash(CurrentLogicFrame, delta) ?? false);
         }
         if (steps > 0 || flashChanged)
@@ -788,6 +798,7 @@ public partial class BattleScene : Node2D
         FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
         FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
         PlaceFighters(p1, p2, state?.Frame ?? 0);
+        _fx.Present(state?.Frame ?? 0, new Vector2(_shakeOffset.X, _shakeOffset.Y));
         if (state is not null && !state.Round.IsFinished)
             _projectileVisuals.Apply(state, _visual1, _visual2, new Vector2(640f, 560f) +
                 new Vector2(_shakeOffset.X, _shakeOffset.Y));
@@ -1299,59 +1310,59 @@ public partial class BattleScene
         // ① 动画时钟：无论本帧有没有事件都要观察（冻结/恢复信息在无事件帧里）。
         for (int i = 0; i < frames.Count; i++)
         {
-            _throwVisual.Observe(frames[i].StateAfter, frames[i].Events);
-            _projectileVisuals.Observe(frames[i].StateAfter);
-            _visual1?.ObserveFrame(frames[i], 0);
-            _visual2?.ObserveFrame(frames[i], 1);
+            var frame = frames[i];
+            _throwVisual.Observe(frame.StateAfter, frame.Events);
+            _projectileVisuals.Observe(frame.StateAfter);
+            _visual1?.ObserveFrame(frame, 0);
+            _visual2?.ObserveFrame(frame, 1);
             if (HasArg("--visual-audit"))
             {
-                var frame = frames[i];
                 var a = frame.StateAfter.Fighter(0);
                 var b = frame.StateAfter.Fighter(1);
                 string events = string.Join(";", frame.Events.Select(e => e.ToString()));
                 GD.Print($"[VisualAudit] scope={frame.Scope} frame={frame.LogicFrame} " +
                     $"p1={a.Health},{a.PositionX.RawValue},{a.PositionY.RawValue},{a.LogicState},{a.MoveId} " +
                     $"p2={b.Health},{b.PositionX.RawValue},{b.PositionY.RawValue},{b.LogicState},{b.MoveId} events={events}");
+                if (HasArg("--entity-audit"))
+                {
+                    string projectiles = string.Join(";", frame.StateAfter.Projectiles.Select(p =>
+                        $"{p.ProjectileId},{p.OwnerFighterId},{p.TypeId},{p.SourceMoveId},{p.PositionX.RawValue},{p.PositionY.RawValue}," +
+                        $"{p.VelocityX.RawValue},{p.VelocityY.RawValue},{p.RemainingLifetime}"));
+                    var grab = frame.StateAfter.PendingThrow;
+                    string pending = grab is null ? "-" : $"{grab.Thrower},{grab.Target},{grab.AttackStartFrame},{grab.StartedFrame}";
+                    GD.Print($"[EntityAudit] scope={frame.Scope} state={frame.StateAfter.Frame} grab={pending} projectiles={projectiles}");
+                }
             }
-        }
-
-        if (!_fxEnabled)
-            return; // F4 关闭特效：只推进时钟，不生成火花/抖动/闪白（权威状态不受影响）。
-
-        // ② 反馈：同一帧的多个事件全部消费；同一事件只出一次特效。
-        for (int i = 0; i < frames.Count; i++)
-        {
-            PresentationFrame frame = frames[i];
+            if (!_fxEnabled) continue;
             for (int e = 0; e < frame.Events.Count; e++)
             {
                 if (!_feedback.TryConsume(frame.Scope, frame.Events[e], out FeedbackCue cue))
                     continue;
                 ApplyCue(cue, frame);
             }
+            _shakeOffset = _shake.Tick();
         }
     }
 
     private void ApplyCue(FeedbackCue cue, in PresentationFrame frame)
     {
-        (Color color, int size, int shake) = CueStyle(cue.Kind);
+        (Color color, int size, int shake) = CueStyle(cue, frame);
         if (size > 0)
         {
             // 位置来自事件帧的权威状态（不是当前渲染帧的最终位置）。
             (double x, double y) = FeedbackGeometry.Anchor(cue, frame);
             var position = new Vector2(640f + (float)x, 560f - (float)y);
 
-            // 固定方向序列（身份 → 角度），保证同一回放产生同样画面。
-            float angle = (cue.Identity % 6) * (Mathf.Pi / 3f);
-            var velocity = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * 1.6f;
-            _fx.Spawn(position, color, size, velocity);
+            _fx.Spawn(cue, position, color, size, frame.StateAfter.Frame);
+            if (HasArg("--sprite-frame-audit"))
+                GD.Print($"[FeedbackAudit] state={frame.StateAfter.Frame} id={cue.Identity} kind={cue.Kind} x={x} y={y} size={size}");
         }
 
         _shake.Trigger(shake);
 
-        // 闪白按逻辑帧计时；取「事件帧 / 当前渲染帧」较大值，低帧率下也不会整段跳过。
+        // 事件提交时开始，年龄按已提交帧计算，包含停顿中的提交帧。
         if (VisualFlash.IsImpact(cue.Kind))
-            TargetVisual(cue.TargetFighterId)?.FlashUntil(
-                Math.Max(frame.LogicFrame, CurrentLogicFrame) + 5);
+            TargetVisual(cue.TargetFighterId)?.FlashUntil(frame.StateAfter.Frame + 5);
     }
 
     private FighterVisual? TargetVisual(int fighterId) => fighterId switch
@@ -1362,8 +1373,11 @@ public partial class BattleScene
     };
 
     /// <summary>反馈样式表：颜色、尺寸与抖动幅度（0 = 不抖动）。</summary>
-    private static (Color Color, int Size, int Shake) CueStyle(FeedbackKind kind) => kind switch
+    private static (Color Color, int Size, int Shake) CueStyle(FeedbackCue cue, in PresentationFrame frame) => cue.Kind switch
     {
+        FeedbackKind.Hit when cue.TargetFighterId is 0 or 1 &&
+            frame.StateAfter.Fighter(cue.TargetFighterId).LogicState == FighterLogicState.AirHitstun
+            => (Color.FromHtml("#FFB347"), 38, 4),
         FeedbackKind.Hit => (Color.FromHtml("#FFE58A"), 26, 3),
         FeedbackKind.Blocked => (Color.FromHtml("#7FC0FF"), 20, 1),
         FeedbackKind.ThrowImpact => (Color.FromHtml("#FFB347"), 34, 4),

@@ -6,6 +6,8 @@
 > 2026-11-10 阶段补记：13C-A 动作审查/浏览器交互预览通过（Python30项、独立有窗口Edge35项），详见 PROGRESS.md 最终13C-A记录及 MUGEN_IMPORT.md。13C-B/C和完整13C尚未通过，不沿用浏览器验收当作Godot战斗图形验收。
 >
 > 2026-11-13 更新：13C-B 真实 Godot 验收 9/9 PASS，专项 58 项、全量 1195 项、Debug 与 Vulkan 像素夹具通过。完整 13C 尚需 13C-C 与最终跨阶段门禁。
+>
+> 2026-11-13 最终更新：13C-C 和 13C 门禁已通过，专项 152 项，全量 1204 项，证据见 STAGE13C_C_ACCEPTANCE.md。
 
 ---
 
@@ -1576,3 +1578,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - 九项结果和本地复现参数、GPU 图像、逐帧日志见 `docs/STAGE13C_B_ACCEPTANCE.md`。工作区 `project.godot` 既有差异继续保留。
 - C 从投技结果驱动的双方演出、飞行道具实体外观及现有事件特效入手。现有投技绑定明确回退，飞行道具在 F2 开启时可显示权威碰撞盒。B 的角色动画与场景证据已通过，C 的演出独立验收。
+
+### 13C-C 正式交接
+
+- C1 `c23b2b4`，C2 `d6ef764`，C3 为 C 阶段最终验收提交。复现参数、图像与日志位置见 `docs/STAGE13C_C_ACCEPTANCE.md`。
+- 应用新的 Terry 本地视觉配置时，从 `tools/MugenImporter/profiles/terry98.binding.json` 更新本地绑定。旧绑定没有可选投技/飞行道具条目时使用兼容回退。导入的第三方素材继续留在忽略目录。
+- `--entity-audit` 与 `--visual-audit` 一起启用时记录权威抓取和投射实体信息。`--sprite-frame-audit` 记录实体绘制和反馈事件，均只供验收。

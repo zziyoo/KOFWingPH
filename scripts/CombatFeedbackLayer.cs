@@ -3,97 +3,72 @@ using NewKOF.BattleCore.Presentation;
 
 namespace NewKOF;
 
-/// <summary>
-/// <b>打击反馈层</b>（阶段 10D，D126）：把 <see cref="FeedbackCue"/> 画成短命的几何火花。
-///
-/// <para><b>纯表现</b>：不读也不写任何权威状态；所有节点按渲染帧衰减后 <c>QueueFree()</c>，
-/// 生命周期用固定帧数（不是 delta），因此同一输入序列的截图可复现。</para>
-///
-/// <para>层被放在角色之上、HUD 之下，因此火花不会遮住调试文字。</para>
-/// </summary>
+/// <summary>Event anchored effects evaluated from the displayed battle snapshot.</summary>
 public partial class CombatFeedbackLayer : Node2D
 {
-    private sealed class Spark
-    {
-        public ColorRect Node = null!;
-        public int Life;
-        public int MaxLife;
-        public Vector2 Velocity;
-        public Vector2 BaseSize;
-    }
-
+    private sealed record Spark(long Id, FeedbackKind Kind, Vector2 Anchor, Color Color, float Size, int Born);
     private readonly List<Spark> _sparks = new();
+    private int _frame;
+    private double _terminalSeconds;
+    private Vector2 _shake;
 
-    /// <summary>总开关（F4 调试切换）；关闭时不再生成新火花并清空现存。</summary>
     public bool Enabled { get; set; } = true;
-
-    /// <summary>当前存活火花数（诊断用）。</summary>
     public int ActiveSparks => _sparks.Count;
 
-    /// <summary>在指定世界坐标生成一个火花。</summary>
-    public void Spawn(Vector2 position, Color color, int size, Vector2 velocity, int lifetimeFrames = 8)
+    public void Spawn(FeedbackCue cue, Vector2 position, Color color, int size, int stateFrame)
     {
-        if (!Enabled)
-            return;
-
-        var rect = new ColorRect
-        {
-            Color = color,
-            Size = new Vector2(size, size),
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        AddChild(rect);
-        rect.Position = position - new Vector2(size / 2f, size / 2f);
-
-        _sparks.Add(new Spark
-        {
-            Node = rect,
-            Life = lifetimeFrames,
-            MaxLife = lifetimeFrames,
-            Velocity = velocity,
-            BaseSize = new Vector2(size, size),
-        });
+        if (Enabled)
+            _sparks.Add(new Spark(cue.Identity, cue.Kind, position, color, size, stateFrame));
     }
 
-    /// <summary>清空全部火花（新回合/重开/关闭特效）。</summary>
+    public void Present(int frame, Vector2 shake)
+    {
+        _frame = frame;
+        _shake = shake;
+        UpdateSparks();
+    }
+
+    public void AdvanceTerminal(double delta)
+    {
+        if (_sparks.Count == 0) return;
+        _terminalSeconds += delta;
+        UpdateSparks();
+    }
+
+    private void UpdateSparks()
+    {
+        _sparks.RemoveAll(s => FeedbackTiming.Progress(s.Born, _frame, _terminalSeconds) >= 1);
+        QueueRedraw();
+    }
+
     public void Clear()
     {
-        foreach (Spark spark in _sparks)
-        {
-            if (IsInstanceValid(spark.Node))
-                spark.Node.QueueFree();
-        }
         _sparks.Clear();
+        _terminalSeconds = 0;
+        QueueRedraw();
     }
 
-    public override void _Process(double delta)
+    public override void _Draw()
     {
-        if (_sparks.Count == 0)
-            return;
-
-        for (int i = _sparks.Count - 1; i >= 0; i--)
+        foreach (var s in _sparks)
         {
-            Spark spark = _sparks[i];
-            if (!IsInstanceValid(spark.Node))
+            float t = FeedbackTiming.Progress(s.Born, _frame, _terminalSeconds);
+            Vector2 center = s.Anchor + _shake;
+            float radius = s.Size * (0.24f + 0.55f * t);
+            var color = new Color(s.Color, 1f - t);
+            bool ring = s.Kind is FeedbackKind.Blocked or FeedbackKind.ProjectileBlocked or FeedbackKind.ThrowTech;
+            if (ring)
+                DrawArc(center, radius, 0, Mathf.Tau, 24, color, 2f, true);
+            else
+                DrawCircle(center, radius * 0.42f, color, true, -1, true);
+
+            int rays = ring ? 4 : 8;
+            float angle = (s.Id % 6) * Mathf.Pi / 3f;
+            for (int i = 0; i < rays; i++)
             {
-                _sparks.RemoveAt(i);
-                continue;
+                Vector2 dir = Vector2.FromAngle(angle + i * Mathf.Tau / rays);
+                DrawLine(center + dir * (radius * 0.55f), center + dir * radius, color, 2f, true);
             }
-
-            spark.Life--;
-            if (spark.Life <= 0)
-            {
-                spark.Node.QueueFree();
-                _sparks.RemoveAt(i);
-                continue;
-            }
-
-            spark.Node.Position += spark.Velocity;
-            spark.Velocity *= 0.82f;
-
-            float t = (float)spark.Life / spark.MaxLife;      // 1 → 0
-            spark.Node.Modulate = new Color(1f, 1f, 1f, t);
-            spark.Node.Size = spark.BaseSize * (0.6f + 0.6f * t);
         }
     }
 }

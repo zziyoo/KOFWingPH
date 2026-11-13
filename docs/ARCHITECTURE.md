@@ -663,3 +663,9 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - 地面走路由同一提交帧的实际位移和已识别方向投影，原有状态与速度契约保持。向后步行、起跳预备和方向跳跃可选用素材变体，旧绑定兼容原 clip。
 - 成功防御事件锁存当帧姿态，下一次合法防御可更新。硬直结束、换人或重开复位。站防和蹲防仍共用权威 Blockstun。
 - `frameSchedule` 在绑定中提供显式 move tick 到源帧的映射。Kai/Rei 的招式时序、HitStop 和取消由权威状态驱动。具体绑定与 Vulkan 验收见 `docs/STAGE13C_B_ACCEPTANCE.md`。
+
+### 阶段 13C-C 多对象表现
+
+- 同一交锋的两席共用 `ThrowVisual`，抓取姿态取 `PendingThrow`，释放姿态只属于 `ThrowHit` 的施投招式实例。拆投、打断、退出招式及交锋重置清除对应姿态。施投、受投和后续倒地均使用权威坐标。
+- 飞行道具按当前交锋 `ProjectileId` 与提交快照同步节点，显示年龄取寿命差，镜像取速度。拥有者换动作、被打断或进入 HitStop 不决定道具的存续。结束交锋清除显示对象。绑定缺失用原创几何图，绑定可给剪影颜色和镜像偏移。
+- 事件特效以 `(scope, EventId)` 去重，坐标取同一提交帧。火花按提交帧计龄，闪白保留 alpha，结束后短时收尾。交锋重置清空所有瞬时表现。详见 `docs/STAGE13C_C_ACCEPTANCE.md`。

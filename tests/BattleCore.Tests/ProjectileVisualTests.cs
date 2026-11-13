@@ -10,6 +10,28 @@ namespace NewKOF.BattleCore.Tests;
 public class ProjectileVisualTests
 {
     [Fact]
+    public void OwnerInterruptionDoesNotResetExistingProjectileAge()
+    {
+        var state = BattleState.CreateDefault();
+        var visuals = new ProjectileVisuals();
+        var ball = new ProjectileState(1, 0, "Fireball", "Fireball", default, default, default, default, 90);
+        visuals.Observe(new BattleState(5, state.Fighters, 15, projectiles: new[] { ball }, nextProjectileId: 2));
+        var interrupted = state.Fighter(0) with
+        {
+            LogicState = FighterLogicState.Hitstun,
+            StunRemainingFrames = 12,
+            HitstopRemainingFrames = 4,
+        };
+        ball = ball with { RemainingLifetime = 89 };
+        visuals.Observe(new BattleState(6, new[] { interrupted, state.Fighter(1) }, 15,
+            projectiles: new[] { ball }, nextProjectileId: 2));
+        Assert.Equal(1, visuals.Age(ball));
+        visuals.Reset();
+        visuals.Observe(new BattleState(1, state.Fighters, 15, projectiles: new[] { ball }, nextProjectileId: 2));
+        Assert.Equal(0, visuals.Age(ball));
+    }
+
+    [Fact]
     public void AgeFollowsIndividualEntitiesThroughRealClashAndBoutReset()
     {
         var kai = DemoRoster.CreateKai();

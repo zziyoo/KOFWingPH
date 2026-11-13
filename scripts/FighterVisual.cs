@@ -106,6 +106,12 @@ public sealed class FighterVisual
     public void FlashUntil(int logicFrame) =>
         _flash.Until(logicFrame);
 
+    public void ClearFlash()
+    {
+        _flash.Reset();
+        _sprite?.SetFlash(false);
+    }
+
     public bool AdvanceTerminalFlash(int logicFrame, double delta) => _flash.AdvanceTerminal(logicFrame, delta);
 
     /// <summary>

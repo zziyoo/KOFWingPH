@@ -170,6 +170,11 @@ public static class FeedbackGeometry
         }
 
         int target = cue.TargetFighterId is 0 or 1 ? cue.TargetFighterId : cue.SourceFighterId;
+        if (cue.Kind == FeedbackKind.ThrowImpact && target is 0 or 1)
+        {
+            FighterState fighter = state.Fighter(target);
+            return (fighter.PositionX.ToDouble(), fighter.PositionY.ToDouble() + 12d);
+        }
         return target is 0 or 1
             ? AnchorOf(state.Fighter(target))
             : (0d, ChestHeight);
@@ -212,7 +217,7 @@ public sealed class HitShake
         _elapsed = 0;
     }
 
-    /// <summary>推进一个渲染帧并返回本帧偏移（无抖动时返回 (0,0)）。</summary>
+    /// <summary>推进一个表现步并返回偏移（无抖动时返回 (0,0)）。</summary>
     public (int X, int Y) Tick()
     {
         if (_magnitude <= 0)
