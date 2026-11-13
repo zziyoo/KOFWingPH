@@ -146,9 +146,17 @@ def source_commands(sections, constants):
     return result, widths
 
 
+def neutral_air_hurtboxes(actions):
+    frames = [boxes for action in actions for boxes in collision_boxes(action, 2, normalize_edges=True)]
+    require(frames and frames[0] and all(boxes == frames[0] for boxes in frames),
+            'neutral Actions 41 and 49 must share common constant Clsn2')
+    return frames[0]
+
+
 def inspect_source(zip_path, manifest):
     zip_sha, members, contents = state200.read_terry_archive(zip_path)
     actions, _ = parse_air(contents['anim'].decode('latin-1'))
+    hashes = state200.manifest_hashes(zip_sha, members)
     sections = read_sections(contents['st1'].decode('latin-1'))
     commands, widths = source_commands(read_sections(contents['cmd'].decode('latin-1')),
                                         read_sections(contents['cns'].decode('latin-1')))
@@ -157,10 +165,14 @@ def inspect_source(zip_path, manifest):
         bounds, source = source_move(sections, number)
         raw = unique((action for action in actions if action['action'] == number), f'AIR Action {number}')
         action = action_profile(raw, bounds)
-        action['spriteIndices'] = validate_manifest(manifest, state200.manifest_hashes(zip_sha, members), raw)
+        action['spriteIndices'] = validate_manifest(manifest, hashes, raw)
         result[number] = {'state': source, 'command': commands[number], 'action': action}
+    air_actions = [unique((action for action in actions if action['action'] == number), f'AIR Action {number}')
+                   for number in (41, 49)]
+    air_sprites = {action['action']: validate_manifest(manifest, hashes, action) for action in air_actions}
     return {'format': 1, 'zipSha256': zip_sha, 'manifestSha256': archive_digest(manifest), 'members': members,
-            'groundBodyWidths': widths['ground'], 'airBodyWidths': widths['air'], 'moves': result}
+            'groundBodyWidths': widths['ground'], 'airBodyWidths': widths['air'], 'moves': result,
+            'neutralAirHurtboxes': neutral_air_hurtboxes(air_actions), 'neutralAirActionSprites': air_sprites}
 
 
 def attack_cursor(action, contacts):
@@ -319,6 +331,11 @@ def build_profile(audit, reference, base_fighter, base_binding, mode):
     fighter['displayName'] = f"Terry Standing Normals ({'default' if mode == 'default' else 'mode 2'})"
     fighter['groundBodyWidths'] = audit['groundBodyWidths']
     fighter['airBodyWidths'] = audit['airBodyWidths']
+    fighter['neutralAirHurtboxes'] = [
+        {'minX': state200.fraction(left), 'maxX': state200.fraction(right),
+         'minY': state200.fraction(-bottom), 'maxY': state200.fraction(-top)}
+        for left, top, right, bottom in audit['neutralAirHurtboxes']
+    ]
     retention = fighter['movement']['groundReaction']['velocityRetention']
     coefficient = Fraction(retention['numerator'], retention['denominator'])
     near = []
@@ -490,6 +507,7 @@ def main():
                 'reference': {**reference, 'cases': reference['cases'][mode], 'projection': reference['projection'][mode]},
                 'limits': ['Near/far profiles use original body-distance priority and fixed pre-match mode.',
                            'Stage 215 contact groups follow the original MoveHitReset rather than its shared HitDef id.',
+                           'Neutral airborne hurtboxes are the constant source Clsn2 of Actions 41 and 49. Other airborne states retain the base rules.',
                            'The first reaction is interrupted by the second contact in the reference. Its effective stun uses the equivalent source HitDef timer as the measured second reaction.',
                            'Second-hit damage is the measured prior-contact or second-only sample. Original var(21) randomizes per tick.'],
             }

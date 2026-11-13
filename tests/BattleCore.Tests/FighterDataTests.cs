@@ -728,6 +728,28 @@ public class FighterDataTests
         Assert.Equal(near ? "Near" : "Far", sim.Step(initial, F(0, InputBits.LightPunch)).State.Fighter(0).MoveId);
     }
 
+    [Theory]
+    [InlineData(Facing.Right, -20, 19)]
+    [InlineData(Facing.Left, -19, 20)]
+    public void NeutralJumpHurtboxes_MirrorWithoutReplacingMovingOrUnconfiguredAirHurtboxes(
+        Facing facing, int left, int right)
+    {
+        string json = Mutate(Json("Kai"), document => document["neutralAirHurtboxes"] = JsonNode.Parse("""
+            [{"minX":{"numerator":-20,"denominator":1},"minY":{"numerator":33,"denominator":1},
+              "maxX":{"numerator":19,"denominator":1},"maxY":{"numerator":96,"denominator":1}}]
+            """));
+        FighterDefinition definition = FighterDataLoader.Load(json);
+        var neutral = FighterState.Create(0, 1000, 0, facing) with
+        {
+            LogicState = FighterLogicState.Airborne, PositionY = 60, JumpKind = JumpKind.HighJump,
+        };
+        Assert.Equal(new FixedRect(left, right, 93, 156), Assert.Single(FighterBoxes.GetHurtboxes(neutral, definition)));
+        Assert.Equal(FighterBoxes.GetHurtbox(neutral), Assert.Single(FighterBoxes.GetHurtboxes(neutral,
+            FighterDataLoader.Load(Json("Kai")))));
+        var moving = neutral with { VelocityX = 3 };
+        Assert.Equal(FighterBoxes.GetHurtbox(moving), Assert.Single(FighterBoxes.GetHurtboxes(moving, definition)));
+    }
+
     [Fact]
     public void MoveHurtboxTimeline_UsesAuthoritativeElapsedAndMirrors()
     {
@@ -895,11 +917,15 @@ public class FighterDataTests
         var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
         BattleState state = ActiveState("StandLightPunch", 3, p1X: -30, p2X: 30);
         var contacts = new List<BattleEvent>();
+        var steps = new List<BattleStepResult>();
+        var inputs = new List<FrameInput>();
         for (int i = 0; i < 60; i++)
         {
             InputBits p1 = i == 40 ? InputBits.LightPunch : InputBits.None;
             InputBits p2 = guard && i is 0 or 43 ? InputBits.Right : InputBits.None;
-            BattleStepResult step = simulation.Step(state, F(i, p1, p2));
+            inputs.Add(F(i, p1, p2));
+            BattleStepResult step = simulation.Step(state, inputs[^1]);
+            steps.Add(step);
             contacts.AddRange(step.Events.Where(e => e.Type is BattleEventType.Hit or BattleEventType.Blocked));
             state = step.State;
         }
@@ -907,6 +933,16 @@ public class FighterDataTests
         Assert.All(contacts, contact => Assert.Equal(guard ? BattleEventType.Blocked : BattleEventType.Hit, contact.Type));
         if (!guard)
             Assert.Equal(new[] { 30, 9, 30, 9 }, contacts.Select(contact => contact.Amount));
+
+        BattleState replay = steps[0].State;
+        Assert.Equal(1u, replay.Fighter(1).LastHitContactGroups);
+        for (int i = 1; i < steps.Count; i++)
+        {
+            BattleStepResult step = simulation.Step(replay, inputs[i]);
+            Assert.Equal(steps[i].Events, step.Events);
+            Assert.Equal(steps[i].State.Fighters, step.State.Fighters);
+            replay = step.State;
+        }
     }
 
     [Fact]

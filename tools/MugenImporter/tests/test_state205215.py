@@ -1,7 +1,7 @@
 import unittest
 
 from mugen_importer.state200 import read_sections
-from mugen_importer.state205215 import action_profile, attack_cursor, build_profile, move_scope
+from mugen_importer.state205215 import action_profile, attack_cursor, build_profile, move_scope, neutral_air_hurtboxes
 
 
 class State205215Tests(unittest.TestCase):
@@ -47,6 +47,7 @@ type = Null
                              {'first': 3, 'last': 9, 'box': [30, -80, 75, -44]}]}
         audit = {'groundBodyWidths': {'front': {'numerator': 15, 'denominator': 1}, 'back': {'numerator': 16, 'denominator': 1}},
                  'airBodyWidths': {'front': {'numerator': 11, 'denominator': 1}, 'back': {'numerator': 12, 'denominator': 1}},
+                 'neutralAirHurtboxes': [[-20, -96, 19, -33]],
                  'moves': {205: {'action': light, 'command': {'maximumStartBodyDistance': 16, 'time': 1, 'bufferTime': 1}},
                            215: {'action': heavy, 'command': {'maximumStartBodyDistance': 34, 'time': 1, 'bufferTime': 1}}}}
         base = {'fighterId': 'TerryS210',
@@ -77,12 +78,32 @@ type = Null
         self.assertNotIn('minimumStartDistance', fighter['moves'][3])
         self.assertIn('minimumStartDistance', base['moves'][1])
         self.assertEqual(215, visuals['clips']['state215']['action'])
+        self.assertEqual([{'minX': {'numerator': -20, 'denominator': 1}, 'maxX': {'numerator': 19, 'denominator': 1},
+                           'minY': {'numerator': 33, 'denominator': 1}, 'maxY': {'numerator': 96, 'denominator': 1}}],
+                         fighter['neutralAirHurtboxes'])
 
     def test_ikemen_collision_cursor_freezes_after_each_contact(self):
         action = {'durations': [2, 2, 3]}
         self.assertEqual([(0, 0), (0, 1), (1, 0), (1, 1), (1, 1), (2, 0),
                           (2, 1), (2, 1), (2, 1), (2, 2)],
                          attack_cursor(action, [(2, 1), (4, 2)]))
+
+    def test_neutral_air_boxes_must_be_constant_across_high_and_short_hops(self):
+        def action(number, box):
+            return {'action': number, 'frames': [{}, {}], 'collisions': [
+                {'before_frame': 0, 'source': 'Clsn2Default: 1'},
+                {'before_frame': 0, 'source': f'Clsn2[0] = {box}'},
+            ]}
+
+        high = action(41, '-20,-96,19,-33')
+        short = action(49, '-20,-96,19,-33')
+        self.assertEqual([[-20, -96, 19, -33]], neutral_air_hurtboxes([high, short]))
+        short['collisions'].extend([
+            {'before_frame': 1, 'source': 'Clsn2: 1'},
+            {'before_frame': 1, 'source': 'Clsn2[0] = -20,-96,19,-20'},
+        ])
+        with self.assertRaisesRegex(ValueError, 'common constant Clsn2'):
+            neutral_air_hurtboxes([high, short])
 
 
 if __name__ == '__main__':

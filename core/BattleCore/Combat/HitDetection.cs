@@ -65,6 +65,7 @@ public static class FighterBoxes
             FighterLogicState.Crouching when previousState == FighterLogicState.Standing
                 && definition.GroundHurtboxes?.StandingOnCrouchEntry == true => definition.GroundHurtboxes.Standing,
             FighterLogicState.Crouching => definition.GroundHurtboxes?.Crouching,
+            FighterLogicState.Airborne when fighter.VelocityX == FixedPoint.Zero => definition.NeutralAirHurtboxes,
             _ => null,
         };
         if (local is null)

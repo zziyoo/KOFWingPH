@@ -115,9 +115,12 @@ public static class FighterDataLoader
             ? BuildBodyWidths(widths, sourceName, "groundBodyWidths") : null;
         GroundBodyWidths? airBodyWidths = dto.AirBodyWidths is { } airWidths
             ? BuildBodyWidths(airWidths, sourceName, "airBodyWidths") : null;
+        IReadOnlyList<FixedRect>? neutralAirHurtboxes = dto.NeutralAirHurtboxes is { } airBoxes
+            ? BuildArray(airBoxes, sourceName, "neutralAirHurtboxes", BuildHurtbox) : null;
 
         FighterDefinition definition = Guard(
-            () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes, groundBodyWidths, airBodyWidths),
+            () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes, groundBodyWidths,
+                airBodyWidths, neutralAirHurtboxes),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }

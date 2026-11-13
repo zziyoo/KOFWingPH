@@ -41,6 +41,9 @@ public sealed class FighterDocumentDto
 
     [JsonPropertyName("airBodyWidths")]
     public GroundBodyWidthsDto? AirBodyWidths { get; set; }
+
+    [JsonPropertyName("neutralAirHurtboxes")]
+    public List<HurtboxDto>? NeutralAirHurtboxes { get; set; }
 }
 
 public sealed class GroundBodyWidthsDto

@@ -83,7 +83,8 @@ public sealed class FighterDefinition
         MovementDefinition? movement = null,
         GroundHurtboxes? groundHurtboxes = null,
         GroundBodyWidths? groundBodyWidths = null,
-        GroundBodyWidths? airBodyWidths = null)
+        GroundBodyWidths? airBodyWidths = null,
+        IReadOnlyList<FixedRect>? neutralAirHurtboxes = null)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -144,6 +145,12 @@ public sealed class FighterDefinition
         AirBodyWidths = airBodyWidths;
         if (airBodyWidths is not null && groundBodyWidths is null)
             throw new ArgumentException("airBodyWidths 需要配置 groundBodyWidths。", nameof(airBodyWidths));
+        if (neutralAirHurtboxes is not null)
+        {
+            if (neutralAirHurtboxes.Count == 0)
+                throw new ArgumentException("垂直跳跃需要至少一个受击矩形。", nameof(neutralAirHurtboxes));
+            NeutralAirHurtboxes = GroundHurtboxes.CopyLocalBoxes(neutralAirHurtboxes, nameof(neutralAirHurtboxes));
+        }
 
         _movesByCommandId = new(StringComparer.Ordinal);
         foreach (var group in moveCopy.GroupBy(move => move.CommandId, StringComparer.Ordinal))
@@ -177,6 +184,7 @@ public sealed class FighterDefinition
     public GroundHurtboxes? GroundHurtboxes { get; }
     public GroundBodyWidths? GroundBodyWidths { get; }
     public GroundBodyWidths? AirBodyWidths { get; }
+    public IReadOnlyList<FixedRect>? NeutralAirHurtboxes { get; }
 
     private readonly Dictionary<string, IReadOnlyList<MoveDefinition>> _movesByCommandId;
     private readonly Dictionary<string, MoveDefinition> _moveById;
