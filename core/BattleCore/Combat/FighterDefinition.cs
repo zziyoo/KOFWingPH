@@ -1,6 +1,36 @@
 using NewKOF.BattleCore.Commands;
+using NewKOF.BattleCore.Numerics;
 
 namespace NewKOF.BattleCore.Combat;
+
+/// <summary>站立和蹲伏的局部受击矩形，X 沿面向，Y 向上。</summary>
+public sealed class GroundHurtboxes
+{
+    public const int MaxLocalCoordinate = 8192;
+
+    public GroundHurtboxes(IReadOnlyList<FixedRect> standing, IReadOnlyList<FixedRect> crouching,
+        bool standingOnCrouchEntry = false)
+    {
+        Standing = Copy(standing, nameof(standing));
+        Crouching = Copy(crouching, nameof(crouching));
+        StandingOnCrouchEntry = standingOnCrouchEntry;
+    }
+
+    public IReadOnlyList<FixedRect> Standing { get; }
+    public IReadOnlyList<FixedRect> Crouching { get; }
+    public bool StandingOnCrouchEntry { get; }
+
+    private static IReadOnlyList<FixedRect> Copy(IReadOnlyList<FixedRect> boxes, string name)
+    {
+        ArgumentNullException.ThrowIfNull(boxes, name);
+        if (boxes.Count == 0 || boxes.Any(box => box.MinX >= box.MaxX || box.MinY >= box.MaxY))
+            throw new ArgumentException("需要至少一个具有正面积的受击矩形。", name);
+        FixedPoint limit = FixedPoint.FromInt(MaxLocalCoordinate);
+        if (boxes.Any(box => box.MinX < -limit || box.MaxX > limit || box.MinY < -limit || box.MaxY > limit))
+            throw new ArgumentOutOfRangeException(name, $"受击框局部坐标必须在 ±{MaxLocalCoordinate} 内。");
+        return Array.AsReadOnly(boxes.ToArray());
+    }
+}
 
 /// <summary>
 /// 一名角色的<b>配置</b>（阶段 04，纯数据）：角色 ID + 专属指令表 + 专属招式表。
@@ -20,13 +50,15 @@ public sealed class FighterDefinition
     /// <param name="moves">该角色的招式表（可为空）。</param>
     /// <param name="movement">该角色的运动配置（阶段 05A，D64）；null 使用
     /// <see cref="MovementDefinition.CreateDefault"/>，保证 P1/P2 可携带不同运动数据。</param>
+    /// <param name="groundHurtboxes">可选地面待机受击框；其他状态沿用通用受击框。</param>
     /// <exception cref="ArgumentException">ID 为空 / 指令 ID 重复 / 招式 ID 重复 /
     /// 招式引用了指令表中不存在的 CommandId。</exception>
     public FighterDefinition(
         string fighterId,
         IReadOnlyList<CommandDefinition> commands,
         IReadOnlyList<MoveDefinition> moves,
-        MovementDefinition? movement = null)
+        MovementDefinition? movement = null,
+        GroundHurtboxes? groundHurtboxes = null)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -82,6 +114,7 @@ public sealed class FighterDefinition
 
         // 运动配置（D64）：null → 默认配置；非 null 直接持有（MovementDefinition 自身构造期不可变）。
         Movement = movement ?? MovementDefinition.CreateDefault();
+        GroundHurtboxes = groundHurtboxes;
 
         // 指令 ID → 招式 的只读查找表（构造期建好，识别外不扫描）。
         var byCommand = new Dictionary<string, MoveDefinition>(StringComparer.Ordinal);
@@ -107,6 +140,8 @@ public sealed class FighterDefinition
 
     /// <summary>该角色的运动配置（阶段 05A，D64；恒非 null）。</summary>
     public MovementDefinition Movement { get; }
+
+    public GroundHurtboxes? GroundHurtboxes { get; }
 
     private readonly Dictionary<string, MoveDefinition> _moveByCommandId;
     private readonly Dictionary<string, MoveDefinition> _moveById;

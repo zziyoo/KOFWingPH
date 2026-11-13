@@ -44,6 +44,9 @@ public partial class BattleScene : Node2D
     private MatchRules _rules = null!;
     private TeamMatchRules _teamRules = null!;
     private FighterCatalog _catalog = null!;
+    private FighterCatalogEntry? _duelP1Override;
+    private FighterCatalogEntry? _duelP2Override;
+    private FightRoster? _duelRoster;
 
     private MatchSession _match = null!;
     private TeamMatchSession _team = null!;
@@ -53,6 +56,7 @@ public partial class BattleScene : Node2D
     private IInputSource _tracedSource = null!;
     private readonly InputTrace _trace = new();
     private bool _diagnostics;
+    private bool _moveAudit;
 
     private Node2D? _fighter1Node;
     private Node2D? _fighter2Node;
@@ -106,9 +110,11 @@ public partial class BattleScene : Node2D
         MoveChild(_fx, Math.Max(0, hudIndex));
 
         _diagnostics = HasArg("--inputdiag");
+        _moveAudit = HasArg("--move-audit");
         _trace.Enabled = _diagnostics;
 
         _catalog = LoadFighterCatalog();
+        (_duelP1Override, _duelP2Override) = LoadDuelOverrides();
         _presentationSets = LoadPresentationSets();
         CreateFighterVisuals();
         _rules = RulesFromArgs();
@@ -159,7 +165,7 @@ public partial class BattleScene : Node2D
     {
         _match = new MatchSession(
             _rules,
-            (p1, p2) => BuildRoster(
+            (p1, p2) => BuildDuelRoster(
                 p1 ?? _catalog.Entries[0].FighterId,
                 p2 ?? _catalog.Entries[^1].FighterId),
             initialStateFactory: CreateDuelInitialState,
@@ -180,6 +186,52 @@ public partial class BattleScene : Node2D
 
     private FightRoster BuildRoster(string p1FighterId, string p2FighterId) =>
         _catalog.CreateRoster(p1FighterId, p2FighterId);
+
+    private (FighterCatalogEntry? P1, FighterCatalogEntry? P2) LoadDuelOverrides()
+    {
+        (FighterCatalogEntry Entry, string Json)? p1 = Load("--p1-fighter-file");
+        (FighterCatalogEntry Entry, string Json)? p2 = Load("--p2-fighter-file");
+        if (p1 is { } first && p2 is { } second && first.Entry.FighterId == second.Entry.FighterId
+            && first.Json != second.Json)
+            throw new ArgumentException($"[BattleScene] experimental ID {first.Entry.FighterId} has conflicting duel definitions.");
+        return (p1?.Entry, p2?.Entry);
+
+        (FighterCatalogEntry Entry, string Json)? Load(string option)
+        {
+            string prefix = option + "=";
+            string[] options = OS.GetCmdlineUserArgs()
+                .Where(arg => arg == option || arg.StartsWith(prefix, StringComparison.Ordinal)).ToArray();
+            if (options.Length == 0)
+                return null;
+            if (options.Length != 1 || options[0].Length <= prefix.Length
+                || string.IsNullOrWhiteSpace(options[0][prefix.Length..]))
+                throw new ArgumentException($"[BattleScene] provide one {option}=<fighter JSON path>.");
+
+            string path = options[0][prefix.Length..];
+            using Godot.FileAccess? access = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+            if (access is null)
+                throw new InvalidOperationException($"[BattleScene] {option}: {path} could not be read ({Godot.FileAccess.GetOpenError()}).");
+
+            string json = access.GetAsText();
+            FighterDataResult data = FighterDataLoader.LoadDocument(json, path);
+            if (_catalog.Entries.Any(e => e.FighterId == data.FighterId))
+                throw new ArgumentException($"[BattleScene] {option}: experimental ID {data.FighterId} conflicts with the default roster.");
+            return (new FighterCatalogEntry(data.FighterId, data.DisplayName, path, data.Definition), json);
+        }
+    }
+
+    private FighterCatalogEntry DuelEntry(int seat, string fighterId)
+    {
+        FighterCatalogEntry? alternate = seat == 0 ? _duelP1Override : _duelP2Override;
+        return alternate?.FighterId == fighterId ? alternate : _catalog.Get(fighterId);
+    }
+
+    private FightRoster BuildDuelRoster(string p1FighterId, string p2FighterId) =>
+        new(DuelEntry(0, p1FighterId).Definition, DuelEntry(1, p2FighterId).Definition);
+
+    private FighterCatalogEntry DuelSelection(int seat) => seat == 0
+        ? _duelP1Override ?? _catalog.Entries[_p1Index]
+        : _duelP2Override ?? _catalog.Entries[_p2Index];
 
     /// <summary>当前激活的会话是否处于队伍赛。</summary>
     private bool TeamActive => _stage == Stage.TeamBattle;
@@ -240,6 +292,9 @@ public partial class BattleScene : Node2D
 
     private static bool HasArg(string name) =>
         OS.GetCmdlineUserArgs().Any(a => a.Equals(name, StringComparison.Ordinal));
+
+    private static string? ArgValue(string name) => OS.GetCmdlineUserArgs()
+        .FirstOrDefault(arg => arg.StartsWith(name + "=", StringComparison.Ordinal))?[(name.Length + 1)..];
 
     private static MatchRules RulesFromArgs()
     {
@@ -627,8 +682,8 @@ public partial class BattleScene : Node2D
     private void StartDuel()
     {
         _match.SelectFighters(
-            _catalog.Entries[_p1Index].FighterId,
-            _catalog.Entries[_p2Index].FighterId);
+            DuelSelection(0).FighterId,
+            DuelSelection(1).FighterId);
         _match.StartMatch();
         _stage = Stage.DuelBattle;
         BindDuelRound();
@@ -651,8 +706,10 @@ public partial class BattleScene : Node2D
         if (_match.CurrentRound is BattleSession round
             && _match.State.P1FighterId is string p1 && _match.State.P2FighterId is string p2)
         {
-            BindAiInput(_match.RoundInputBuffer,()=>_match.CurrentBattleState!,BuildRoster(p1,p2),_match.State.RoundNumber,0,"1v1");
-            _debugBoxes.Bind(round, BuildRoster(p1, p2));
+            FightRoster roster = BuildDuelRoster(p1, p2);
+            _duelRoster = roster;
+            BindAiInput(_match.RoundInputBuffer,()=>_match.CurrentBattleState!,roster,_match.State.RoundNumber,0,"1v1");
+            _debugBoxes.Bind(round, roster);
             _visual1?.SetAnimationSet(SetFor(p1));
             _visual2?.SetAnimationSet(SetFor(p2));
             _visual1?.Reset();
@@ -867,8 +924,8 @@ public partial class BattleScene
 
     private string BuildDuelSelectHud()
     {
-        string p1Name = _catalog.Entries[_p1Index].DisplayName;
-        string p2Name = _catalog.Entries[_p2Index].DisplayName;
+        string p1Name = DuelSelection(0).DisplayName;
+        string p2Name = DuelSelection(1).DisplayName;
         string p1Tag = _p1Confirmed ? "[CONFIRMED]" : "[choose]";
         string p2Tag = _p2Confirmed ? "[CONFIRMED]" : "[choose]";
 
@@ -905,8 +962,8 @@ public partial class BattleScene
         FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
         FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
 
-        string p1Name = m.P1FighterId is null ? "-" : _catalog.DisplayName(m.P1FighterId);
-        string p2Name = m.P2FighterId is null ? "-" : _catalog.DisplayName(m.P2FighterId);
+        string p1Name = m.P1FighterId is null ? "-" : DuelEntry(0, m.P1FighterId).DisplayName;
+        string p2Name = m.P2FighterId is null ? "-" : DuelEntry(1, m.P2FighterId).DisplayName;
         FrameInput last = _aiSource?.LastInput ?? _match.RoundInputBuffer.LastInput ?? FrameInput.Empty(state?.Frame ?? 0);
         int seconds = (m.RemainingTimeFrames + BattleCoreInfo.LogicFrameRate - 1)
             / BattleCoreInfo.LogicFrameRate;
@@ -1234,12 +1291,10 @@ public partial class BattleScene
 
     private void CreateFighterVisuals()
     {
-        static string? Option(string name) => OS.GetCmdlineUserArgs()
-            .FirstOrDefault(arg => arg.StartsWith(name + "=", StringComparison.Ordinal))?[(name.Length + 1)..];
         if (_fighter1Node?.GetNodeOrNull<ColorRect>("Body") is ColorRect body1)
-            _visual1 = new FighterVisual(_fighter1Node, body1, SetFor(DefaultFighterId(0)), Option("--p1-visual"), Option("--p1-visual-fighter"), _throwVisual);
+            _visual1 = new FighterVisual(_fighter1Node, body1, SetFor(DefaultFighterId(0)), ArgValue("--p1-visual"), ArgValue("--p1-visual-fighter"), _throwVisual);
         if (_fighter2Node?.GetNodeOrNull<ColorRect>("Body") is ColorRect body2)
-            _visual2 = new FighterVisual(_fighter2Node, body2, SetFor(DefaultFighterId(1)), Option("--p2-visual"), Option("--p2-visual-fighter"), _throwVisual);
+            _visual2 = new FighterVisual(_fighter2Node, body2, SetFor(DefaultFighterId(1)), ArgValue("--p2-visual"), ArgValue("--p2-visual-fighter"), _throwVisual);
     }
 
     private string DefaultFighterId(int player) =>
@@ -1274,8 +1329,8 @@ public partial class BattleScene
                 _visual2?.SetAnimationSet(SetFor(_catalog.Entries[^1].FighterId));
                 break;
             case Stage.DuelSelect:
-                _visual1?.SetAnimationSet(SetFor(_catalog.Entries[_p1Index].FighterId));
-                _visual2?.SetAnimationSet(SetFor(_catalog.Entries[_p2Index].FighterId));
+                _visual1?.SetAnimationSet(SetFor(DuelSelection(0).FighterId));
+                _visual2?.SetAnimationSet(SetFor(DuelSelection(1).FighterId));
                 break;
             case Stage.TeamSelect:
                 _visual1?.SetAnimationSet(
@@ -1315,6 +1370,8 @@ public partial class BattleScene
             _projectileVisuals.Observe(frame.StateAfter);
             _visual1?.ObserveFrame(frame, 0);
             _visual2?.ObserveFrame(frame, 1);
+            if (_moveAudit && !TeamActive && _duelRoster is { } roster)
+                PrintMoveAudit(frame, roster);
             if (HasArg("--visual-audit"))
             {
                 var a = frame.StateAfter.Fighter(0);
@@ -1342,6 +1399,25 @@ public partial class BattleScene
             }
             _shakeOffset = _shake.Tick();
         }
+    }
+
+    private static void PrintMoveAudit(in PresentationFrame frame, FightRoster roster)
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            FighterState state = frame.StateAfter.Fighter(i);
+            FighterDefinition definition = roster.Fighter(i);
+            string boxes = string.Join(";", FighterBoxes.GetActiveHitboxes(state, definition).Select(Box));
+            GD.Print($"[MoveAudit] logic={frame.LogicFrame} fighter={i} id={definition.FighterId} " +
+                $"state={state.LogicState} move={state.MoveId ?? "-"} elapsed={state.MoveElapsedFrames} " +
+                $"phase={state.PhaseRemainingFrames} stop={state.HitstopRemainingFrames} stun={state.StunRemainingFrames} " +
+                $"facing={state.Facing} x={state.PositionX.RawValue} y={state.PositionY.RawValue} " +
+                $"vx={state.VelocityX.RawValue} vy={state.VelocityY.RawValue} health={state.Health} " +
+                $"attacks={boxes} hurt={string.Join(";", FighterBoxes.GetHurtboxes(state, definition).Select(Box))}");
+        }
+
+        static string Box(FixedRect rect) =>
+            $"{rect.MinX.RawValue},{rect.MinY.RawValue},{rect.MaxX.RawValue},{rect.MaxY.RawValue}";
     }
 
     private void ApplyCue(FeedbackCue cue, in PresentationFrame frame)

@@ -52,6 +52,34 @@ public static class FighterBoxes
             fighter.PositionY + height);
     }
 
+    /// <summary>当前姿态的权威受击区域。可选待机配置中的每个矩形独立参与碰撞。</summary>
+    public static IReadOnlyList<FixedRect> GetHurtboxes(FighterState fighter, FighterDefinition definition,
+        FighterLogicState? previousState = null)
+    {
+        IReadOnlyList<FixedRect>? local = fighter.LogicState switch
+        {
+            FighterLogicState.Standing => definition.GroundHurtboxes?.Standing,
+            FighterLogicState.Crouching when previousState == FighterLogicState.Standing
+                && definition.GroundHurtboxes?.StandingOnCrouchEntry == true => definition.GroundHurtboxes.Standing,
+            FighterLogicState.Crouching => definition.GroundHurtboxes?.Crouching,
+            _ => null,
+        };
+        if (local is null)
+            return new[] { GetHurtbox(fighter) };
+
+        var world = new FixedRect[local.Count];
+        for (int i = 0; i < local.Count; i++)
+        {
+            FixedRect box = local[i];
+            bool right = fighter.Facing == Facing.Right;
+            world[i] = new FixedRect(
+                fighter.PositionX + (right ? box.MinX : -box.MaxX),
+                fighter.PositionX + (right ? box.MaxX : -box.MinX),
+                fighter.PositionY + box.MinY, fighter.PositionY + box.MaxY);
+        }
+        return world;
+    }
+
     /// <summary>
     /// 该角色当帧的 <b>Pushbox</b>（仅显示/调试查询；权威推挤仍由 D73 求解器负责）。
     /// </summary>
@@ -209,14 +237,16 @@ public static class HitDetection
         FighterState fighter0,
         FighterState fighter1,
         FighterDefinition definition0,
-        FighterDefinition definition1)
+        FighterDefinition definition1,
+        FighterLogicState? previous0 = null,
+        FighterLogicState? previous1 = null)
     {
         ArgumentNullException.ThrowIfNull(definition0);
         ArgumentNullException.ThrowIfNull(definition1);
 
         List<AttackContact>? contacts = null;
-        Collect(fighter0, fighter1, definition0, 0, ref contacts);
-        Collect(fighter1, fighter0, definition1, 1, ref contacts);
+        Collect(fighter0, fighter1, definition0, definition1, previous1, 0, ref contacts);
+        Collect(fighter1, fighter0, definition1, definition0, previous0, 1, ref contacts);
 
         // 只读包装（D34/D61 同一先例）：快照附属数据不得暴露可变 List。
         return contacts is null
@@ -228,6 +258,8 @@ public static class HitDetection
         FighterState attacker,
         FighterState target,
         FighterDefinition attackerDefinition,
+        FighterDefinition targetDefinition,
+        FighterLogicState? previousTargetState,
         int attackerId,
         ref List<AttackContact>? contacts)
     {
@@ -235,19 +267,20 @@ public static class HitDetection
         if (hitboxes.Count == 0)
             return;
 
-        FixedRect hurtbox = FighterBoxes.GetHurtbox(target);
-        string? moveId = attacker.MoveId;
-        if (moveId is null)
-            return;
+        IReadOnlyList<FixedRect> hurtboxes = FighterBoxes.GetHurtboxes(target, targetDefinition, previousTargetState);
+        string moveId = attacker.MoveId!; // Nonempty hitboxes require a configured active move.
+        MoveDefinition move = attackerDefinition.FindMoveById(moveId)!;
 
         for (int i = 0; i < hitboxes.Count; i++)
         {
-            if (hitboxes[i].Box.Overlaps(hurtbox))
+            ActiveHitbox hitbox = hitboxes[i];
+            bool inclusive = move.Attacks[hitbox.AttackIndex].ContactOnEdge;
+            if (hurtboxes.Any(hurt => inclusive ? hitbox.Box.IntersectsOrTouches(hurt) : hitbox.Box.Overlaps(hurt)))
             {
                 contacts ??= new List<AttackContact>(4);
 
                 // 原始攻击定义序号（不是过滤后列表下标）：结算据此取回同一份攻击数据。
-                contacts.Add(new AttackContact(attackerId, 1 - attackerId, moveId, hitboxes[i].AttackIndex));
+                contacts.Add(new AttackContact(attackerId, 1 - attackerId, moveId, hitbox.AttackIndex));
             }
         }
     }

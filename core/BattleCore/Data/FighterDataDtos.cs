@@ -32,6 +32,36 @@ public sealed class FighterDocumentDto
 
     [JsonPropertyName("moves")]
     public List<MoveDto>? Moves { get; set; }
+
+    [JsonPropertyName("groundHurtboxes")]
+    public GroundHurtboxesDto? GroundHurtboxes { get; set; }
+}
+
+public sealed class GroundHurtboxesDto
+{
+    [JsonPropertyName("standingOnCrouchEntry")]
+    public bool StandingOnCrouchEntry { get; set; }
+
+    [JsonPropertyName("standing")]
+    public List<HurtboxDto>? Standing { get; set; }
+
+    [JsonPropertyName("crouching")]
+    public List<HurtboxDto>? Crouching { get; set; }
+}
+
+public sealed class HurtboxDto
+{
+    [JsonPropertyName("minX")]
+    public FractionDto? MinX { get; set; }
+
+    [JsonPropertyName("minY")]
+    public FractionDto? MinY { get; set; }
+
+    [JsonPropertyName("maxX")]
+    public FractionDto? MaxX { get; set; }
+
+    [JsonPropertyName("maxY")]
+    public FractionDto? MaxY { get; set; }
 }
 
 /// <summary>Q16.16 定点数的<b>整数分数</b>表示：numerator / denominator。</summary>
@@ -67,6 +97,21 @@ public sealed class MovementDto
 
     [JsonPropertyName("horizontalJumpSpeed")]
     public FractionDto? HorizontalJumpSpeed { get; set; }
+
+    [JsonPropertyName("groundReaction")]
+    public GroundReactionMovementDto? GroundReaction { get; set; }
+}
+
+public sealed class GroundReactionMovementDto
+{
+    [JsonPropertyName("velocityRetention")]
+    public FractionDto? VelocityRetention { get; set; }
+
+    [JsonPropertyName("lastHitStepScale")]
+    public FractionDto? LastHitStepScale { get; set; }
+
+    [JsonPropertyName("crouchGuardVelocityRetention")]
+    public FractionDto? CrouchGuardVelocityRetention { get; set; }
 }
 
 public sealed class CommandDto
@@ -193,6 +238,9 @@ public sealed class AttackDto
 
     [JsonPropertyName("hitstopByOutcome")]
     public HitstopByOutcomeDto? HitstopByOutcome { get; set; }
+
+    [JsonPropertyName("contactOnEdge")]
+    public bool ContactOnEdge { get; set; }
 }
 
 public sealed class HitstopByOutcomeDto

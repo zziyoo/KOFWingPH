@@ -441,6 +441,167 @@ public class FighterDataTests
         Assert.EndsWith(".hitstopByOutcome" + path, ExpectFailure(json).FieldPath);
     }
 
+    [Theory]
+    [InlineData(false, false, 13, 11, 3156914)]
+    [InlineData(true, false, 11, 10, 3073532)]
+    [InlineData(true, true, 11, 10, 2789212)]
+    public void GroundReaction_MatchesMeasuredSlideAfterIndependentPause(bool blocked, bool crouch, int pause,
+        int stun, int expectedDisplacement)
+    {
+        string json = Mutate(Json("Kai"), o =>
+        {
+            o["movement"]!["groundReaction"] = JsonNode.Parse("""
+                {"velocityRetention":{"numerator":17,"denominator":20},
+                 "lastHitStepScale":{"numerator":3,"denominator":5},
+                 "crouchGuardVelocityRetention":{"numerator":41,"denominator":50}}
+                """);
+            JsonNode jab = o["moves"]!.AsArray().Single(m => (string?)m!["moveId"] == "StandLightPunch")!;
+            JsonNode attack = jab["attacks"]![0]!;
+            attack["groundKnockback"] = JsonNode.Parse("""{"numerator":6,"denominator":1}""");
+            attack["blockKnockback"] = attack["groundKnockback"]!.DeepClone();
+            attack["hitstunFrames"] = 11;
+            attack["blockstunFrames"] = 10;
+            attack["hitstopByOutcome"] = JsonNode.Parse("""
+                {"hit":{"attackerFrames":11,"defenderFrames":13},
+                 "block":{"attackerFrames":11,"defenderFrames":11}}
+                """);
+        });
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var sim = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = new(0, new[]
+        {
+            FighterState.Create(0, 1000, -30, Facing.Right),
+            FighterState.Create(1, 1000, 30, Facing.Left),
+        }, BattleState.CreateDefault().StateVersion);
+
+        for (int tick = 0; tick <= 3; tick++)
+            state = sim.Step(state, F(state.Frame, tick == 0 ? InputBits.LightPunch : InputBits.None,
+                blocked && tick == 3 ? InputBits.Right : InputBits.None)).State;
+
+        Assert.Equal(stun, state.Fighter(1).StunRemainingFrames);
+        Assert.Equal(pause, state.Fighter(1).HitstopRemainingFrames);
+        FixedPoint contactX = state.Fighter(1).PositionX;
+        for (int tick = 0; tick < pause; tick++)
+        {
+            state = sim.Step(state, F(state.Frame, InputBits.None)).State;
+            Assert.Equal(contactX, state.Fighter(1).PositionX);
+        }
+        FixedPoint speed = 6;
+        FixedPoint expectedX = contactX;
+        for (int tick = 1; tick < stun; tick++)
+        {
+            bool holdCrouch = crouch && tick <= 6;
+            state = sim.Step(state, F(state.Frame, InputBits.None,
+                holdCrouch ? InputBits.Down | InputBits.Right : InputBits.None)).State;
+            expectedX += !blocked && tick == stun - 1 ? speed * FixedPoint.FromFraction(3, 5) : speed;
+            Assert.Equal(expectedX, state.Fighter(1).PositionX);
+            speed *= holdCrouch ? FixedPoint.FromFraction(41, 50) : FixedPoint.FromFraction(17, 20);
+        }
+        state = sim.Step(state, F(state.Frame, InputBits.None)).State;
+        Assert.Equal(FighterLogicState.Standing, state.Fighter(1).LogicState);
+        Assert.Equal(FixedPoint.Zero, state.Fighter(1).VelocityX);
+        Assert.InRange((state.Fighter(1).PositionX - contactX).RawValue,
+            FixedPoint.FromFraction(expectedDisplacement - 1000, 100000).RawValue,
+            FixedPoint.FromFraction(expectedDisplacement + 1000, 100000).RawValue);
+    }
+
+    [Fact]
+    public void StandingHurtboxOnCrouchEntry_UsesCurrentInputForGuardResult()
+    {
+        string json = Mutate(Json("Kai"), o => o["groundHurtboxes"] = JsonNode.Parse("""
+            {"standingOnCrouchEntry":true,
+             "standing":[{"minX":{"numerator":-20,"denominator":1},"minY":{"numerator":1,"denominator":1},
+                           "maxX":{"numerator":19,"denominator":1},"maxY":{"numerator":88,"denominator":1}}],
+             "crouching":[{"minX":{"numerator":-20,"denominator":1},"minY":{"numerator":1,"denominator":1},
+                            "maxX":{"numerator":19,"denominator":1},"maxY":{"numerator":72,"denominator":1}}]}
+            """));
+        FighterDefinition defender = FighterDataLoader.Load(json);
+        var attacker = new FighterDefinition("Probe", defender.Commands, new[]
+        {
+            new MoveDefinition("Probe", "5A", 1, 2, 1, attacks: new[]
+            {
+                new AttackDefinition(31, 80, 27, 7, damage: 7, blockstunFrames: 10),
+            }),
+        });
+        var sim = new BattleSimulation(new FightRoster(attacker, defender));
+        BattleState state = new(0, new[]
+        {
+            FighterState.Create(0, 1000, -30, Facing.Right),
+            FighterState.Create(1, 1000, 30, Facing.Left),
+        }, BattleState.CreateDefault().StateVersion);
+        InputBits downBack = InputBits.Down | InputBits.Right;
+        BattleState standing = sim.Step(state, F(0, InputBits.LightPunch)).State;
+        BattleState crouched = sim.Step(state, F(0, InputBits.LightPunch, downBack)).State;
+
+        BattleStepResult late = sim.Step(standing, F(1, InputBits.None, downBack));
+        BattleStepResult early = sim.Step(crouched, F(1, InputBits.None, downBack));
+        Assert.Contains(late.Events, e => e.Type == BattleEventType.Blocked);
+        Assert.Equal(FighterLogicState.Blockstun, late.State.Fighter(1).LogicState);
+        Assert.DoesNotContain(early.Events, e => e.Type is BattleEventType.Blocked or BattleEventType.Hit);
+        Assert.Equal(FighterLogicState.Crouching, early.State.Fighter(1).LogicState);
+        Assert.Equal(1000, late.State.Fighter(1).Health);
+        Assert.Equal(1000, early.State.Fighter(1).Health);
+    }
+
+    [Theory]
+    [InlineData(0, 77, false, true)]
+    [InlineData(0, 78, false, false)]
+    [InlineData(0, 78, true, true)]
+    [InlineData(0, 79, true, false)]
+    [InlineData(1, 77, false, true)]
+    [InlineData(1, 78, false, false)]
+    [InlineData(1, 78, true, true)]
+    [InlineData(1, 79, true, false)]
+    public void GroundHurtboxes_UseSourceRectanglesAndHonorTheAttacksEdgeRule(
+        int seat, int distance, bool contactOnEdge, bool hits)
+    {
+        string json = Mutate(Json("Kai"), o =>
+        {
+            o["groundHurtboxes"] = JsonNode.Parse("""
+                {"standing":[{"minX":{"numerator":-20,"denominator":1},"minY":{"numerator":1,"denominator":1},
+                              "maxX":{"numerator":19,"denominator":1},"maxY":{"numerator":88,"denominator":1}},
+                             {"minX":{"numerator":-8,"denominator":1},"minY":{"numerator":81,"denominator":1},
+                              "maxX":{"numerator":15,"denominator":1},"maxY":{"numerator":104,"denominator":1}}],
+                 "crouching":[{"minX":{"numerator":-20,"denominator":1},"minY":{"numerator":1,"denominator":1},
+                               "maxX":{"numerator":19,"denominator":1},"maxY":{"numerator":72,"denominator":1}}]}
+                """);
+        });
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var attackerDefinition = new FighterDefinition("BoxProbe", fighter.Commands, new[]
+        {
+            new MoveDefinition("Probe", "5A", 1, 1, 1, attacks: new[]
+            {
+                new AttackDefinition(FixedPoint.FromFraction(63, 2), FixedPoint.FromFraction(161, 2),
+                    FixedPoint.FromFraction(55, 2), FixedPoint.FromFraction(15, 2), contactOnEdge: contactOnEdge),
+            }),
+        });
+        FighterState attacker = FighterState.Create(seat, 1000, 0, seat == 0 ? Facing.Right : Facing.Left) with
+        {
+            LogicState = FighterLogicState.Active, MoveId = "Probe", PhaseRemainingFrames = 1, MoveStartedFrame = 0,
+        };
+        FighterState target = FighterState.Create(1 - seat, 1000, seat == 0 ? distance : -distance,
+            seat == 0 ? Facing.Left : Facing.Right);
+        IReadOnlyList<AttackContact> Detect(FighterState defender) => seat == 0
+            ? HitDetection.Detect(attacker, defender, attackerDefinition, fighter)
+            : HitDetection.Detect(defender, attacker, fighter, attackerDefinition);
+        Assert.Equal(hits ? 1 : 0, Detect(target).Count);
+        Assert.Empty(Detect(target with { LogicState = FighterLogicState.Crouching }));
+    }
+
+    [Fact]
+    public void GroundHurtboxes_RejectExtremeLocalCoordinatesBeforeMirroring()
+    {
+        string json = Mutate(Json("Kai"), o => o["groundHurtboxes"] = JsonNode.Parse("""
+            {"standing":[{"minX":{"numerator":-140737488355328,"denominator":1},
+                           "minY":{"numerator":0,"denominator":1},
+                           "maxX":{"numerator":1,"denominator":1},"maxY":{"numerator":1,"denominator":1}}],
+             "crouching":[{"minX":{"numerator":0,"denominator":1},"minY":{"numerator":0,"denominator":1},
+                            "maxX":{"numerator":1,"denominator":1},"maxY":{"numerator":1,"denominator":1}}]}
+            """));
+
+        Assert.Contains("groundHurtboxes", ExpectFailure(json).FieldPath);
+    }
+
     [Fact]
     public void MalformedJson_AndUnsupportedVersion_AreRejected()
     {

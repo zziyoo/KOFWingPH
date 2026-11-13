@@ -305,9 +305,18 @@ public sealed class BattleSimulation
                 FixedPoint speed = fighter.VelocityX;
                 if (speed != FixedPoint.Zero)
                 {
+                    GroundReactionMovement? reaction = definition.Movement.GroundReaction;
+                    if (reaction is not null && logic == FighterLogicState.Hitstun && stunRemaining == 1)
+                        speed *= reaction.LastHitStepScale;
                     x = fighter.PositionX + speed;
                     FixedPoint friction = fighter.KnockbackFriction;
-                    FixedPoint next = speed > FixedPoint.Zero ? speed - friction : speed + friction;
+                    FixedPoint? crouchRetention = logic == FighterLogicState.Blockstun && resolved.Down
+                        ? reaction?.CrouchGuardVelocityRetention : null;
+                    FixedPoint next = reaction is not null
+                        ? speed * (crouchRetention ?? reaction.VelocityRetention)
+                        : (speed > FixedPoint.Zero ? speed - friction : speed + friction);
+                    if (reaction is not null && crouchRetention is null && (next > -FixedPoint.One && next < FixedPoint.One))
+                        next = FixedPoint.Zero;
                     if ((speed > FixedPoint.Zero && next < FixedPoint.Zero)
                         || (speed < FixedPoint.Zero && next > FixedPoint.Zero))
                         next = FixedPoint.Zero;
@@ -405,7 +414,8 @@ public sealed class BattleSimulation
         // ── 第 6 阶段：命中结算（D78/D79/D80/D81）——接触检测 + 双方同时判定（互不先手）
         //    + 攻击实例去重（同一发动对同一目标只结算一次，被防御亦算已结算）。
         IReadOnlyList<AttackContact> contacts = state.PendingThrow is not null ? Array.Empty<AttackContact>() : HitDetection.Detect(
-            nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1));
+            nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1),
+            state.Fighters[0].LogicState, state.Fighters[1].LogicState);
 
         // ── 第 6a 阶段：攻击相杀（D98）——两个攻击实例的攻击框正面积重叠，
         //    且双方都<b>没有</b>打中对方受击框（攻击在空中对撞）。任一方真正命中的帧
@@ -1127,7 +1137,8 @@ public sealed class BattleSimulation
             }
 
             ProjectileDefinition definition = definitions[i];
-            if (!ProjectileBox(projectile, definition).Overlaps(FighterBoxes.GetHurtbox(fighters[target])))
+            FixedRect projectileBox = ProjectileBox(projectile, definition);
+            if (!FighterBoxes.GetHurtboxes(fighters[target], _roster.Fighter(target)).Any(projectileBox.Overlaps))
             {
                 survivors.Add(projectile);
                 continue;

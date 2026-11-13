@@ -103,9 +103,16 @@ public static class FighterDataLoader
             dto.Commands, sourceName, "commands", BuildCommand);
         MoveDefinition[] moves = BuildArray(
             dto.Moves, sourceName, "moves", BuildMove);
+        GroundHurtboxes? groundHurtboxes = dto.GroundHurtboxes is { } boxes
+            ? Guard(() => new GroundHurtboxes(
+                BuildArray(boxes.Standing, sourceName, "groundHurtboxes.standing", BuildHurtbox),
+                BuildArray(boxes.Crouching, sourceName, "groundHurtboxes.crouching", BuildHurtbox),
+                boxes.StandingOnCrouchEntry),
+                sourceName, "groundHurtboxes")
+            : null;
 
         FighterDefinition definition = Guard(
-            () => new FighterDefinition(fighterId, commands, moves, movement),
+            () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }
@@ -134,6 +141,12 @@ public static class FighterDataLoader
 
     // ── 顶层构造 ────────────────────────────────────────────────────
 
+    private static FixedRect BuildHurtbox(HurtboxDto dto, string source, string path) => Guard(
+        () => new FixedRect(
+            Fraction(dto.MinX, source, path + ".minX"), Fraction(dto.MaxX, source, path + ".maxX"),
+            Fraction(dto.MinY, source, path + ".minY"), Fraction(dto.MaxY, source, path + ".maxY")),
+        source, path);
+
     private static MovementDefinition BuildMovement(MovementDto dto, string source) => Guard(
         () => new MovementDefinition(
             walkForwardSpeed: Fraction(dto.WalkForwardSpeed, source, "movement.walkForwardSpeed"),
@@ -145,7 +158,15 @@ public static class FighterDataLoader
                 "movement.highJumpInitialVelocity"),
             jumpGravity: Fraction(dto.JumpGravity, source, "movement.jumpGravity"),
             horizontalJumpSpeed: Fraction(dto.HorizontalJumpSpeed, source,
-                "movement.horizontalJumpSpeed")),
+                "movement.horizontalJumpSpeed"),
+            groundReaction: dto.GroundReaction is { } reaction
+                ? Guard(() => new GroundReactionMovement(
+                    Fraction(reaction.VelocityRetention, source, "movement.groundReaction.velocityRetention"),
+                    Fraction(reaction.LastHitStepScale, source, "movement.groundReaction.lastHitStepScale"),
+                    reaction.CrouchGuardVelocityRetention is { } crouch
+                        ? Fraction(crouch, source, "movement.groundReaction.crouchGuardVelocityRetention") : null),
+                    source, "movement.groundReaction")
+                : null),
         source, "movement");
 
     private static CommandDefinition BuildCommand(CommandDto dto, string source, string path) => Guard(
@@ -206,7 +227,8 @@ public static class FighterDataLoader
                 ? new HitstopByOutcome(
                     BuildHitstopPair(outcome.Hit, source, path + ".hitstopByOutcome.hit"),
                     BuildHitstopPair(outcome.Block, source, path + ".hitstopByOutcome.block"))
-                : null),
+                : null,
+            contactOnEdge: dto.ContactOnEdge),
         source, path);
 
     private static HitstopPair BuildHitstopPair(HitstopPairDto? dto, string source, string path)

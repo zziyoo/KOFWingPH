@@ -57,4 +57,9 @@ public readonly record struct FixedRect
     public bool Overlaps(FixedRect other) =>
         MinX < other.MaxX && other.MinX < MaxX &&
         MinY < other.MaxY && other.MinY < MaxY;
+
+    /// <summary>包括相接的边界，仅用于显式声明此规则的攻击。</summary>
+    public bool IntersectsOrTouches(FixedRect other) =>
+        MinX <= other.MaxX && other.MinX <= MaxX &&
+        MinY <= other.MaxY && other.MinY <= MaxY;
 }

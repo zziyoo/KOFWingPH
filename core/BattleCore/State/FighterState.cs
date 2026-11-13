@@ -100,7 +100,7 @@ public readonly record struct FighterState(
     /// <b>命中停顿剩余帧数</b>（阶段 08A，D96）：&gt; 0 表示该角色本帧被冻结——
     /// 动作阶段、硬直计时、击退衰减、空中积分、取消窗口全部停摆，仅<b>输入识别</b>照常推进
     /// （缓冲不丢失）。每冻结一帧 −1，归零后的下一帧恢复正常推进。
-    /// 停顿由命中/成功防御结算写入（攻击方与被击方同值）。
+    /// 停顿由接触结算分别写入；旧近身攻击配置为双方使用相同值。
     /// </summary>
     public int HitstopRemainingFrames { get; init; } = HitstopRemainingFrames;
 

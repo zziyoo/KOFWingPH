@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fighterId": "TerryS200",
+  "animations": [
+    { "name": "idle", "loop": true, "framesPerStep": 1,
+      "frames": [{ "width": 60, "height": 120, "offsetX": 0, "offsetY": 0, "rotation": 0, "color": "#BB5147" }] },
+    { "name": "walk", "loop": true, "framesPerStep": 1,
+      "frames": [{ "width": 60, "height": 120, "offsetX": 0, "offsetY": 0, "rotation": 0, "color": "#BB5147" }] },
+    { "name": "crouch", "loop": true, "framesPerStep": 1,
+      "frames": [{ "width": 60, "height": 70, "offsetX": 0, "offsetY": 0, "rotation": 0, "color": "#BB5147" }] },
+    { "name": "jump", "loop": true, "framesPerStep": 1,
+      "frames": [{ "width": 60, "height": 120, "offsetX": 0, "offsetY": 0, "rotation": -6, "color": "#BB5147" }] },
+    { "name": "guard", "loop": true, "framesPerStep": 1,
+      "frames": [{ "width": 60, "height": 120, "offsetX": -4, "offsetY": 0, "rotation": -4, "color": "#6682C2" }] },
+    { "name": "hurt", "loop": true, "framesPerStep": 1,
+      "frames": [{ "width": 60, "height": 112, "offsetX": -8, "offsetY": 0, "rotation": -12, "color": "#E47D74" }] },
+    { "name": "state200", "loop": false, "framesPerStep": 1,
+      "frames": [{ "width": 84, "height": 120, "offsetX": 12, "offsetY": 0, "rotation": 0, "color": "#BB5147" }] }
+  ],
+  "states": {
+    "Standing": "idle",
+    "Walking": "walk",
+    "Crouching": "crouch",
+    "PreJump": "jump",
+    "Airborne": "jump",
+    "Startup": "state200",
+    "Active": "state200",
+    "Recovery": "state200",
+    "Hitstun": "hurt",
+    "Blockstun": "guard",
+    "AirHitstun": "hurt",
+    "AirBlockstun": "guard",
+    "Knockdown": "hurt",
+    "Wakeup": "hurt"
+  },
+  "moves": {
+    "TerryStandLightPunch200": { "startup": "state200", "active": "state200", "recovery": "state200" }
+  }
+}

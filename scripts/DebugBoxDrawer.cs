@@ -43,7 +43,8 @@ public partial class DebugBoxDrawer : Node2D
             FighterDefinition definition = _roster.Fighter(i);
 
             // Hurtbox：蓝色半透明（受击面）。
-            DrawRect(ToScreenRect(FighterBoxes.GetHurtbox(fighter)), new Color(0.3f, 0.55f, 1f, 0.30f));
+            foreach (FixedRect hurtbox in FighterBoxes.GetHurtboxes(fighter, definition))
+                DrawRect(ToScreenRect(hurtbox), new Color(0.3f, 0.55f, 1f, 0.30f));
 
             // Pushbox：绿色轮廓（实体占位；权威推挤仍由内核 D73 负责）。
             DrawRect(ToScreenRect(FighterBoxes.GetPushbox(fighter)), new Color(0.2f, 1f, 0.3f, 0.9f),

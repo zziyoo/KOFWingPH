@@ -2,6 +2,28 @@ using NewKOF.BattleCore.Numerics;
 
 namespace NewKOF.BattleCore.Combat;
 
+/// <summary>可选的地面受击速度比例。硬直剩余一帧时按原状态机恢复控制。</summary>
+public sealed class GroundReactionMovement
+{
+    public GroundReactionMovement(FixedPoint velocityRetention, FixedPoint lastHitStepScale,
+        FixedPoint? crouchGuardVelocityRetention = null)
+    {
+        if (velocityRetention <= FixedPoint.Zero || velocityRetention >= FixedPoint.One)
+            throw new ArgumentOutOfRangeException(nameof(velocityRetention), "速度保留比例必须大于 0 且小于 1。");
+        if (lastHitStepScale <= FixedPoint.Zero || lastHitStepScale > FixedPoint.One)
+            throw new ArgumentOutOfRangeException(nameof(lastHitStepScale), "末次受击位移比例必须大于 0 且不大于 1。");
+        if (crouchGuardVelocityRetention is { } crouch && (crouch <= FixedPoint.Zero || crouch >= FixedPoint.One))
+            throw new ArgumentOutOfRangeException(nameof(crouchGuardVelocityRetention), "蹲防速度保留比例必须大于 0 且小于 1。");
+        VelocityRetention = velocityRetention;
+        LastHitStepScale = lastHitStepScale;
+        CrouchGuardVelocityRetention = crouchGuardVelocityRetention;
+    }
+
+    public FixedPoint VelocityRetention { get; }
+    public FixedPoint LastHitStepScale { get; }
+    public FixedPoint? CrouchGuardVelocityRetention { get; }
+}
+
 /// <summary>
 /// 一名角色的<b>运动配置</b>（阶段 05A/05B，D64，纯数据）：地面步行与跳跃参数。
 ///
@@ -38,6 +60,7 @@ public sealed class MovementDefinition
     /// <param name="highJumpInitialVelocity">大跳垂直初速度（必须 &gt; 小跳初速度）。</param>
     /// <param name="jumpGravity">重力大小（世界单位/帧²，&gt; 0；积分时向 -Y 施加）。</param>
     /// <param name="horizontalJumpSpeed">前/后跳水平初速度大小（&gt; 0；中立跳为 0）。</param>
+    /// <param name="groundReaction">可选的地面受击与防御击退规则；缺省采用攻击数据的线性摩擦。</param>
     /// <exception cref="ArgumentOutOfRangeException">速度/初速/重力 ≤ 0 或超过上限；
     /// 预备窗口越界。</exception>
     /// <exception cref="ArgumentException">大跳初速度 ≤ 小跳初速度。</exception>
@@ -48,7 +71,8 @@ public sealed class MovementDefinition
         FixedPoint shortHopInitialVelocity,
         FixedPoint highJumpInitialVelocity,
         FixedPoint jumpGravity,
-        FixedPoint horizontalJumpSpeed)
+        FixedPoint horizontalJumpSpeed,
+        GroundReactionMovement? groundReaction = null)
     {
         ValidateSpeed(walkForwardSpeed, nameof(walkForwardSpeed), MaxWalkSpeedPerFrameUnits);
         ValidateSpeed(walkBackwardSpeed, nameof(walkBackwardSpeed), MaxWalkSpeedPerFrameUnits);
@@ -79,6 +103,7 @@ public sealed class MovementDefinition
         HighJumpInitialVelocity = highJumpInitialVelocity;
         JumpGravity = jumpGravity;
         HorizontalJumpSpeed = horizontalJumpSpeed;
+        GroundReaction = groundReaction;
     }
 
     /// <summary>前向步行速度（大小，世界单位/帧）。</summary>
@@ -101,6 +126,8 @@ public sealed class MovementDefinition
 
     /// <summary>前/后跳水平初速度大小（世界单位/帧；起跳帧锁定，空中无控制，D68）。</summary>
     public FixedPoint HorizontalJumpSpeed { get; }
+
+    public GroundReactionMovement? GroundReaction { get; }
 
     /// <summary>
     /// 默认运动配置（阶段 05 演示基线）：前 2.0 / 后 1.5 单位/帧；预备窗口 3 帧；

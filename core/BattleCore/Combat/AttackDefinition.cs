@@ -62,6 +62,7 @@ public sealed class AttackDefinition
     /// <param name="hitstopFrames">命中停顿帧数（阶段 08A，D96）：命中或成功防御后，
     /// 攻击方与被击方各冻结该数量的<b>后续</b>逻辑帧；0 = 不产生停顿。</param>
     /// <param name="hitstopByOutcome">可选的近身命中与防御停顿，覆盖上述对称默认值。</param>
+    /// <param name="contactOnEdge">近身攻击是否把边缘相接计为接触；默认要求正面积重叠。</param>
     /// <exception cref="ArgumentOutOfRangeException">半宽/半高 ≤ 0、帧号 &lt; 0、
     /// 伤害 &lt; 0 或硬直帧数 &lt; 1，或击退/击飞参数越界。</exception>
     /// <exception cref="ArgumentException">lastActiveFrame &lt; firstActiveFrame，
@@ -85,7 +86,8 @@ public sealed class AttackDefinition
         int knockdownFrames = 0,
         int wakeupFrames = 0,
         int hitstopFrames = 0,
-        HitstopByOutcome? hitstopByOutcome = null)
+        HitstopByOutcome? hitstopByOutcome = null,
+        bool contactOnEdge = false)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -158,6 +160,7 @@ public sealed class AttackDefinition
         WakeupFrames = wakeupFrames;
         HitstopFrames = hitstopFrames;
         HitstopByOutcome = hitstopByOutcome;
+        ContactOnEdge = contactOnEdge;
     }
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
@@ -219,6 +222,8 @@ public sealed class AttackDefinition
     public int HitstopFrames { get; }
 
     public HitstopByOutcome? HitstopByOutcome { get; }
+
+    public bool ContactOnEdge { get; }
 
     public HitstopPair ResolveMeleeHitstop(bool blocked) => HitstopByOutcome is { } outcome
         ? (blocked ? outcome.Block : outcome.Hit)
