@@ -471,6 +471,18 @@ public sealed class RecognitionState
 
         IReadOnlyList<CommandDirection> sequence = definition.DirectionSequence;
 
+        if (definition.ReserveGroundInput)
+        {
+            if (directions[^1].Direction != sequence[0])
+                return false;
+            pressIndex = FindPressIndex(presses, definition.RequiredButtons, frame, tolerance: 0);
+            if (pressIndex < 0)
+                return false;
+            // A held direction qualifies on each new edge without consuming the motion history.
+            match = CreateMatch(definition, playerIndex, frame, frame, directions, 0, 0, presses[pressIndex].Frame);
+            return true;
+        }
+
         // 裸按键指令（D56）：空方向序列 + 攻击键——不依赖方向历史，
         // 仅当帧的未消费按键边沿可完成（旧边沿已被消费或按容差裁剪）。
         if (sequence.Count == 0)

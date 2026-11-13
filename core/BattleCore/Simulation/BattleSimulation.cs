@@ -128,7 +128,7 @@ public sealed class BattleSimulation
         public int LandingWakeupFrames;
         public int MoveElapsedFrames;
         public int CrouchReturnTicks;
-        public int LightGroundReactionTick;
+        public GroundHitReactionState GroundReaction;
         public int HitstopRemainingFrames;
         public int ProjectileSpawnMask;
         public FixedPoint? HitLaunchGravity;
@@ -235,7 +235,7 @@ public sealed class BattleSimulation
                     MoveStartedFrame = fighter.MoveStartedFrame,
                     MoveElapsedFrames = fighter.MoveElapsedFrames,
                     CrouchReturnTicks = fighter.CrouchReturnTicks,
-                    LightGroundReactionTick = fighter.LightGroundReactionTick,
+                    GroundReaction = fighter.GroundReaction,
                     MoveStartedThisFrame = false,
                     KnockbackFriction = fighter.KnockbackFriction,
                     LandingKnockdownFrames = fighter.LandingKnockdownFrames,
@@ -307,7 +307,7 @@ public sealed class BattleSimulation
                 moveElapsed,
                 opponentDistance,
                 OpponentBodyDistance(fighter, state.Fighters[1 - i], definition, _roster.Fighter(1 - i)),
-                fighter.CrouchReturnTicks);
+                fighter.CrouchReturnTicks, fighter.GroundReaction.Crouching);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -408,7 +408,9 @@ public sealed class BattleSimulation
                     x = fighter.PositionX + speed;
                     FixedPoint friction = fighter.KnockbackFriction;
                     FixedPoint? crouchRetention = logic == FighterLogicState.Blockstun && resolved.Down
-                        ? reaction?.CrouchGuardVelocityRetention : null;
+                        ? reaction?.CrouchGuardVelocityRetention
+                        : logic == FighterLogicState.Hitstun && fighter.GroundReaction.Crouching
+                            ? reaction?.CrouchHitVelocityRetention : null;
                     FixedPoint next = reaction is not null
                         ? speed * (crouchRetention ?? reaction.VelocityRetention)
                         : (speed > FixedPoint.Zero ? speed - friction : speed + friction);
@@ -467,8 +469,8 @@ public sealed class BattleSimulation
                 LandingWakeupFrames = landingWakeup,
                 MoveElapsedFrames = tick.MoveElapsedFrames,
                 CrouchReturnTicks = tick.CrouchReturnTicks,
-                LightGroundReactionTick = logic == FighterLogicState.Hitstun && fighter.LightGroundReactionTick > 0
-                    ? checked(fighter.LightGroundReactionTick + 1) : 0,
+                GroundReaction = logic == FighterLogicState.Hitstun && fighter.GroundReaction.Tick > 0
+                    ? fighter.GroundReaction with { Tick = checked(fighter.GroundReaction.Tick + 1) } : default,
                 HitstopRemainingFrames = 0, // 命中停顿只由结算写入（本帧未冻结）。
                 // 投掷物生成掩码只属于当前攻击实例：换招/回到待机由状态机给出 0（见下方归一化）。
                 ProjectileSpawnMask = tick.MoveStartedFrame == fighter.MoveStartedFrame
@@ -520,7 +522,7 @@ public sealed class BattleSimulation
                 LandingWakeupFrames = candidates[i].LandingWakeupFrames,
                 MoveElapsedFrames = candidates[i].MoveElapsedFrames,
                 CrouchReturnTicks = candidates[i].CrouchReturnTicks,
-                LightGroundReactionTick = candidates[i].LightGroundReactionTick,
+                GroundReaction = candidates[i].GroundReaction,
                 HitstopRemainingFrames = candidates[i].HitstopRemainingFrames,
                 ProjectileSpawnMask = candidates[i].ProjectileSpawnMask,
                 HitLaunchGravity = candidates[i].HitLaunchGravity,
@@ -635,11 +637,14 @@ public sealed class BattleSimulation
             if ((fighter.CrouchReturnTicks < 0 && fighter.LogicState != FighterLogicState.Crouching) ||
                 (fighter.CrouchReturnTicks > 0 && fighter.LogicState != FighterLogicState.Standing) || fighter.Health == 0)
                 fighter = fighter with { CrouchReturnTicks = 0 };
-            if (fighter.LightGroundReactionTick != 0 && (fighter.LogicState != FighterLogicState.Hitstun || fighter.Health == 0))
-                fighter = fighter with { LightGroundReactionTick = 0 };
+            if (fighter.GroundReaction != default && (fighter.LogicState != FighterLogicState.Hitstun || fighter.Health == 0))
+                fighter = fighter with { GroundReaction = default };
             if (fighter.LogicState is not (FighterLogicState.Standing or FighterLogicState.Crouching) &&
                 (fighter.GuardWalkMomentum != FixedPoint.Zero || fighter.ProjectileGuardRecoveryRemaining != 0))
                 fighter = fighter with { GuardWalkMomentum = FixedPoint.Zero, ProjectileGuardRecoveryRemaining = 0 };
+            if (fighter.GroundGuardCrouching.HasValue &&
+                (fighter.Health == 0 || fighter.LogicState != FighterLogicState.Blockstun && fighter.ProjectileGuardRecoveryRemaining == 0))
+                fighter = fighter with { GroundGuardCrouching = null };
             nextFighters[i] = fighter;
         }
 
@@ -923,6 +928,7 @@ public sealed class BattleSimulation
                 fighters[defender] = defenderState with
                 {
                     LogicState = defenderState.LogicState.IsAirborneLike() ? FighterLogicState.AirBlockstun : FighterLogicState.Blockstun,
+                    GroundGuardCrouching = ResolveGroundGuard(defenderState, _roster.Fighter(defender)),
                     MoveId = null,
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
@@ -1014,7 +1020,7 @@ public sealed class BattleSimulation
                 fighters[defender] = defenderState with
                 {
                     LogicState = FighterLogicState.Hitstun,
-                    LightGroundReactionTick = settled.LightGroundReaction && _roster.Fighter(defender).GroundHurtboxes?.LightHitstun is not null ? 1 : 0,
+                    GroundReaction = ResolveGroundReaction(defenderState, _roster.Fighter(defender), settled.GroundReaction),
                     MoveId = null,
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
@@ -1657,6 +1663,7 @@ public sealed class BattleSimulation
             fighters[target] = defender with
             {
                 LogicState = defenderAirborne ? FighterLogicState.AirBlockstun : FighterLogicState.Blockstun,
+                GroundGuardCrouching = ResolveGroundGuard(defender, _roster.Fighter(target)),
                 MoveId = null,
                 PhaseRemainingFrames = 0,
                 StunRemainingFrames = hit.BlockstunFrames,
@@ -1757,7 +1764,7 @@ public sealed class BattleSimulation
             fighters[target] = defender with
             {
                 LogicState = FighterLogicState.Hitstun,
-                LightGroundReactionTick = 0,
+                GroundReaction = ResolveGroundReaction(defender, _roster.Fighter(target), hit.GroundReaction),
                 MoveId = null,
                 PhaseRemainingFrames = 0,
                 StunRemainingFrames = hit.HitstunFrames,
@@ -1949,8 +1956,25 @@ public sealed class BattleSimulation
             KnockdownFrames: launches ? attack.KnockdownFrames : 0,
             WakeupFrames: launches ? attack.WakeupFrames : 0,
             Hitstop: attack.ResolveMeleeHitstop(blocked: false),
-            LightGroundReaction: attack.LightGroundReaction);
+            GroundReaction: attack.GroundReaction);
     }
+
+    private static GroundHitReactionState ResolveGroundReaction(
+        FighterState defender, FighterDefinition definition, GroundHitReaction reaction)
+    {
+        bool crouching = definition.GroundHurtboxes?.HitReactionTimeline(reaction, crouching: true) is not null &&
+            reaction is GroundHitReaction.Heavy or GroundHitReaction.CrouchingLight or GroundHitReaction.HeavyLow &&
+            (defender.LogicState == FighterLogicState.Crouching || defender.GroundReaction.Crouching ||
+             defender.IsInMove && definition.FindMoveById(defender.MoveId!)?.AllowedFrom == MoveAllowedStates.Crouching);
+        return definition.GroundHurtboxes?.HitReactionTimeline(reaction, crouching) is null
+            ? default : new GroundHitReactionState(reaction, crouching, 1);
+    }
+
+    private static bool? ResolveGroundGuard(FighterState defender, FighterDefinition definition) =>
+        definition.GroundHurtboxes?.StandingGuard is null || defender.LogicState.IsAirborneLike() ? null
+            : defender.LogicState == FighterLogicState.Blockstun
+                ? defender.GroundGuardCrouching ?? false
+                : defender.LogicState == FighterLogicState.Crouching;
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
     private static bool CanGuard(FighterLogicState state, bool backHeld, AttackHeight height) =>
@@ -2241,7 +2265,7 @@ public sealed class BattleSimulation
         int KnockdownFrames,
         int WakeupFrames,
         HitstopPair Hitstop,
-        bool LightGroundReaction = false);
+        GroundHitReaction GroundReaction = GroundHitReaction.Standard);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。

@@ -18,7 +18,8 @@ public sealed record SpriteClipBinding(int Action, bool MoveClock, int StartTick
 /// <summary>Validated visual-only mapping. Version 1 integer clips remain supported.</summary>
 public sealed class SpriteBinding
 {
-    private sealed record HitReactionBinding(string Initial, string Followup, int FollowupTick);
+    private sealed record ReactionClips(string Initial, string Followup, int FollowupTick);
+    private sealed record HitReactionBinding(ReactionClips Standing, ReactionClips? Crouching);
 
     public string VisualId { get; private init; } = "";
     public double Scale { get; private init; }
@@ -36,13 +37,14 @@ public sealed class SpriteBinding
     public string ResolveStateClip(string defaultClip, string state) =>
         _states.TryGetValue(state, out string? clip) ? clip : defaultClip;
 
-    public (string Clip, int Tick)? ResolveHitReaction(string? moveId, int elapsed)
+    public (string Clip, int Tick)? ResolveHitReaction(string? moveId, int elapsed, bool crouching = false)
     {
         if (moveId is null || !_hitReactions.TryGetValue(moveId, out HitReactionBinding? reaction))
             return null;
-        return elapsed < reaction.FollowupTick
-            ? (reaction.Initial, Math.Max(0, elapsed - 1))
-            : (reaction.Followup, elapsed - reaction.FollowupTick);
+        ReactionClips poses = crouching ? reaction.Crouching ?? reaction.Standing : reaction.Standing;
+        return elapsed < poses.FollowupTick
+            ? (poses.Initial, Math.Max(0, elapsed - 1))
+            : (poses.Followup, elapsed - poses.FollowupTick);
     }
     public static bool ValidId(string id) => id.Length is > 0 and <= 80 && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
     public static string SelectVisualId(string fighterId, string? visualOverride, string? onlyFighter) =>
@@ -113,14 +115,11 @@ public sealed class SpriteBinding
             foreach (var item in reactionData.EnumerateObject())
             {
                 var reaction = item.Value;
-                if (string.IsNullOrWhiteSpace(item.Name)
-                    || !reaction.TryGetProperty("initial", out var initial) || initial.GetString() is not string initialName
-                    || !reaction.TryGetProperty("followup", out var followup) || followup.GetString() is not string followupName
-                    || !reaction.TryGetProperty("followupTick", out var tick) || !tick.TryGetInt32(out int switchTick)
-                    || switchTick < 1 || initialName == followupName
-                    || !clips.ContainsKey(initialName) || !clips.ContainsKey(followupName))
+                if (string.IsNullOrWhiteSpace(item.Name))
                     throw new ArgumentException($"Invalid hit reaction binding for {item.Name}.");
-                reactions.Add(item.Name, new HitReactionBinding(initialName, followupName, switchTick));
+                reactions.Add(item.Name, new HitReactionBinding(ParseReactionClips(reaction, clips, item.Name),
+                    reaction.TryGetProperty("crouching", out var crouch)
+                        ? ParseReactionClips(crouch, clips, item.Name + ".crouching") : null));
             }
         }
         var states = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -137,5 +136,18 @@ public sealed class SpriteBinding
         }
         return new SpriteBinding { VisualId = id, Scale = scale, OffsetX = x, OffsetY = y, Clips = clips,
             Fallback = fallback, _moves = moves, _hitReactions = reactions, _states = states };
+    }
+
+    private static ReactionClips ParseReactionClips(JsonElement reaction,
+        Dictionary<string, SpriteClipBinding> clips, string move)
+    {
+        if (reaction.ValueKind != JsonValueKind.Object ||
+            !reaction.TryGetProperty("initial", out var initial) || initial.GetString() is not string initialName ||
+            !reaction.TryGetProperty("followup", out var followup) || followup.GetString() is not string followupName ||
+            !reaction.TryGetProperty("followupTick", out var tick) || !tick.TryGetInt32(out int switchTick) ||
+            switchTick < 1 || initialName == followupName ||
+            !clips.ContainsKey(initialName) || !clips.ContainsKey(followupName))
+            throw new ArgumentException($"Invalid hit reaction binding for {move}.");
+        return new ReactionClips(initialName, followupName, switchTick);
     }
 }

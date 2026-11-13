@@ -20,8 +20,8 @@ internal sealed class MugenSpriteVisual
     private readonly Func<string, Texture2D?> _loadTexture;
     private sealed record ActionData(JsonElement[] Frames, int LoopStart);
     public bool HasClip(string clip) => _clips.ContainsKey(clip);
-    public (string Clip, int Tick)? HitReactionClip(string? moveId, int elapsed) =>
-        _binding.ResolveHitReaction(moveId, elapsed) is { } result && HasClip(result.Clip) ? result : null;
+    public (string Clip, int Tick)? HitReactionClip(string? moveId, int elapsed, bool crouching = false) =>
+        _binding.ResolveHitReaction(moveId, elapsed, crouching) is { } result && HasClip(result.Clip) ? result : null;
     public string StateClip(string defaultClip, string state)
     {
         string clip = _binding.ResolveStateClip(defaultClip, state);

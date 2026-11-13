@@ -32,6 +32,126 @@ public class FighterDataTests
 
     private static FrameInput F(int frame, InputBits p1, InputBits p2 = InputBits.None) => new(frame, p1, p2);
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void AuthoredHeavyReactionHoldsDuringHitPauseAndUsesDefenderTimeline(bool mirror, bool crouching)
+    {
+        string attackerJson = Mutate(Json("Kai"), o =>
+        {
+            JsonNode strike = o["moves"]![0]!["attacks"]![0]!;
+            strike["groundHitReaction"] = "Heavy";
+            strike["hitstunFrames"] = 5;
+            strike["hitstopFrames"] = 3;
+        });
+        static object Number(int value) => new { numerator = value, denominator = 1 };
+        static object Box(int left, int right, int top) =>
+            new { minX = Number(left), maxX = Number(right), minY = Number(0), maxY = Number(top) };
+        string defenderJson = Mutate(Json("Kai"), o =>
+        {
+            o["groundHurtboxes"] = JsonSerializer.SerializeToNode(new
+            {
+                standing = new[] { Box(-30, 30, 120) },
+                crouching = new[] { Box(-30, 30, 70) },
+                crouchRise = new[] { new { frames = 4, boxes = new[] { Box(-30, 30, 82) } } },
+                heavyHitstun = new[] { new { frames = 2, boxes = new[] { Box(-19, 11, 104) } },
+                    new { frames = 3, boxes = new[] { Box(-45, 7, 72) } } },
+                crouchingHeavyHitstun = new[] { new { frames = 5, boxes = new[] { Box(-17, 12, 68) } } },
+            });
+        });
+        FighterDefinition attacker = FighterDataLoader.Load(attackerJson);
+        FighterDefinition defender = FighterDataLoader.Load(defenderJson);
+        var simulation = new BattleSimulation(new FightRoster(attacker, defender));
+        BattleState state = ActiveState("StandLightPunch", 2, p1X: mirror ? 30 : -30, p2X: mirror ? -30 : 30);
+        state = new BattleState(0, [
+            state.Fighter(0) with { Facing = mirror ? Facing.Left : Facing.Right },
+            state.Fighter(1) with { Facing = mirror ? Facing.Right : Facing.Left,
+                LogicState = crouching ? FighterLogicState.Crouching : FighterLogicState.Standing }], state.StateVersion);
+
+        for (int frame = 0; frame <= 9; frame++)
+        {
+            FrameInput input = F(frame, InputBits.None, crouching && frame == 0 ? InputBits.Down : InputBits.None);
+            BattleStepResult first = simulation.Step(state, input);
+            Assert.Equal(first.State.Fighters, simulation.Step(state, input).State.Fighters);
+            if (frame == 0)
+                Assert.Single(first.Events, e => e.Type == BattleEventType.Hit);
+            state = first.State;
+            FighterState target = state.Fighter(1);
+            FixedRect box = Assert.Single(FighterBoxes.GetHurtboxes(target, defender));
+            int height = crouching ? (frame < 8 ? 68 : frame == 8 ? 70 : 82) : (frame <= 4 ? 104 : frame <= 7 ? 72 : 120);
+            int right = crouching ? (frame < 8 ? mirror ? 12 : 17 : 30)
+                : (frame <= 4 ? mirror ? 11 : 19 : frame <= 7 ? mirror ? 7 : 45 : 30);
+            Assert.Equal(FixedPoint.FromInt(height), box.MaxY);
+            Assert.Equal(FixedPoint.FromInt(right), box.MaxX - target.PositionX);
+        }
+        Assert.Equal(FighterLogicState.Standing, state.Fighter(1).LogicState);
+    }
+
+    [Fact]
+    public void AuthoredProjectileGroundReactionFreezesAndClearsOnControlReturn()
+    {
+        static object Number(int value) => new { numerator = value, denominator = 1 };
+        static object Box(int top) => new { minX = Number(-30), maxX = Number(30), minY = Number(0), maxY = Number(top) };
+        string json = Mutate(Json("Kai"), o =>
+        {
+            JsonNode projectile = o["moves"]!.AsArray().SelectMany(m => m!["projectiles"]!.AsArray()).First()!;
+            projectile["hit"]!["groundHitReaction"] = "HeavyLow";
+            o["groundHurtboxes"] = JsonSerializer.SerializeToNode(new
+            {
+                standing = new[] { Box(120) },
+                crouching = new[] { Box(70) },
+                lowHeavyHitstun = new[] { new { frames = 120, boxes = new[] { Box(96) } } },
+            });
+        });
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var sim = new BattleSimulation(new FightRoster(fighter, fighter));
+        MoveDefinition source = Assert.Single(fighter.Moves, move => move.Projectiles.Count != 0);
+        ProjectileDefinition projectile = Assert.Single(source.Projectiles);
+        BattleState state = BattleState.CreateDefault();
+        var entity = new ProjectileState(1, 0, projectile.ProjectileTypeId, source.MoveId,
+            state.Fighter(1).PositionX, 40, 0, 0, 4);
+        state = new BattleState(0, state.Fighters, state.StateVersion, projectiles: [entity], nextProjectileId: 2);
+        BattleStepResult first = sim.Step(state, F(0, InputBits.None));
+        Assert.Single(first.Events, e => e.Type == BattleEventType.ProjectileHit);
+        FighterState target = first.State.Fighter(1);
+        Assert.Equal(FixedPoint.FromInt(96), Assert.Single(FighterBoxes.GetHurtboxes(target, fighter)).MaxY);
+        state = first.State;
+        for (int frame = 1; frame <= target.HitstopRemainingFrames + target.StunRemainingFrames; frame++)
+        {
+            BattleState snapshot = state;
+            state = sim.Step(snapshot, F(frame, InputBits.None)).State;
+            Assert.Equal(state.Fighters, sim.Step(snapshot, F(frame, InputBits.None)).State.Fighters);
+            if (frame <= target.HitstopRemainingFrames)
+                Assert.Equal(target.GroundReaction, state.Fighter(1).GroundReaction);
+        }
+        Assert.Equal(FighterLogicState.Standing, state.Fighter(1).LogicState);
+        Assert.Equal(default, state.Fighter(1).GroundReaction);
+    }
+
+    [Fact]
+    public void AuthoredGuardHurtboxStaysCrouchedThroughFreezeAfterRelease()
+    {
+        static object Number(int value) => new { numerator = value, denominator = 1 };
+        static object Box(int top) => new { minX = Number(-30), maxX = Number(30), minY = Number(0), maxY = Number(top) };
+        string defenderJson = Mutate(Json("Kai"), o => o["groundHurtboxes"] = JsonSerializer.SerializeToNode(new
+        {
+            standing = new[] { Box(120) }, crouching = new[] { Box(70) },
+            standingGuard = new[] { Box(95) }, crouchingGuard = new[] { Box(65) },
+            standingGuardReady = new[] { Box(96) }, crouchingGuardReady = new[] { Box(66) },
+        }));
+        FighterDefinition attacker = FighterDataLoader.Load(Json("Kai"));
+        FighterDefinition defender = FighterDataLoader.Load(defenderJson);
+        var sim = new BattleSimulation(new FightRoster(attacker, defender));
+        BattleState state = ActiveState("StandLightPunch", 2, p1X: -30, p2X: 30);
+        BattleStepResult first = sim.Step(state, F(0, InputBits.None, InputBits.Down | InputBits.Right));
+        Assert.Single(first.Events, e => e.Type == BattleEventType.Blocked);
+        Assert.Equal(FixedPoint.FromInt(65), Assert.Single(FighterBoxes.GetHurtboxes(first.State.Fighter(1), defender)).MaxY);
+        state = sim.Step(first.State, F(1, InputBits.None)).State;
+        Assert.Equal(FixedPoint.FromInt(65), Assert.Single(FighterBoxes.GetHurtboxes(state.Fighter(1), defender)).MaxY);
+    }
+
     [Fact]
     public void Reentry_ExplicitSelfCancelStartsNewInstanceAndCanHitAgain()
     {

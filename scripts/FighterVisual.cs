@@ -82,7 +82,10 @@ public sealed class FighterVisual
                 return (launch, reaction.Phase is LaunchReactionPhase.Shake or LaunchReactionPhase.Lift ? 0 : reaction.Ticks);
         }
         if (fighter.LogicState == FighterLogicState.Hitstun &&
-            _sprite?.HitReactionClip(_hitReaction.MoveId, _hitReaction.Elapsed) is { } hitClip)
+            _sprite?.HitReactionClip(_hitReaction.MoveId,
+                fighter.GroundReaction.Kind is GroundHitReaction.Heavy or GroundHitReaction.CrouchingLight or GroundHitReaction.HeavyLow
+                    ? fighter.GroundReaction.Tick - 1 : _hitReaction.Elapsed,
+                fighter.GroundReaction.Crouching) is { } hitClip)
             return hitClip;
         if (fighter.LogicState == FighterLogicState.Blockstun && _guardPose.Crouching &&
             _sprite?.HasClip("guard_crouch") == true)

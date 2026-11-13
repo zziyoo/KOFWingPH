@@ -17,7 +17,8 @@ ALIASES = (ALIAS, "terry98-stage15-default", "terry98-stage15-mode2",
            "terry98-stage18-default", "terry98-stage18-mode2", "terry98-stage19-default",
            "terry98-stage20-default", "terry98-stage20-mode2",
            "terry98-stage21-default", "terry98-stage21-mode2",
-           "terry98-stage22-default", "terry98-stage22-mode2")
+           "terry98-stage22-default", "terry98-stage22-mode2",
+           "terry98-stage23-default", "terry98-stage23-mode2")
 
 
 def stage(source, binding, destination):

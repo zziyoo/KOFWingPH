@@ -93,6 +93,21 @@ public class SpriteBindingTests
     }
 
     [Fact]
+    public void CrouchingHitReactionSelectsItsOwnClipsAndSharesTheAuthoredClock()
+    {
+        var binding = SpriteBinding.Parse("""
+            {"clips":{"standImpact":5002,"standSlide":5007,"crouchImpact":5022,"crouchSlide":5027},
+             "hitReactions":{"Heavy":{"initial":"standImpact","followup":"standSlide","followupTick":4,
+               "crouching":{"initial":"crouchImpact","followup":"crouchSlide","followupTick":4}}}}
+            """, "x");
+        Assert.Equal(("standImpact", 0), binding.ResolveHitReaction("Heavy", 1));
+        Assert.Equal(("standSlide", 0), binding.ResolveHitReaction("Heavy", 4));
+        Assert.Equal(("crouchImpact", 0), binding.ResolveHitReaction("Heavy", 1, crouching: true));
+        Assert.Equal(("crouchImpact", 2), binding.ResolveHitReaction("Heavy", 3, crouching: true));
+        Assert.Equal(("crouchSlide", 0), binding.ResolveHitReaction("Heavy", 4, crouching: true));
+    }
+
+    [Fact]
     public void HitReactionTracksTheCommittedMoveAndCountsOnlyAfterFreeze()
     {
         var binding = SpriteBinding.Parse("""

@@ -729,3 +729,10 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - 同一物理边沿可映射到不同姿态的招式。距离回落顺序按各允许姿态独立校验。状态提交前，取消执行器按当前下方向许可蹲姿目标，并沿用优先级、命令缓冲和单次消费。State 400 以自己的 `CancelDefinition` 配置旧 tick 4，复用 State 1000、Helper 1020 和暂停执行器。
 - `returnsToCrouch` 描述自然退出后的 State 11。`groundHurtboxes.crouchRise` 描述松下后 Action 12 的可控地面过渡。权威快照保存起身进度，Godot 读取该进度绘制。出招、受击或 KO 清除过渡。
 - `lightGroundReaction` 和接收方 `groundHurtboxes.lightHitstun` 启用源素材的轻击反应框。时钟随快照保存，HitPause 冻结，后续反应替换它。原子结算、暂停和伤害公式沿用既有实现。
+
+### 阶段 23 蹲姿重击
+
+- `reserveGroundInput` 表示已确认的原版地面命令占用输入。它按当帧方向和新按键边沿识别，在可行动时与普通指令一起排序并消费同帧候选。阶段 23 以此表达前下＋重拳优先于 400／410，保留弱 Wave 的更高优先级。该配置没有招式或动画实例。
+- `groundHitReaction` 为近战命中选择接收方数据。原有 `lightGroundReaction` 仍能读取，`Heavy` 使用 `heavyHitstun`，目标命中时为蹲姿且配置了 `crouchingHeavyHitstun` 时选择蹲姿分支。分支和受击时钟锁存在权威快照，独立 HitPause 和全局 Pause 冻结。新命中替换反应，退出硬直或 KO 时清除。
+- 蹲姿重击反应使用接收方的 `crouchHitVelocityRetention` 及现有末步比例，并经可控蹲伏恢复。该受击姿态由接触决定，松下可影响恢复后的动作。Godot 通过同一权威时钟选择站姿或蹲姿的初始和滑动受击动画。
+- 阶段 23 用同一受击时钟处理 205 打断蹲姿时的轻击和 Helper 晚段落地重击。仅晚段不击飞的 Wave HitDef 选择 `HeavyLow`。可选的站／蹲守势框按格挡时锁存的姿态查询，续防期间的可控守势按当前姿态查询。全局 Pause 与 HitPause 保持权威快照。

@@ -11,6 +11,8 @@ public enum Facing
     Left = -1,
 }
 
+public readonly record struct GroundHitReactionState(GroundHitReaction Kind, bool Crouching, int Tick);
+
 /// <summary>
 /// 单名角色的当前数据。
 ///
@@ -76,8 +78,10 @@ public readonly record struct FighterState(
     FixedPoint GuardWalkMomentum = default,
     int ProjectileGuardRecoveryRemaining = 0,
     int CrouchReturnTicks = 0,
-    int LightGroundReactionTick = 0)
+    GroundHitReactionState GroundReaction = default,
+    bool? GroundGuardCrouching = null)
 {
+    public int LightGroundReactionTick => GroundReaction.Kind == GroundHitReaction.Light ? GroundReaction.Tick : 0;
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
 
@@ -141,11 +145,15 @@ public readonly record struct FighterState(
         if (CrouchReturnTicks < -1 ||
             (CrouchReturnTicks < 0 && LogicState != FighterLogicState.Crouching) ||
             (CrouchReturnTicks > 0 && LogicState != FighterLogicState.Standing) ||
-            LightGroundReactionTick < 0 || (LightGroundReactionTick > 0 && LogicState != FighterLogicState.Hitstun))
+            (GroundReaction != default && (GroundReaction.Tick <= 0 || GroundReaction.Kind == GroundHitReaction.Standard ||
+                !Enum.IsDefined(GroundReaction.Kind) || LogicState != FighterLogicState.Hitstun)))
             throw new InvalidOperationException($"角色 {Id} 的地面过渡时钟非法。");
         if (ProjectileGuardRecoveryRemaining < 0 ||
             (ProjectileGuardRecoveryRemaining != 0 && LogicState is not (FighterLogicState.Standing or FighterLogicState.Crouching)))
             throw new InvalidOperationException($"角色 {Id} 的防御恢复快照非法。");
+        if (GroundGuardCrouching.HasValue && LogicState != FighterLogicState.Blockstun &&
+            ProjectileGuardRecoveryRemaining == 0)
+            throw new InvalidOperationException($"角色 {Id} 的地面防御姿态快照非法。");
         FixedPoint walkLimit = FixedPoint.FromInt(MovementDefinition.MaxWalkSpeedPerFrameUnits);
         if (GuardWalkMomentum != FixedPoint.Zero &&
             (LogicState != FighterLogicState.Standing || GuardWalkMomentum < -walkLimit || GuardWalkMomentum > walkLimit))

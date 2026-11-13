@@ -111,9 +111,21 @@ public static class FighterDataLoader
                 boxes.Hitstun is null ? null : BuildArray(boxes.Hitstun, sourceName, "groundHurtboxes.hitstun", BuildHurtbox),
                 boxes.HitstunRecoveryFrames,
                 boxes.CrouchRise is null ? null : BuildArray(boxes.CrouchRise, sourceName, "groundHurtboxes.crouchRise", BuildMoveHurtboxSpan),
-                boxes.LightHitstun is null ? null : BuildArray(boxes.LightHitstun, sourceName, "groundHurtboxes.lightHitstun", BuildMoveHurtboxSpan)),
+                boxes.LightHitstun is null ? null : BuildArray(boxes.LightHitstun, sourceName, "groundHurtboxes.lightHitstun", BuildMoveHurtboxSpan),
+                boxes.HeavyHitstun is null ? null : BuildArray(boxes.HeavyHitstun, sourceName, "groundHurtboxes.heavyHitstun", BuildMoveHurtboxSpan),
+                boxes.CrouchingHeavyHitstun is null ? null : BuildArray(boxes.CrouchingHeavyHitstun, sourceName,
+                    "groundHurtboxes.crouchingHeavyHitstun", BuildMoveHurtboxSpan),
+                boxes.CrouchingLightHitstun is null ? null : BuildArray(boxes.CrouchingLightHitstun, sourceName,
+                    "groundHurtboxes.crouchingLightHitstun", BuildMoveHurtboxSpan),
+                boxes.LowHeavyHitstun is null ? null : BuildArray(boxes.LowHeavyHitstun, sourceName,
+                    "groundHurtboxes.lowHeavyHitstun", BuildMoveHurtboxSpan),
+                GuardBoxes(boxes.StandingGuard, "standingGuard"), GuardBoxes(boxes.CrouchingGuard, "crouchingGuard"),
+                GuardBoxes(boxes.StandingGuardReady, "standingGuardReady"), GuardBoxes(boxes.CrouchingGuardReady, "crouchingGuardReady")),
                 sourceName, "groundHurtboxes")
             : null;
+
+        IReadOnlyList<FixedRect>? GuardBoxes(List<HurtboxDto>? list, string key) =>
+            list is null ? null : BuildArray(list, sourceName, $"groundHurtboxes.{key}", BuildHurtbox);
 
         GroundBodyWidths? groundBodyWidths = dto.GroundBodyWidths is { } widths
             ? BuildBodyWidths(widths, sourceName, "groundBodyWidths") : null;
@@ -206,7 +218,9 @@ public static class FighterDataLoader
                     Fraction(reaction.VelocityRetention, source, "movement.groundReaction.velocityRetention"),
                     Fraction(reaction.LastHitStepScale, source, "movement.groundReaction.lastHitStepScale"),
                     reaction.CrouchGuardVelocityRetention is { } crouch
-                        ? Fraction(crouch, source, "movement.groundReaction.crouchGuardVelocityRetention") : null),
+                        ? Fraction(crouch, source, "movement.groundReaction.crouchGuardVelocityRetention") : null,
+                    reaction.CrouchHitVelocityRetention is { } crouchHit
+                        ? Fraction(crouchHit, source, "movement.groundReaction.crouchHitVelocityRetention") : null),
                     source, "movement.groundReaction")
                 : null),
         source, "movement");
@@ -231,7 +245,7 @@ public static class FighterDataLoader
                     RequiredInt(buffer.HelperHeldDecay, source, path + ".bufferPolicy.helperHeldDecay"),
                     RequiredInt(buffer.HelperReleasedDecay, source, path + ".bufferPolicy.helperReleasedDecay"))
                 : null,
-            matchHeldMotion: dto.MatchHeldMotion),
+            matchHeldMotion: dto.MatchHeldMotion, reserveGroundInput: dto.ReserveGroundInput),
         source, path);
 
     private static MoveDefinition BuildMove(MoveDto dto, string source, string path) => Guard(
@@ -293,7 +307,9 @@ public static class FighterDataLoader
             contactGroup: dto.ContactGroup,
             damageAfterPriorContact: dto.DamageAfterPriorContact,
             dynamicDamage: BuildDynamicDamage(dto.DynamicDamage, source, path + ".dynamicDamage"),
-            lightGroundReaction: dto.LightGroundReaction),
+            lightGroundReaction: dto.LightGroundReaction,
+            groundHitReaction: dto.GroundHitReaction is { } reaction
+                ? ParseEnum<GroundHitReaction>(reaction, source, path + ".groundHitReaction") : GroundHitReaction.Standard),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>

@@ -6,7 +6,7 @@ namespace NewKOF.BattleCore.Combat;
 public sealed class GroundReactionMovement
 {
     public GroundReactionMovement(FixedPoint velocityRetention, FixedPoint lastHitStepScale,
-        FixedPoint? crouchGuardVelocityRetention = null)
+        FixedPoint? crouchGuardVelocityRetention = null, FixedPoint? crouchHitVelocityRetention = null)
     {
         if (velocityRetention <= FixedPoint.Zero || velocityRetention >= FixedPoint.One)
             throw new ArgumentOutOfRangeException(nameof(velocityRetention), "速度保留比例必须大于 0 且小于 1。");
@@ -14,14 +14,18 @@ public sealed class GroundReactionMovement
             throw new ArgumentOutOfRangeException(nameof(lastHitStepScale), "末次受击位移比例必须大于 0 且不大于 1。");
         if (crouchGuardVelocityRetention is { } crouch && (crouch <= FixedPoint.Zero || crouch >= FixedPoint.One))
             throw new ArgumentOutOfRangeException(nameof(crouchGuardVelocityRetention), "蹲防速度保留比例必须大于 0 且小于 1。");
+        if (crouchHitVelocityRetention is { } hit && (hit <= FixedPoint.Zero || hit >= FixedPoint.One))
+            throw new ArgumentOutOfRangeException(nameof(crouchHitVelocityRetention), "蹲姿受击速度保留比例必须大于 0 且小于 1。");
         VelocityRetention = velocityRetention;
         LastHitStepScale = lastHitStepScale;
         CrouchGuardVelocityRetention = crouchGuardVelocityRetention;
+        CrouchHitVelocityRetention = crouchHitVelocityRetention;
     }
 
     public FixedPoint VelocityRetention { get; }
     public FixedPoint LastHitStepScale { get; }
     public FixedPoint? CrouchGuardVelocityRetention { get; }
+    public FixedPoint? CrouchHitVelocityRetention { get; }
 }
 
 /// <summary>

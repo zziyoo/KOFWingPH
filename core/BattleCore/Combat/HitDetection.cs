@@ -59,6 +59,14 @@ public static class FighterBoxes
         IReadOnlyList<FixedRect>? local = fighter.IsInMove && fighter.MoveId is { } moveId
             ? definition.FindMoveById(moveId)?.HurtboxesAt(fighter.MoveElapsedFrames)
             : null;
+        if (fighter.GroundGuardCrouching is { } crouching && definition.GroundHurtboxes is { } guards)
+        {
+            if (fighter.LogicState == FighterLogicState.Blockstun)
+                local = crouching ? guards.CrouchingGuard : guards.StandingGuard;
+            else if (fighter.ProjectileGuardRecoveryRemaining > 0 && fighter.RecognitionState.Directions.LastOrDefault().Direction
+                     is Commands.CommandDirection.Back or Commands.CommandDirection.DownBack)
+                local = fighter.LogicState == FighterLogicState.Crouching ? guards.CrouchingGuardReady : guards.StandingGuardReady;
+        }
         local ??= fighter.LogicState switch
         {
             FighterLogicState.Standing => GroundHurtboxes.BoxesAt(definition.GroundHurtboxes?.CrouchRise,
@@ -66,8 +74,9 @@ public static class FighterBoxes
             FighterLogicState.Crouching when previousState == FighterLogicState.Standing
                 && definition.GroundHurtboxes?.StandingOnCrouchEntry == true => definition.GroundHurtboxes.Standing,
             FighterLogicState.Crouching => definition.GroundHurtboxes?.Crouching,
-            FighterLogicState.Hitstun when fighter.LightGroundReactionTick > 0 =>
-                GroundHurtboxes.BoxesAt(definition.GroundHurtboxes?.LightHitstun, fighter.LightGroundReactionTick - 1),
+            FighterLogicState.Hitstun when fighter.GroundReaction.Tick > 0 =>
+                GroundHurtboxes.BoxesAt(definition.GroundHurtboxes?.HitReactionTimeline(
+                    fighter.GroundReaction.Kind, fighter.GroundReaction.Crouching), fighter.GroundReaction.Tick - 1),
             FighterLogicState.Hitstun when fighter.HitstopRemainingFrames == 0 &&
                 definition.GroundHurtboxes is { } ground && fighter.StunRemainingFrames > 0 &&
                 fighter.StunRemainingFrames <= ground.HitstunRecoveryFrames => ground.Hitstun,

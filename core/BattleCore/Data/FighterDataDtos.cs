@@ -134,6 +134,30 @@ public sealed class GroundHurtboxesDto
 
     [JsonPropertyName("lightHitstun")]
     public List<MoveHurtboxSpanDto>? LightHitstun { get; set; }
+
+    [JsonPropertyName("heavyHitstun")]
+    public List<MoveHurtboxSpanDto>? HeavyHitstun { get; set; }
+
+    [JsonPropertyName("crouchingHeavyHitstun")]
+    public List<MoveHurtboxSpanDto>? CrouchingHeavyHitstun { get; set; }
+
+    [JsonPropertyName("crouchingLightHitstun")]
+    public List<MoveHurtboxSpanDto>? CrouchingLightHitstun { get; set; }
+
+    [JsonPropertyName("lowHeavyHitstun")]
+    public List<MoveHurtboxSpanDto>? LowHeavyHitstun { get; set; }
+
+    [JsonPropertyName("standingGuard")]
+    public List<HurtboxDto>? StandingGuard { get; set; }
+
+    [JsonPropertyName("crouchingGuard")]
+    public List<HurtboxDto>? CrouchingGuard { get; set; }
+
+    [JsonPropertyName("standingGuardReady")]
+    public List<HurtboxDto>? StandingGuardReady { get; set; }
+
+    [JsonPropertyName("crouchingGuardReady")]
+    public List<HurtboxDto>? CrouchingGuardReady { get; set; }
 }
 
 public sealed class HurtboxDto
@@ -199,6 +223,9 @@ public sealed class GroundReactionMovementDto
 
     [JsonPropertyName("crouchGuardVelocityRetention")]
     public FractionDto? CrouchGuardVelocityRetention { get; set; }
+
+    [JsonPropertyName("crouchHitVelocityRetention")]
+    public FractionDto? CrouchHitVelocityRetention { get; set; }
 }
 
 public sealed class CommandDto
@@ -237,6 +264,9 @@ public sealed class CommandDto
 
     [JsonPropertyName("bufferPolicy")]
     public CommandBufferPolicyDto? BufferPolicy { get; set; }
+
+    [JsonPropertyName("reserveGroundInput")]
+    public bool ReserveGroundInput { get; set; }
 }
 
 public sealed class CommandBufferPolicyDto
@@ -289,6 +319,7 @@ public sealed class MoveDto
     [JsonPropertyName("returnsToCrouch")]
     public bool ReturnsToCrouch { get; set; }
 
+
     [JsonPropertyName("attacks")]
     public List<AttackDto>? Attacks { get; set; }
 
@@ -315,6 +346,9 @@ public sealed class AttackDto
 {
     [JsonPropertyName("lightGroundReaction")]
     public bool LightGroundReaction { get; set; }
+
+    [JsonPropertyName("groundHitReaction")]
+    public string? GroundHitReaction { get; set; }
 
     [JsonPropertyName("offsetForward")]
     public FractionDto? OffsetForward { get; set; }

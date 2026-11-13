@@ -206,3 +206,28 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_wave.p
 ```
 
 将转换输出改到新目录并加 `--body-only` 可单独验证本体。配置包含 Action 12 起身受击框和 Action 5010／5015 的地面轻击受击框。受击规则仅在攻击定义声明 `lightGroundReaction` 且目标配置了 `lightHitstun` 时生效。
+
+## 阶段 23 蹲重拳与弱 Power Wave
+
+转换核对六份阶段 22 冻结 JSON 的哈希，以及原始 State 410 的 CNS/CMD、Action 410 和站／蹲受击素材。先按[原版参考](STAGE23_REFERENCE.md)采集轨迹。若需分开校验本体，将输出指定为独立路径并加 `--body-only`。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+$base = 'data/imported-characters/terry98-stage22-data'
+$profiles = 'data/imported-characters/terry98-stage23-data'
+py -m mugen_importer.state_crouch_heavy_wave local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
+  --base $base --reference local-mugen/stage23-reference/results `
+  --reference local-mugen/stage23-reference-supplement/results `
+  --reference local-mugen/stage23-reference-boundaries/results `
+  --reference local-mugen/stage23-reference-final-probes/results `
+  --reference local-mugen/stage23-reference-combined-input/results --output $profiles
+foreach ($mode in 'default','mode2') {
+  py tools/Stage14Validation/stage_assets.py --binding "$profiles/$mode.binding.json" `
+    --destination "data/imported-characters/terry98-stage23-$mode"
+}
+py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_heavy_wave.py
+```
+
+站防、蹲防及持后续防分别读取 Action 150／151、130／131 的碰撞框。默认完整预设中，Helper 1020 只有晚段地面 HitDef 绑定 Action 5012／5017；早段击飞沿用原有实体反应链。单独的本体预设保留冻结的 Helper 1020 配置。
+
+前下＋重拳占用原版 State 310 的 CMD 候选优先级。`ReservedRisingUpper` 只保留合法地面输入的占用顺序，不分配招式。完整默认预设仍优先选择合规的弱 Power Wave。

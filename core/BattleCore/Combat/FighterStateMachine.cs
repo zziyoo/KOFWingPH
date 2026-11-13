@@ -102,7 +102,8 @@ public static class FighterStateMachine
         int moveElapsedFrames = 0,
         FixedPoint opponentDistance = default,
         FixedPoint opponentBodyDistance = default,
-        int crouchReturnTicks = 0)
+        int crouchReturnTicks = 0,
+        bool crouchingHitReaction = false)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -229,6 +230,7 @@ public static class FighterStateMachine
             if (stunRemaining > 0)
                 return new FighterActionTick(state, null, 0, recognition, ConsumedMatch: null,
                     StunRemainingFrames: stunRemaining);
+            returnToCrouch = state == FighterLogicState.Hitstun && crouchingHitReaction;
             // 归零：继续执行待机更新与消费（无独立 return）。
         }
 
@@ -252,6 +254,11 @@ public static class FighterStateMachine
                 continue;
 
             CommandMatch match = result.Match;
+            if (definition.ReservesGroundCommand(match.CommandId))
+            {
+                recognition = recognition.WithResultConsumed(match.RecognizedFrame);
+                break;
+            }
             MoveAllowedStates required = idle == FighterLogicState.Crouching
                 ? MoveAllowedStates.Crouching
                 : MoveAllowedStates.Standing;

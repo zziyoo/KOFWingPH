@@ -14,6 +14,37 @@ public sealed class CrouchRouteTests
     private const string Stand = "StandLight";
 
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void AReservedGroundCommandTakesPriorityOverBothNormalButtons(bool mirror, bool back)
+    {
+        var heavy = new CommandDefinition("5B", [], InputBits.HeavyPunch, 1, 2);
+        var light = new CommandDefinition("5A", [], InputBits.LightPunch, 1, 2, priority: 1);
+        var reserved = new CommandDefinition("Reserved", [CommandDirection.DownForward], InputBits.HeavyPunch, 1, 0,
+            priority: 2, bufferLifetimeFrames: 0, reserveGroundInput: true);
+        var heavyMove = new MoveDefinition("CrouchHeavy", "5B", 5, 8, 14, MoveAllowedStates.Crouching);
+        var lightMove = new MoveDefinition(Crouch, "5A", 3, 2, 8, MoveAllowedStates.Crouching);
+        var fighter = new FighterDefinition("Test", [heavy, light, reserved], [heavyMove, lightMove], useCommandPriority: true);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        var state = new BattleState(0, [
+            FighterState.Create(0, 1000, mirror ? 120 : -120, mirror ? Facing.Left : Facing.Right),
+            FighterState.Create(1, 1000, mirror ? -120 : 120, mirror ? Facing.Right : Facing.Left)],
+            BattleState.CreateDefault().StateVersion);
+        InputBits horizontal = mirror == back ? InputBits.Right : InputBits.Left;
+        InputBits heldDirection = InputBits.Down | horizontal;
+        InputBits buttons = InputBits.LightPunch | InputBits.HeavyPunch;
+        state = simulation.Step(state, new FrameInput(0, heldDirection, 0)).State;
+        BattleStepResult first = simulation.Step(state, new FrameInput(1, heldDirection | buttons, 0));
+        Assert.Equal(back ? Crouch : null, first.State.Fighter(0).MoveId);
+        BattleStepResult release = simulation.Step(first.State, new FrameInput(2, InputBits.Down | buttons, 0));
+        Assert.DoesNotContain(release.Events, e => e.Type == BattleEventType.MoveStarted);
+        if (!back)
+            Assert.Null(release.State.Fighter(0).MoveId);
+    }
+
+    [Theory]
     [InlineData(InputBits.Down, Crouch)]
     [InlineData(InputBits.None, Stand)]
     public void OnePhysicalEdgeSelectsTheMoveForTheCurrentPosture(InputBits direction, string expected)

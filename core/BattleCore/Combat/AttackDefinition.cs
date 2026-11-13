@@ -22,6 +22,16 @@ public readonly record struct HitstopPair
 /// <summary>近身攻击在两种结算结果下的独立停顿。相杀和飞行道具沿用各自的规则。</summary>
 public readonly record struct HitstopByOutcome(HitstopPair Hit, HitstopPair Block);
 
+/// <summary>Grounded melee response selected from the defender's authored reaction timelines.</summary>
+public enum GroundHitReaction
+{
+    Standard,
+    Light,
+    Heavy,
+    CrouchingLight,
+    HeavyLow,
+}
+
 /// <summary>
 /// 一段<b>攻击判定数据</b>（阶段 06A，D76）：招式在 Active 阶段的攻击框几何、
 /// 生效帧范围与攻击高度。纯数据，构造期校验；06B 在此之上接入伤害与硬直结算。
@@ -93,7 +103,8 @@ public sealed class AttackDefinition
         int contactGroup = 0,
         int? damageAfterPriorContact = null,
         DynamicAttackDamage? dynamicDamage = null,
-        bool lightGroundReaction = false)
+        bool lightGroundReaction = false,
+        GroundHitReaction groundHitReaction = GroundHitReaction.Standard)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -156,7 +167,10 @@ public sealed class AttackDefinition
             throw new ArgumentOutOfRangeException(nameof(hitstopFrames), hitstopFrames,
                 $"命中停顿帧数超过上限 {MaxHitstopFrames}（防止配置错误导致长时间冻结）。");
 
-        LightGroundReaction = lightGroundReaction;
+        if (!Enum.IsDefined(groundHitReaction) ||
+            (lightGroundReaction && groundHitReaction is not (GroundHitReaction.Standard or GroundHitReaction.Light)))
+            throw new ArgumentException("地面受击反应配置非法或冲突。", nameof(groundHitReaction));
+        GroundReaction = lightGroundReaction ? GroundHitReaction.Light : groundHitReaction;
         OffsetForward = offsetForward;
         OffsetUp = offsetUp;
         HalfWidth = halfWidth;
@@ -185,7 +199,7 @@ public sealed class AttackDefinition
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
     public FixedPoint OffsetForward { get; }
-    public bool LightGroundReaction { get; }
+    public GroundHitReaction GroundReaction { get; }
 
     /// <summary>攻击框中心相对脚底锚点的向上偏移（世界单位）。</summary>
     public FixedPoint OffsetUp { get; }

@@ -95,7 +95,8 @@ public sealed class CommandDefinition
         int chargeHoldFrames = 0,
         int chargeReleaseToleranceFrames = CommandCatalog.DefaultChargeReleaseToleranceFrames,
         bool matchHeldMotion = false,
-        CommandBufferPolicy? bufferPolicy = null)
+        CommandBufferPolicy? bufferPolicy = null,
+        bool reserveGroundInput = false)
     {
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("指令 ID 不能为空。", nameof(commandId));
@@ -157,6 +158,9 @@ public sealed class CommandDefinition
                 nameof(matchHeldMotion));
         if (bufferPolicy is { HelperTicks: > 0 } && requiredButtons == InputBits.None)
             throw new ArgumentException("A helper command buffer requires attack buttons.", nameof(bufferPolicy));
+        if (reserveGroundInput && (sequence.Length != 1 || requiredButtons == InputBits.None ||
+            buttonToleranceFrames != 0 || bufferLifetimeFrames != 0 || chargeHoldFrames != 0 || bufferPolicy is not null))
+            throw new ArgumentException("保留的地面指令需要单一相对方向和当帧按键边沿。", nameof(reserveGroundInput));
 
         CommandId = commandId;
         DirectionSequence = Array.AsReadOnly(sequence);
@@ -169,6 +173,7 @@ public sealed class CommandDefinition
         ChargeReleaseToleranceFrames = chargeReleaseToleranceFrames;
         MatchHeldMotion = matchHeldMotion;
         BufferPolicy = bufferPolicy;
+        ReserveGroundInput = reserveGroundInput;
     }
 
     /// <summary>唯一标识，如 <c>236A</c>。</summary>
@@ -208,4 +213,5 @@ public sealed class CommandDefinition
 
     public bool MatchHeldMotion { get; }
     public CommandBufferPolicy? BufferPolicy { get; }
+    public bool ReserveGroundInput { get; }
 }

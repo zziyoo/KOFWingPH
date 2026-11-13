@@ -26,7 +26,11 @@ public sealed class GroundHurtboxes
 
     public GroundHurtboxes(IReadOnlyList<FixedRect> standing, IReadOnlyList<FixedRect> crouching,
         bool standingOnCrouchEntry = false, IReadOnlyList<FixedRect>? hitstun = null, int hitstunRecoveryFrames = 0,
-        IReadOnlyList<MoveHurtboxSpan>? crouchRise = null, IReadOnlyList<MoveHurtboxSpan>? lightHitstun = null)
+        IReadOnlyList<MoveHurtboxSpan>? crouchRise = null, IReadOnlyList<MoveHurtboxSpan>? lightHitstun = null,
+        IReadOnlyList<MoveHurtboxSpan>? heavyHitstun = null, IReadOnlyList<MoveHurtboxSpan>? crouchingHeavyHitstun = null,
+        IReadOnlyList<MoveHurtboxSpan>? crouchingLightHitstun = null, IReadOnlyList<MoveHurtboxSpan>? lowHeavyHitstun = null,
+        IReadOnlyList<FixedRect>? standingGuard = null, IReadOnlyList<FixedRect>? crouchingGuard = null,
+        IReadOnlyList<FixedRect>? standingGuardReady = null, IReadOnlyList<FixedRect>? crouchingGuardReady = null)
     {
         Standing = Copy(standing, nameof(standing));
         Crouching = Copy(crouching, nameof(crouching));
@@ -38,6 +42,18 @@ public sealed class GroundHurtboxes
         HitstunRecoveryFrames = hitstunRecoveryFrames;
         CrouchRise = CopyTimeline(crouchRise, nameof(crouchRise));
         LightHitstun = CopyTimeline(lightHitstun, nameof(lightHitstun));
+        HeavyHitstun = CopyTimeline(heavyHitstun, nameof(heavyHitstun));
+        CrouchingHeavyHitstun = CopyTimeline(crouchingHeavyHitstun, nameof(crouchingHeavyHitstun));
+        CrouchingLightHitstun = CopyTimeline(crouchingLightHitstun, nameof(crouchingLightHitstun));
+        LowHeavyHitstun = CopyTimeline(lowHeavyHitstun, nameof(lowHeavyHitstun));
+        StandingGuard = standingGuard is null ? null : Copy(standingGuard, nameof(standingGuard));
+        CrouchingGuard = crouchingGuard is null ? null : Copy(crouchingGuard, nameof(crouchingGuard));
+        StandingGuardReady = standingGuardReady is null ? null : Copy(standingGuardReady, nameof(standingGuardReady));
+        CrouchingGuardReady = crouchingGuardReady is null ? null : Copy(crouchingGuardReady, nameof(crouchingGuardReady));
+        if ((StandingGuard is null) != (CrouchingGuard is null) ||
+            (StandingGuardReady is null) != (CrouchingGuardReady is null) ||
+            (StandingGuardReady is not null && StandingGuard is null))
+            throw new ArgumentException("站姿和蹲姿防御框需要成对配置，续防框需要基础防御框。");
         CrouchRiseFrames = CrouchRise?.Sum(span => span.Frames) ?? 0;
     }
 
@@ -48,7 +64,25 @@ public sealed class GroundHurtboxes
     public int HitstunRecoveryFrames { get; }
     public IReadOnlyList<MoveHurtboxSpan>? CrouchRise { get; }
     public IReadOnlyList<MoveHurtboxSpan>? LightHitstun { get; }
+    public IReadOnlyList<MoveHurtboxSpan>? HeavyHitstun { get; }
+    public IReadOnlyList<MoveHurtboxSpan>? CrouchingHeavyHitstun { get; }
+    public IReadOnlyList<MoveHurtboxSpan>? CrouchingLightHitstun { get; }
+    public IReadOnlyList<MoveHurtboxSpan>? LowHeavyHitstun { get; }
+    public IReadOnlyList<FixedRect>? StandingGuard { get; }
+    public IReadOnlyList<FixedRect>? CrouchingGuard { get; }
+    public IReadOnlyList<FixedRect>? StandingGuardReady { get; }
+    public IReadOnlyList<FixedRect>? CrouchingGuardReady { get; }
     public int CrouchRiseFrames { get; }
+
+    internal IReadOnlyList<MoveHurtboxSpan>? HitReactionTimeline(GroundHitReaction reaction, bool crouching) =>
+        reaction switch
+        {
+            GroundHitReaction.Light => LightHitstun,
+            GroundHitReaction.Heavy => crouching ? CrouchingHeavyHitstun : HeavyHitstun,
+            GroundHitReaction.CrouchingLight => crouching ? CrouchingLightHitstun : null,
+            GroundHitReaction.HeavyLow => crouching ? CrouchingHeavyHitstun : LowHeavyHitstun,
+            _ => null,
+        };
 
     private static IReadOnlyList<MoveHurtboxSpan>? CopyTimeline(IReadOnlyList<MoveHurtboxSpan>? spans, string name)
     {
@@ -156,13 +190,19 @@ public sealed class FighterDefinition
         var moveCopy = moves.ToArray();
 
         var commandIds = new HashSet<string>(StringComparer.Ordinal);
+        var reserved = new HashSet<string>(StringComparer.Ordinal);
         foreach (CommandDefinition command in commandCopy)
         {
+            if (command.ReserveGroundInput)
+                reserved.Add(command.CommandId);
             if (!commandIds.Add(command.CommandId))
                 throw new ArgumentException(
                     $"角色 {fighterId} 的指令 ID 重复：{command.CommandId}（同一角色内同一指令" +
                     "映射到多个招式会产生歧义）。", nameof(commands));
         }
+        if (reserved.Count > 0 && (!useCommandPriority || moveCopy.Any(move => reserved.Contains(move.CommandId))))
+            throw new ArgumentException("保留的地面指令需要优先级选招且不可绑定招式。", nameof(commands));
+        ReservedGroundCommands = reserved;
 
         var moveIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (MoveDefinition move in moveCopy)
@@ -251,6 +291,8 @@ public sealed class FighterDefinition
 
     /// <summary>该角色的专属指令表（只读，识别器按此匹配）。</summary>
     public IReadOnlyList<CommandDefinition> Commands { get; }
+    private HashSet<string> ReservedGroundCommands { get; }
+    internal bool ReservesGroundCommand(string commandId) => ReservedGroundCommands.Contains(commandId);
 
     public bool UseCommandPriority { get; }
 
