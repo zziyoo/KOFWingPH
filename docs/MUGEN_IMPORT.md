@@ -150,3 +150,21 @@ python -m unittest discover -s tools/MugenImporter/tests -p test_state_reentry.p
 ```
 
 State 200／205 均可在零基动作 tick 7–11 以站轻拳重进。近身分支优先，身体距离等于 16 时选 205，超过 16 选 200。原版按键 Helper 99999 支持年龄最多 2 个逻辑 tick 的 `x` 边沿，转入新状态时读取当时的下方向。新预设用既有命令缓冲和可选取消规则表达这些条件。动作 tick 12 的原版普通技入口属于自然恢复后的再起手。收招中下加轻拳会走原版 State 400，阶段 18 仅覆盖站轻拳入口。保留阶段 17 的伤害和 RNG 范围，空中轨迹仅核对距离与分支选择。
+
+## 阶段 20 近身轻拳取消弱 Power Wave
+
+在仓库根目录运行，输出到新目录。转换校验阶段 19 默认与阶段 18 模式 2 的冻结文件、原始 ZIP、Manifest 和原引擎轨迹。输出包括两个预设各自的角色、绑定与来源 JSON。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+python -m mugen_importer.state_power_wave_routes local-mugen/terry.zip data/imported-characters/terry98/manifest.json --audit-only
+python -m mugen_importer.state_power_wave_routes local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
+  --stage19-profile-dir data/imported-characters/terry98-stage19-data `
+  --stage18-profile-dir data/imported-characters/terry98-stage18-data `
+  --reference local-mugen/stage20-reference/results `
+  --reference local-mugen/stage20-reference-mixed/results `
+  --output-dir data/imported-characters/terry98-stage20-data
+python -m unittest discover -s tools/MugenImporter/tests -p test_state_power_wave_routes.py
+```
+
+默认预设从 Action 205 的 AIR 持续时间和 CNS 的严格元素比较计算出取消窗口 tick 4–6。窗口接受命中、格挡或空挥。tick 7–11 仍按身体距离优先尝试 205，其次 200。默认预设复用阶段 19 的 State 1000、Helper 1020 和绑定。原版模式 2 走 State 1050，实验对照只保留阶段 18 的普通技与重进。使用 `stage_assets.py` 分别将 `default.binding.json` 和 `mode2.binding.json` 安装到 `terry98-stage20-default` 和 `terry98-stage20-mode2`。
