@@ -84,7 +84,8 @@ public sealed class FighterDefinition
         GroundHurtboxes? groundHurtboxes = null,
         GroundBodyWidths? groundBodyWidths = null,
         GroundBodyWidths? airBodyWidths = null,
-        IReadOnlyList<FixedRect>? neutralAirHurtboxes = null)
+        IReadOnlyList<FixedRect>? neutralAirHurtboxes = null,
+        DynamicDamageRules? damageRules = null)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -117,6 +118,14 @@ public sealed class FighterDefinition
                 throw new ArgumentException(
                     $"角色 {fighterId} 的招式 {move.MoveId} 引用了指令表中不存在的 " +
                     $"CommandId：{move.CommandId}。", nameof(moves));
+
+            foreach (AttackDefinition attack in move.Attacks)
+            {
+                if (attack.DynamicDamage is not { } damage)
+                    continue;
+                if (damageRules is null || Math.Min(damage.NormalBase, damage.CounterBase) < damageRules.VarianceMaximum)
+                    throw new ArgumentException($"招式 {move.MoveId} 的动态伤害需要 damageRules，且基数必须覆盖波动上限。", nameof(moves));
+            }
         }
 
         // 取消目标校验（阶段 07B，D91）：目标必须存在于<b>本角色</b>的招式表，且不能是自身
@@ -143,6 +152,7 @@ public sealed class FighterDefinition
         GroundHurtboxes = groundHurtboxes;
         GroundBodyWidths = groundBodyWidths;
         AirBodyWidths = airBodyWidths;
+        DamageRules = damageRules;
         if (airBodyWidths is not null && groundBodyWidths is null)
             throw new ArgumentException("airBodyWidths 需要配置 groundBodyWidths。", nameof(airBodyWidths));
         if (neutralAirHurtboxes is not null)
@@ -185,6 +195,7 @@ public sealed class FighterDefinition
     public GroundBodyWidths? GroundBodyWidths { get; }
     public GroundBodyWidths? AirBodyWidths { get; }
     public IReadOnlyList<FixedRect>? NeutralAirHurtboxes { get; }
+    public DynamicDamageRules? DamageRules { get; }
 
     private readonly Dictionary<string, IReadOnlyList<MoveDefinition>> _movesByCommandId;
     private readonly Dictionary<string, MoveDefinition> _moveById;

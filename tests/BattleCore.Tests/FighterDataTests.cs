@@ -32,6 +32,238 @@ public class FighterDataTests
 
     private static FrameInput F(int frame, InputBits p1, InputBits p2 = InputBits.None) => new(frame, p1, p2);
 
+    [Fact]
+    public void DynamicDamage_LoadsOptInRulesAndUsesTheActiveTickRoll()
+    {
+        string json = Mutate(Json("Kai"), o =>
+        {
+            o["damageRules"] = JsonNode.Parse("""
+                {"baseScale":{"numerator":1923,"denominator":200},
+                 "attackMultiplier":{"numerator":4,"denominator":5},
+                 "defenseMultiplier":{"numerator":1,"denominator":1},
+                 "hitstunDefenseMultiplier":{"numerator":97,"denominator":100},
+                 "varianceMaximum":2,"counterGraceTicks":2}
+                """);
+            JsonNode attack = o["moves"]![0]!["attacks"]![0]!;
+            attack["damage"] = 0;
+            attack["dynamicDamage"] = JsonNode.Parse("""{"normalBase":9,"counterBase":9,"useContactDivisor":false}""");
+        });
+        FighterDefinition attacker = FighterDataLoader.Load(json);
+        var sim = new BattleSimulation(new FightRoster(attacker, FighterDataLoader.Load(Json("Kai"))));
+        BattleState initial = ActiveState("StandLightPunch", 2, p1X: -30, p2X: 30);
+
+        // Seed 1337 → Park–Miller 22470959 → range bucket 0 → floor(9 × 9.615) × .8 → 69.
+        BattleStepResult step = sim.Step(initial, F(0, InputBits.None));
+        Assert.Equal(69, Assert.Single(step.Events, evt => evt.Type == BattleEventType.Hit).Amount);
+        Assert.Equal(931, step.State.Fighter(1).Health);
+        Assert.Equal(step.State.Fighters, sim.Step(initial, F(0, InputBits.None)).State.Fighters);
+    }
+
+    [Theory]
+    [InlineData(1u, 0, 69)]
+    [InlineData(3u, 1, 61)]
+    [InlineData(7u, 2, 54)]
+    public void DynamicDamage_SeedsProduceLegalDistinctDamage(uint seed, int expectedVariance, int expectedDamage)
+    {
+        var simulation = DynamicSimulation();
+        BattleState state = DynamicInitial(seed);
+        state = simulation.Step(state, F(0, InputBits.LightPunch)).State;
+        BattleStepResult step = simulation.Step(state, F(1, InputBits.None));
+        Assert.Equal(expectedVariance, step.State.Fighter(0).DamageScript.Variance);
+        Assert.Equal(expectedDamage, Assert.Single(step.Events, e => e.Type == BattleEventType.Hit).Amount);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void DynamicDamage_HitstopDivisorAndReplayFollowCommittedContact(bool firstMisses, bool guard)
+    {
+        var simulation = DynamicSimulation();
+        BattleState initial = DynamicInitial(1337, firstMisses ? 100 : 60);
+        var steps = new List<BattleStepResult>();
+        var inputs = new List<FrameInput>();
+        var contacts = new List<BattleEvent>();
+        BattleState state = initial;
+        for (int frame = 0; frame < 28; frame++)
+        {
+            inputs.Add(F(frame, frame == 0 ? InputBits.LightPunch : InputBits.None,
+                guard && frame == 1 ? InputBits.Right : InputBits.None));
+            BattleStepResult step = simulation.Step(state, inputs[^1]);
+            contacts.AddRange(step.Events.Where(e => e.Type is BattleEventType.Hit or BattleEventType.Blocked));
+            steps.Add(step);
+            state = step.State;
+        }
+        Assert.Equal(firstMisses ? new[] { 4 } : new[] { 1, 7 }, contacts.Select(e => e.Frame));
+        Assert.All(contacts, contact => Assert.Equal(guard ? BattleEventType.Blocked : BattleEventType.Hit, contact.Type));
+        Assert.Equal(1, steps[0].State.Fighter(0).DamageScript.ContactDivisor);
+        if (!firstMisses)
+        {
+            DamageScriptState hit = steps[1].State.Fighter(0).DamageScript;
+            Assert.Equal(3, hit.Pause);
+            Assert.Equal(hit.RandomState, steps[4].State.Fighter(0).DamageScript.RandomState);
+            Assert.NotEqual(steps[1].State.Fighter(1).DamageScript.RandomState,
+                steps[2].State.Fighter(1).DamageScript.RandomState); // Victim shake does not pause the script.
+            Assert.Equal(2, steps[5].State.Fighter(0).DamageScript.ContactDivisor);
+            Assert.Equal(2, steps[7].State.Fighter(0).DamageScript.ContactDivisor);
+            if (!guard)
+                Assert.Contains(contacts[1].Amount, new[] { 22, 29 });
+        }
+        else
+        {
+            Assert.Equal(1, steps[4].State.Fighter(0).DamageScript.ContactDivisor);
+            Assert.Contains(contacts[0].Amount, new[] { 54, 61, 69 });
+        }
+        Assert.Equal(1, steps[^1].State.Fighter(0).DamageScript.ContactDivisor);
+
+        BattleState replay = steps[1].State;
+        for (int frame = 2; frame < steps.Count; frame++)
+        {
+            BattleStepResult step = simulation.Step(replay, inputs[frame]);
+            Assert.Equal(steps[frame].State.Fighters, step.State.Fighters);
+            Assert.Equal(steps[frame].Events, step.Events);
+            replay = step.State;
+        }
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    public void DynamicDamage_RecoveryCarryExpiresOnThirdNonAttackTick(int attackAt, bool expectedCounter)
+    {
+        var simulation = DynamicSimulation();
+        BattleState initial = DynamicInitial(1);
+        FighterState target = initial.Fighter(1) with
+        {
+            LogicState = FighterLogicState.Recovery, PhaseRemainingFrames = 12,
+            MoveId = "Heavy", MoveStartedFrame = 0, MoveElapsedFrames = 8,
+        };
+        FighterState source = initial.Fighter(0) with
+        {
+            DamageScript = DamageScriptState.FromSeed(1, 0) with { CounterAge = 1 },
+        };
+        BattleState state = new(1, new[] { source, target }, initial.StateVersion);
+        for (int offset = 0; offset <= attackAt; offset++)
+        {
+            if (offset == attackAt)
+                state = new BattleState(state.Frame, new[] { state.Fighter(0) with
+                {
+                    LogicState = FighterLogicState.Startup, PhaseRemainingFrames = 1,
+                    MoveId = "Heavy", MoveStartedFrame = state.Frame - 1,
+                }, state.Fighter(1) }, state.StateVersion);
+            BattleStepResult result = simulation.Step(state, F(state.Frame, InputBits.None));
+            state = result.State;
+            if (offset != attackAt)
+                continue;
+            int age = state.Fighter(0).DamageScript.CounterAge;
+            int variance = state.Fighter(0).DamageScript.Variance;
+            int basis = expectedCounter ? 20 : 16;
+            int expected = ((basis - variance) * 1923 / 200 * 4 + 2) / 5;
+            Assert.Equal(expectedCounter ? attackAt + 2 : 0, age);
+            Assert.Equal(expected, Assert.Single(result.Events, e => e.Type == BattleEventType.Hit).Amount);
+        }
+    }
+
+    [Theory]
+    [InlineData(60, false)]
+    [InlineData(60, true)]
+    [InlineData(100, false)]
+    public void DynamicDamage_TradesAndKnockoutUseBothPreSettlementSnapshots(int distance, bool knockout)
+    {
+        var simulation = DynamicSimulation();
+        BattleState state = DynamicInitial(1337, distance, knockout ? 1 : 1000);
+        state = simulation.Step(state, F(0, InputBits.LightPunch, InputBits.HeavyPunch)).State;
+        BattleStepResult step = simulation.Step(state, F(1, InputBits.None));
+        BattleEvent[] hits = step.Events.Where(e => e.Type == BattleEventType.Hit).ToArray();
+        Assert.Equal(distance == 60 ? 2 : 1, hits.Length);
+        Assert.Equal(1, step.State.Fighter(0).DamageScript.CounterAge + (knockout ? 1 : 0));
+        Assert.Equal(1, step.State.Fighter(1).DamageScript.CounterAge + (knockout ? 1 : 0));
+        Assert.Null(step.State.Fighter(0).MoveId);
+        Assert.Empty(FighterBoxes.GetActiveHitboxes(step.State.Fighter(0), simulation.Roster.Player1));
+        Assert.Equal(0, step.State.Fighter(0).DamageScript.Pause);
+        if (distance == 60)
+            Assert.Equal(0, step.State.Fighter(1).DamageScript.Pause);
+        if (knockout)
+        {
+            Assert.Contains(step.Events, evt => evt.Type == BattleEventType.DoubleKnockout);
+            var next = simulation.Step(step.State, F(2, InputBits.LightPunch)).State;
+            Assert.Equal(step.State.Fighters, next.Fighters);
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void DynamicDamage_MirroringKeepsRoundingAndAttackStream(int seat)
+    {
+        var simulation = DynamicSimulation();
+        BattleState initial = DynamicInitial(3);
+        FighterState[] fighters = initial.Fighters.ToArray();
+        fighters[seat] = fighters[seat] with { DamageScript = DamageScriptState.FromSeed(3, 0) };
+        BattleState state = new(0, fighters, initial.StateVersion);
+        state = simulation.Step(state, F(0, seat == 0 ? InputBits.LightPunch : InputBits.None,
+            seat == 1 ? InputBits.LightPunch : InputBits.None)).State;
+        BattleStepResult step = simulation.Step(state, F(1, InputBits.None));
+        BattleEvent hit = Assert.Single(step.Events, e => e.Type == BattleEventType.Hit);
+        Assert.Equal(seat, hit.SourceFighterId);
+        Assert.Equal(61, hit.Amount);
+        Assert.Equal(847425747u, step.State.Fighter(seat).DamageScript.RandomState);
+    }
+
+    [Theory]
+    [InlineData(1, 2, 1, 1, 2)] // 3 × .5 rounds away from zero.
+    [InlineData(1, 2, 1, 10, 1)] // Nonzero damage under one applies the native minimum.
+    [InlineData(0, 1, 1, 1, 0)]
+    [InlineData(2, 1, 3, 2, 9)]
+    public void DynamicDamage_MultipliesByBothFightersRulesBeforeRounding(int attackNumerator, int attackDenominator,
+        int defenseNumerator, int defenseDenominator, int expected)
+    {
+        var baseSimulation = DynamicSimulation();
+        FighterDefinition source = baseSimulation.Roster.Player1;
+        FighterDefinition WithRules(string id, DamageRatio attack, DamageRatio defense) => new(id, source.Commands,
+            source.Moves.Select(m => new MoveDefinition(m.MoveId, m.CommandId, m.StartupFrames, m.ActiveFrames,
+                m.RecoveryFrames, attacks: m.Attacks.Select(a => new AttackDefinition(a.OffsetForward, a.OffsetUp,
+                    a.HalfWidth, a.HalfHeight, firstActiveFrame: a.FirstActiveFrame, lastActiveFrame: a.LastActiveFrame,
+                    damage: 0, contactGroup: a.ContactGroup, dynamicDamage: new DynamicAttackDamage(3, 3, false))).ToArray())).ToArray(),
+            damageRules: new DynamicDamageRules(DamageRatio.One, attack, defense, DamageRatio.One, 0, 2));
+        var sim = new BattleSimulation(new FightRoster(
+            WithRules("Source", new DamageRatio(attackNumerator, attackDenominator), DamageRatio.One),
+            WithRules("Target", DamageRatio.One, new DamageRatio(defenseNumerator, defenseDenominator))));
+        BattleState state = sim.Step(DynamicInitial(1), F(0, InputBits.LightPunch)).State;
+        Assert.Equal(expected, Assert.Single(sim.Step(state, F(1, InputBits.None)).Events, e => e.Type == BattleEventType.Hit).Amount);
+    }
+
+    private static BattleState DynamicInitial(uint seed, int distance = 60, int health = 1000) => new(0, new[]
+    {
+        FighterState.Create(0, health, -distance / 2, Facing.Right) with { DamageScript = DamageScriptState.FromSeed(seed, 0) },
+        FighterState.Create(1, health, distance / 2, Facing.Left) with { DamageScript = DamageScriptState.FromSeed(seed, 1) },
+    }, BattleState.CreateDefault().StateVersion);
+
+    private static BattleSimulation DynamicSimulation()
+    {
+        var commands = new[]
+        {
+            new Commands.CommandDefinition("5A", Array.Empty<Commands.CommandDirection>(), InputBits.LightPunch),
+            new Commands.CommandDefinition("5B", Array.Empty<Commands.CommandDirection>(), InputBits.HeavyPunch),
+        };
+        var rules = new DynamicDamageRules(new DamageRatio(1923, 200), new DamageRatio(4, 5), DamageRatio.One,
+            new DamageRatio(97, 100), 2, 2);
+        AttackDefinition Strike(int end, int group, int first = 0, int last = 0, int normal = 9, int counter = 9) =>
+            new(offsetForward: FixedPoint.FromFraction(end, 2), offsetUp: 45,
+                halfWidth: FixedPoint.FromFraction(end, 2), halfHeight: 40,
+                firstActiveFrame: first, lastActiveFrame: last, damage: 0, hitstunFrames: 10, blockstunFrames: 10,
+                hitstopByOutcome: new HitstopByOutcome(new(3, 5), new(3, 3)), contactGroup: group,
+                dynamicDamage: new DynamicAttackDamage(normal, counter, group > 0));
+        var fighter = new FighterDefinition("DynamicProbe", commands, new[]
+        {
+            new MoveDefinition("Double", "5A", 1, 4, 4, attacks: new[] { Strike(60, 1), Strike(90, 2, 3, 3) }),
+            new MoveDefinition("Heavy", "5B", 1, 1, 20, attacks: new[] { Strike(90, 0, normal: 16, counter: 20) }),
+        }, damageRules: rules);
+        return new BattleSimulation(new FightRoster(fighter, fighter));
+    }
+
     /// <summary>把配置的全部战斗相关字段摊平成可逐项比较的文本行。</summary>
     private static List<string> Describe(FighterDefinition d)
     {

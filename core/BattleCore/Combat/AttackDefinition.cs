@@ -91,7 +91,8 @@ public sealed class AttackDefinition
         bool contactOnEdge = false,
         int? counterDamage = null,
         int contactGroup = 0,
-        int? damageAfterPriorContact = null)
+        int? damageAfterPriorContact = null,
+        DynamicAttackDamage? dynamicDamage = null)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -111,6 +112,9 @@ public sealed class AttackDefinition
             throw new ArgumentOutOfRangeException(nameof(contactGroup), "接触组必须在 0..31 内。");
         if (damageAfterPriorContact < 0 || (damageAfterPriorContact.HasValue && contactGroup == 0))
             throw new ArgumentException("接触后的伤害必须非负且仅用于显式接触组。", nameof(damageAfterPriorContact));
+        if (dynamicDamage is not null && (damage != 0 || counterDamage.HasValue || damageAfterPriorContact.HasValue ||
+            dynamicDamage.UseContactDivisor && contactGroup == 0))
+            throw new ArgumentException("动态伤害不能与固定伤害混用，分段伤害必须配置接触组。", nameof(dynamicDamage));
         if (hitstunFrames < 1)
             throw new ArgumentOutOfRangeException(nameof(hitstunFrames), hitstunFrames,
                 "命中硬直帧数必须 ≥ 1（命中必进入 Hitstun）。");
@@ -174,6 +178,7 @@ public sealed class AttackDefinition
         CounterDamage = counterDamage;
         ContactGroup = contactGroup;
         DamageAfterPriorContact = damageAfterPriorContact;
+        DynamicDamage = dynamicDamage;
     }
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
@@ -242,6 +247,7 @@ public sealed class AttackDefinition
     /// <summary>同一招式中共享结算资格的判定框组；0 表示整招一次结算。</summary>
     public int ContactGroup { get; }
     public int? DamageAfterPriorContact { get; }
+    public DynamicAttackDamage? DynamicDamage { get; }
 
     public HitstopPair ResolveMeleeHitstop(bool blocked) => HitstopByOutcome is { } outcome
         ? (blocked ? outcome.Block : outcome.Hit)

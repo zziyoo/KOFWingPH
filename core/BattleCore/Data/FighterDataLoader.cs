@@ -117,10 +117,12 @@ public static class FighterDataLoader
             ? BuildBodyWidths(airWidths, sourceName, "airBodyWidths") : null;
         IReadOnlyList<FixedRect>? neutralAirHurtboxes = dto.NeutralAirHurtboxes is { } airBoxes
             ? BuildArray(airBoxes, sourceName, "neutralAirHurtboxes", BuildHurtbox) : null;
+        DynamicDamageRules? damageRules = dto.DamageRules is { } rules
+            ? BuildDamageRules(rules, sourceName) : null;
 
         FighterDefinition definition = Guard(
             () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes, groundBodyWidths,
-                airBodyWidths, neutralAirHurtboxes),
+                airBodyWidths, neutralAirHurtboxes, damageRules),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }
@@ -128,6 +130,27 @@ public static class FighterDataLoader
     private static GroundBodyWidths BuildBodyWidths(GroundBodyWidthsDto dto, string source, string path) =>
         Guard(() => new GroundBodyWidths(Fraction(dto.Front, source, path + ".front"),
             Fraction(dto.Back, source, path + ".back")), source, path);
+
+    private static DynamicDamageRules BuildDamageRules(DamageRulesDto dto, string source)
+    {
+        const string path = "damageRules";
+        return Guard(() => new DynamicDamageRules(
+            DamageFraction(dto.BaseScale, source, path + ".baseScale"),
+            DamageFraction(dto.AttackMultiplier, source, path + ".attackMultiplier"),
+            DamageFraction(dto.DefenseMultiplier, source, path + ".defenseMultiplier"),
+            DamageFraction(dto.HitstunDefenseMultiplier, source, path + ".hitstunDefenseMultiplier"),
+            RequiredInt(dto.VarianceMaximum, source, path + ".varianceMaximum"),
+            RequiredInt(dto.CounterGraceTicks, source, path + ".counterGraceTicks")), source, path);
+    }
+
+    private static DamageRatio DamageFraction(FractionDto? dto, string source, string path)
+    {
+        long numerator = RequiredLong(dto?.Numerator, source, path + ".numerator");
+        long denominator = RequiredLong(dto?.Denominator, source, path + ".denominator");
+        if (numerator is < 0 or > 1_000_000 || denominator is < 1 or > 1_000_000)
+            throw Fail(source, path, "伤害倍率要求分子 0..1000000、分母 1..1000000。");
+        return new DamageRatio((int)numerator, (int)denominator);
+    }
 
     /// <summary>
     /// 从多份文档构建 <see cref="FighterCatalog"/>（角色目录 → 选人 → FightRoster 的入口）。
@@ -253,7 +276,10 @@ public static class FighterDataLoader
             contactOnEdge: dto.ContactOnEdge,
             counterDamage: dto.CounterDamage,
             contactGroup: dto.ContactGroup,
-            damageAfterPriorContact: dto.DamageAfterPriorContact),
+            damageAfterPriorContact: dto.DamageAfterPriorContact,
+            dynamicDamage: dto.DynamicDamage is { } damage ? new DynamicAttackDamage(
+                RequiredInt(damage.NormalBase, source, path + ".dynamicDamage.normalBase"),
+                RequiredInt(damage.CounterBase, source, path + ".dynamicDamage.counterBase"), damage.UseContactDivisor) : null),
         source, path);
 
     private static HitstopPair BuildHitstopPair(HitstopPairDto? dto, string source, string path)

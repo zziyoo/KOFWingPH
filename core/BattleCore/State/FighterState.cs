@@ -68,7 +68,8 @@ public readonly record struct FighterState(
     int HitstopRemainingFrames = 0,
     int LastThrowStartFrame = -1,
     int ProjectileSpawnMask = 0,
-    uint LastHitContactGroups = 0)
+    uint LastHitContactGroups = 0,
+    DamageScriptState DamageScript = default)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -134,6 +135,8 @@ public readonly record struct FighterState(
             throw new InvalidOperationException($"角色 {Id} 的 MaxHealth 必须为正：{MaxHealth}。");
         if (Health < 0 || Health > MaxHealth)
             throw new InvalidOperationException($"角色 {Id} 的 Health 越界：{Health}/{MaxHealth}。");
+        if (!DamageScript.IsValid(IsInMove))
+            throw new InvalidOperationException($"角色 {Id} 的动态伤害快照非法：{DamageScript}。");
 
         // 合法枚举检查（D62）：未定义的 FighterLogicState 无论其他字段是什么都拒绝——
         // 否则 (FighterLogicState)999 + 空 MoveId + 0 帧会被误认为正常待机。

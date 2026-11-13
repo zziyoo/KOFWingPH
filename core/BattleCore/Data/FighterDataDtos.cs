@@ -44,6 +44,42 @@ public sealed class FighterDocumentDto
 
     [JsonPropertyName("neutralAirHurtboxes")]
     public List<HurtboxDto>? NeutralAirHurtboxes { get; set; }
+
+    [JsonPropertyName("damageRules")]
+    public DamageRulesDto? DamageRules { get; set; }
+}
+
+public sealed class DamageRulesDto
+{
+    [JsonPropertyName("baseScale")]
+    public FractionDto? BaseScale { get; set; }
+
+    [JsonPropertyName("attackMultiplier")]
+    public FractionDto? AttackMultiplier { get; set; }
+
+    [JsonPropertyName("defenseMultiplier")]
+    public FractionDto? DefenseMultiplier { get; set; }
+
+    [JsonPropertyName("hitstunDefenseMultiplier")]
+    public FractionDto? HitstunDefenseMultiplier { get; set; }
+
+    [JsonPropertyName("varianceMaximum")]
+    public int? VarianceMaximum { get; set; }
+
+    [JsonPropertyName("counterGraceTicks")]
+    public int? CounterGraceTicks { get; set; }
+}
+
+public sealed class DynamicAttackDamageDto
+{
+    [JsonPropertyName("normalBase")]
+    public int? NormalBase { get; set; }
+
+    [JsonPropertyName("counterBase")]
+    public int? CounterBase { get; set; }
+
+    [JsonPropertyName("useContactDivisor")]
+    public bool UseContactDivisor { get; set; }
 }
 
 public sealed class GroundBodyWidthsDto
@@ -286,6 +322,9 @@ public sealed class AttackDto
 
     [JsonPropertyName("damageAfterPriorContact")]
     public int? DamageAfterPriorContact { get; set; }
+
+    [JsonPropertyName("dynamicDamage")]
+    public DynamicAttackDamageDto? DynamicDamage { get; set; }
 }
 
 public sealed class HitstopByOutcomeDto

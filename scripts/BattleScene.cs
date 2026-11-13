@@ -252,14 +252,20 @@ public partial class BattleScene : Node2D
     private BattleState CreateDuelInitialState(MatchRules rules)
     {
         int health = CapByDebugHealth(1000);
-        FixedPoint? facingSeparation = BuildDuelRoster(_match.State.P1FighterId!, _match.State.P2FighterId!)
-            .FacingGroundSeparation;
-        FixedPoint distance = DuelDistanceFromArgs(facingSeparation);
-        IReadOnlyList<FighterState> fighters = new[]
+        FightRoster roster = BuildDuelRoster(_match.State.P1FighterId!, _match.State.P2FighterId!);
+        FixedPoint distance = DuelDistanceFromArgs(roster.FacingGroundSeparation);
+        FighterState[] fighters =
         {
             FighterState.Create(0, 1000, 0, Facing.Right) with { Health = health, PositionX = -distance },
             FighterState.Create(1, 1000, 0, Facing.Left) with { Health = health, PositionX = distance },
         };
+        uint seed = DamageScriptState.DefaultSeed;
+        if (ArgValue("--damage-seed") is { } seedText &&
+            !uint.TryParse(seedText, NumberStyles.None, CultureInfo.InvariantCulture, out seed))
+            throw new ArgumentException("--damage-seed 需要无符号 32 位整数。");
+        for (int i = 0; i < fighters.Length; i++)
+            if (roster.Fighter(i).DamageRules is not null)
+                fighters[i] = fighters[i] with { DamageScript = DamageScriptState.FromSeed(seed, i) };
 
         return new BattleState(0, fighters, BattleState.CreateDefault().StateVersion,
             round: null, projectiles: null, nextProjectileId: 1,
@@ -1406,6 +1412,14 @@ public partial class BattleScene
             _visual2?.ObserveFrame(frame, 1);
             if (_moveAudit && !TeamActive && _duelRoster is { } roster)
                 PrintMoveAudit(frame, roster);
+            if (HasArg("--damage-audit"))
+                for (int seat = 0; seat < 2; seat++)
+                {
+                    DamageScriptState script = frame.StateAfter.Fighter(seat).DamageScript;
+                    if (script.RandomState != 0)
+                        GD.Print($"[DamageAudit] logic={frame.LogicFrame} fighter={seat} rng={script.RandomState} " +
+                            $"variance={script.Variance} counter={script.CounterAge} divisor={script.ContactDivisor} pause={script.Pause}");
+                }
             if (HasArg("--visual-audit"))
             {
                 var a = frame.StateAfter.Fighter(0);

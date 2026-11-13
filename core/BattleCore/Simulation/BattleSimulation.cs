@@ -436,6 +436,8 @@ public sealed class BattleSimulation
             nextFighters[i] = NormalizeLandingPlan(nextFighters[i]);
         }
 
+        AdvanceDamageScripts(state, nextFighters);
+
         // ── 第 6 阶段：命中结算（D78/D79/D80/D81）——接触检测 + 双方同时判定（互不先手）
         //    + 攻击实例去重（同一发动对同一目标只结算一次，被防御亦算已结算）。
         IReadOnlyList<AttackContact> contacts = state.PendingThrow is not null ? Array.Empty<AttackContact>() : HitDetection.Detect(
@@ -517,8 +519,13 @@ public sealed class BattleSimulation
         // 不是角色本身。命中结算/投技结算/相杀会改写状态，必须在全部结算完成后统一核账：
         // 离开招式或换到新实例就清零，同一实例 Active → Recovery 则原样保留。
         for (int i = 0; i < nextFighters.Length; i++)
-            nextFighters[i] = NormalizeLandingPlan(NormalizeSpawnMask(
+        {
+            FighterState fighter = NormalizeLandingPlan(NormalizeSpawnMask(
                 nextFighters[i], state.Fighters[i].MoveStartedFrame));
+            if (fighter.DamageScript.RandomState != 0 && !fighter.IsInMove)
+                fighter = fighter with { DamageScript = ClearDamageMove(fighter.DamageScript) };
+            nextFighters[i] = fighter;
+        }
 
         // 连段收尾（D90）：恢复自由行动的角色清空旧记录（命中帧本身不会到这里——命中后必为受击状态）。
         UpdateCombos(nextFighters);
@@ -555,6 +562,14 @@ public sealed class BattleSimulation
                 timeOverThisFrame = true;
             }
         }
+
+        if (nextRound.IsFinished)
+            for (int i = 0; i < nextFighters.Length; i++)
+                if (nextFighters[i].DamageScript.RandomState != 0)
+                    nextFighters[i] = nextFighters[i] with
+                    {
+                        DamageScript = ClearDamageMove(nextFighters[i].DamageScript) with { CounterAge = 0 },
+                    };
 
         // ── 第 8 阶段：战斗事件（D82）——由权威结算产生，帧内顺序固定。
         IReadOnlyList<BattleEvent> events = CollectEvents(
@@ -608,6 +623,40 @@ public sealed class BattleSimulation
     /// <see cref="HitDetection.Detect"/> 固定）；体力边界由 max(0, …) 保证，
     /// 不允许负数或溢出；同一命中只扣一次（重复命中抑制属 06C）。</para>
     /// </summary>
+    private void AdvanceDamageScripts(BattleState state, FighterState[] nextFighters)
+    {
+        for (int i = 0; i < nextFighters.Length; i++)
+        {
+            if (_roster.Fighter(i).DamageRules is not { } rules)
+                continue;
+
+            FighterState before = state.Fighters[i];
+            FighterState fighter = nextFighters[i];
+            FighterState targetBefore = state.Fighters[1 - i];
+            FighterState target = nextFighters[1 - i];
+            // Both sides read the same frame-start attack activity; simultaneous entries are visible to both.
+            bool targetAttacking = IsAttacking(targetBefore.LogicState) ||
+                target.LogicState == FighterLogicState.Startup && target.MoveStartedFrame == state.Frame;
+            bool sameMove = fighter.IsInMove && fighter.MoveStartedFrame == before.MoveStartedFrame;
+            DamageScriptState script = before.DamageScript.RandomState != 0 ? before.DamageScript
+                : DamageScriptState.FromSeed(DamageScriptState.DefaultSeed, i);
+            nextFighters[i] = fighter with
+            {
+                DamageScript = script.Advance(rules, targetAttacking, HasHitMoveType(targetBefore.LogicState),
+                    sameMove, state.PendingThrow is not null),
+            };
+        }
+    }
+
+    private static bool IsAttacking(FighterLogicState state) =>
+        state is FighterLogicState.Startup or FighterLogicState.Active;
+
+    private static bool HasHitMoveType(FighterLogicState state) =>
+        state.IsHitReaction() || state is FighterLogicState.Blockstun or FighterLogicState.AirBlockstun;
+
+    private static DamageScriptState ClearDamageMove(DamageScriptState state) =>
+        state with { Pause = 0, ContactDivisor = 1, ContactPending = false };
+
     private void ApplyCombatSettlement(
         int frame,
         FighterState[] fighters,
@@ -643,6 +692,15 @@ public sealed class BattleSimulation
                 fighters[attacker] = settled.Blocked
                     ? attackerState with { BlockConfirmFrame = frame }
                     : attackerState with { HitConfirmFrame = frame };
+                if (attackerState.DamageScript.RandomState != 0)
+                    fighters[attacker] = fighters[attacker] with
+                    {
+                        DamageScript = attackerState.DamageScript with
+                        {
+                            Pause = settled.Hitstop.AttackerFrames,
+                            ContactPending = settled.UsesContactDivisor,
+                        },
+                    };
             }
 
             // 连段（D90）：用<b>结算前</b>的状态判断目标是否仍在受击延续中；
@@ -1535,13 +1593,15 @@ public sealed class BattleSimulation
             uint group = attack.ContactGroup == 0 ? 0 : 1u << (attack.ContactGroup - 1);
             if (sameInstance && (group == 0 || (priorGroups & group) != 0))
                 continue;
-            return ResolveAttack(attack, moveId, attackerState, defenderState, backHeld, priorGroups, group);
+            return ResolveAttack(attack, moveId, attackerState, defenderState, backHeld, priorGroups, group,
+                _roster.Fighter(1 - defender).DamageRules, _roster.Fighter(defender).DamageRules);
         }
         return null;
     }
 
     private static CombatSettlement ResolveAttack(AttackDefinition attack, string moveId,
-        FighterState attackerState, FighterState defenderState, bool backHeld, uint priorGroups, uint group)
+        FighterState attackerState, FighterState defenderState, bool backHeld, uint priorGroups, uint group,
+        DynamicDamageRules? attackerRules, DynamicDamageRules? defenderRules)
     {
         // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
         // D131：正常 Airborne 可防 High/Mid，AirHitstun 与动作状态没有防御资格。
@@ -1566,6 +1626,7 @@ public sealed class BattleSimulation
                 Blocked: true, Damage: 0, StunFrames: attack.BlockstunFrames,
                 MoveId: moveId, AttackStartFrame: attackerState.MoveStartedFrame,
                 ContactGroups: priorGroups | group,
+                UsesContactDivisor: attack.DynamicDamage?.UseContactDivisor == true,
                 AirHit: false, Launch: false,
                 KnockbackX: knockbackX, KnockbackFriction: friction,
                 LaunchVelocityX: FixedPoint.Zero, LaunchVelocityY: FixedPoint.Zero,
@@ -1574,13 +1635,15 @@ public sealed class BattleSimulation
         }
 
         bool launches = attack.Launches;
-        int damage = priorGroups != 0 && attack.DamageAfterPriorContact is { } afterContact ? afterContact
-            : defenderState.LogicState is FighterLogicState.Startup or FighterLogicState.Active
-                ? attack.CounterDamage ?? attack.Damage : attack.Damage;
+        int damage = attack.DynamicDamage is { } dynamic
+            ? attackerRules!.Compute(dynamic, attackerState.DamageScript, defenderRules, HasHitMoveType(defenderState.LogicState))
+            : priorGroups != 0 && attack.DamageAfterPriorContact is { } afterContact ? afterContact
+            : IsAttacking(defenderState.LogicState) ? attack.CounterDamage ?? attack.Damage : attack.Damage;
         return new CombatSettlement(
             Blocked: false, Damage: damage, StunFrames: attack.HitstunFrames,
             MoveId: moveId, AttackStartFrame: attackerState.MoveStartedFrame,
             ContactGroups: priorGroups | group,
+            UsesContactDivisor: attack.DynamicDamage?.UseContactDivisor == true,
             AirHit: defenderState.LogicState.IsAirborneLike(), Launch: launches,
             KnockbackX: launches ? FixedPoint.Zero : knockbackX,
             KnockbackFriction: launches ? FixedPoint.Zero : friction,
@@ -1870,6 +1933,7 @@ public sealed class BattleSimulation
         string MoveId,
         int AttackStartFrame,
         uint ContactGroups,
+        bool UsesContactDivisor,
         bool AirHit,
         bool Launch,
         FixedPoint KnockbackX,
