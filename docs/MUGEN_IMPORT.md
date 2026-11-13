@@ -107,3 +107,26 @@ python -m unittest discover -s tools/MugenImporter/tests
 ```
 
 `--audit-only` 仅审查 State 205/215 的原始脚本、AIR 和图集。完整转换在两个预设中保留远站分支，并从参考轨迹生成同键近身分支、各段停顿和伤害。原版 State 215 在第二段前重置接触记号，转换后为两段各分配一个接触组。来源 JSON 记录相同身体距离判定、两段接触、第二段单独命中和反击伤害所用轨迹。默认及模式 2 各生成角色、绑定和来源三个文件。图形启动与图集别名见 [阶段 16 取证命令](../tools/Stage16Validation/README.md)。
+
+## 阶段 17 动态伤害与反击延续
+
+在仓库根目录运行，输出到独立的新目录。转换先检查源脚本、既有阶段 14–16 参考、阶段 17 逐场轨迹及哈希，再生成默认及模式 2 的角色、绑定和来源 JSON。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+python -m mugen_importer.state_damage local-mugen/terry.zip --audit-only
+python -m mugen_importer.state_damage local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
+  --state200-reference local-mugen/stage14-reference-replay/results/run-metadata.json `
+  --state210-reference local-mugen/stage15-reference/results/run-metadata.json `
+  --fractional-reference local-mugen/stage15-reference-fractional/results/run-metadata.json `
+  --state205215-reference local-mugen/stage16-reference/results/run-metadata.json `
+  --reference local-mugen/stage17-reference/results/run-metadata.json `
+  --reference local-mugen/stage17-reference-seed-1/results/run-metadata.json `
+  --reference local-mugen/stage17-reference-seed-2026/results/run-metadata.json `
+  --reference local-mugen/stage17-reference-replay/results/run-metadata.json `
+  --reference local-mugen/stage17-reference-carry-edge/results/run-metadata.json `
+  --output-dir data/imported-characters/terry98-stage17-data
+python -m unittest discover -s tools/MugenImporter/tests -p test_state_damage.py
+```
+
+State 200、205、210 按反击状态选择基础值。State 215 先从基础值减去随机量，再按当次接触的分母作整数除法。两条路径随后乘以脚本倍率并向下取整，再由实际攻防倍率结算生命变化。来源 JSON 记录每次原版 HitDef 对应的 `var(21)` 抽样、反击年龄、双段分母及命中伤害，并在同种子重跑时核对对应接触。NewKOF 的预设使用每席独立的可重放伤害随机流，原引擎使用全局共享随机流。跨引擎比较以记录中的随机量和反击等条件为准。预设覆盖审查过的普通模式站立轻重拳以及模式 2 的动作选择，其他脚本控制器仍超出范围。
