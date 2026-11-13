@@ -12,7 +12,8 @@ IMPORTS = ROOT / "data/imported-characters"
 TERRY = IMPORTS / "terry98"
 ALIAS = "terry98-stage14"
 ALIASES = (ALIAS, "terry98-stage15-default", "terry98-stage15-mode2",
-           "terry98-stage16-default", "terry98-stage16-mode2")
+           "terry98-stage16-default", "terry98-stage16-mode2",
+           "terry98-stage17-default", "terry98-stage17-mode2")
 
 
 def stage(source, binding, destination):
