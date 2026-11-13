@@ -2667,3 +2667,4 @@ HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本�
 
 - 阶段 21 正式提交已核实进入 GitHub main。阶段 22 实验预设接入 State 400、自然退到 State 11 和松下后 Action 12；默认模式弱 Wave 显式取消只在旧 tick 4。模式 2 原版 1050 保持为独立范围。窗口外回落、早输入、冻结缓冲和两侧姿态均有原引擎和 Vulkan 证据。 [原引擎参考](STAGE22_REFERENCE.md)
 - 已推送原引擎取证 `b50d0ae` 与运行时 `8c7813f` 两笔 checkpoint。专项、全量、构建与取证见[阶段 22 验收](STAGE22_ACCEPTANCE.md)。
+- 阶段 22 正式 PASS。原引擎与固定 Vulkan 各 29 场，Vulkan 的 48,260 条视觉开关权威记录一致，实时两档与像素夹具通过。C# 1,379/1,379、Python 86/86，Debug 零警告零错误，阶段 13C–21 冻结回归全部对齐。候选 410→1000 已做静态准备。 [验收和复现](STAGE22_ACCEPTANCE.md)

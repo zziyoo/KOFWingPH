@@ -102,6 +102,13 @@ def realtime_route(starts, events):
 def verify_poses(phases, scene, events, committed, timelines, modes):
     windows = fighter_poses(scene, events, committed, timelines, modes, actions={**ACTIONS, CROUCH: 400})
     mirror = phases['before-command'][0]['chars'][0]['facing'] < 0
+    for event in events:
+        if event['kind'] != 'Blocked' or event['move'] != CROUCH:
+            continue
+        seat, state = event['target'], event['frame'] + 1
+        source = phases['before-command'][state - 15]['chars'][seat ^ mirror]
+        expected = 151 if source['raw'] & 2 else 150
+        assert_equal(str(expected), committed[seat, state]['action'], f'guard pose at state {state}')
     for seat in range(2):
         after_crouch = False
         for frame, rows in sorted(phases['after-collision'].items()):
