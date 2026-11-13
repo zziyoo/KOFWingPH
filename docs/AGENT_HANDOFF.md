@@ -1612,3 +1612,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 阶段 17 动态实验配置使用显式角色文件 `terry98-stage17-data/{default,mode2}.fighter.json` 和各席视觉别名 `terry98-stage17-default`／`terry98-stage17-mode2`。`--damage-seed` 设定 1v1 实验初态，`--damage-audit` 只读提交状态。旧角色与固定样本仍走原规则。
 - 原版取证 81 份，运行、快照、图像和已知差异见 [阶段 17 验收](STAGE17_ACCEPTANCE.md) 和 [原引擎基准](STAGE17_REFERENCE.md)。完整 Terry MAX、共享全局 RNG 逐样本匹配和取消控制器不在本轮动态配置范围内。
 - 近身 205/215、原版模式交互、动态反击变量及 RNG、取消、守势惯性和空中规则仍在后续范围。继续保留原 `project.godot` 差异及素材诊断。
+
+### 阶段 18 交接
+
+- 新配置 `terry98-stage18-data/{default,mode2}.fighter.json` 通过 1v1 的显式角色文件参数载入，分别用视觉别名 `terry98-stage18-default`／`terry98-stage18-mode2`。命令 `--reentry-audit` 只读记录已提交的招式实例、命中与格挡确认及最近受击实例。生成、绑定安装与 Vulkan 复跑见[阶段 18 验收](STAGE18_ACCEPTANCE.md)。
+- 本阶段范围为两种人类站轻拳的显式重进。原版连续防御、动态受击框、方向跳跃及其他取消属于已记录的独立兼容范围。保持 13C 封版标签、阶段 14–17 的预设和既有 `project.godot` 差异。
