@@ -90,3 +90,20 @@ py -m unittest discover -s tools/MugenImporter/tests
 ```
 
 每套预设输出角色、绑定和来源三个 JSON。两套预设都包含 `5A` 对应的 State 200 和 `5B` 对应的 State 210。用 `default` 或 `mode2` 预设把同一重拳绑定到 Action 210 或 211。`--audit-only` 单独输出静态来源审查，无需运行轨迹。模式来源、距离边界、反击样本及限制见 [阶段 15 原引擎基准](STAGE15_REFERENCE.md)。图形启动方法见 [取证命令](../tools/Stage15Validation/README.md)。
+
+## 阶段 16 近身轻拳与双段重拳
+
+从仓库根目录生成独立的实验预设，使用已核对的三个阶段原引擎轨迹。源 ZIP、Manifest 和阶段 14、15 的输出可以继续复用。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+python -m mugen_importer.state205215 local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
+  --state200-reference local-mugen/stage14-reference-replay/results/run-metadata.json `
+  --state210-reference local-mugen/stage15-reference/results/run-metadata.json `
+  --fractional-reference local-mugen/stage15-reference-fractional/results/run-metadata.json `
+  --reference local-mugen/stage16-reference/results/run-metadata.json `
+  --output-dir data/imported-characters/terry98-stage16-data
+python -m unittest discover -s tools/MugenImporter/tests
+```
+
+`--audit-only` 仅审查 State 205/215 的原始脚本、AIR 和图集。完整转换在两个预设中保留远站分支，并从参考轨迹生成同键近身分支、各段停顿和伤害。原版 State 215 在第二段前重置接触记号，转换后为两段各分配一个接触组。来源 JSON 记录相同身体距离判定、两段接触、第二段单独命中和反击伤害所用轨迹。默认及模式 2 各生成角色、绑定和来源三个文件。图形启动与图集别名见 [阶段 16 取证命令](../tools/Stage16Validation/README.md)。
