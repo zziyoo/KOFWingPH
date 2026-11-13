@@ -28,7 +28,7 @@ Q16 = 65536
 VISUAL_FRAME = re.compile(r"^\[VisualAudit\] scope=1 frame=(\d+)\b")
 
 
-def native_case(reference, name, *, recovery=False):
+def native_case(reference, name, *, recovery=False, last_frame=None):
     phases = defaultdict(dict)
     changes = []
     for row in map(json.loads, reference.read_text(encoding="utf-8").splitlines()):
@@ -37,7 +37,7 @@ def native_case(reference, name, *, recovery=False):
         elif row["phase"] == "state-change":
             changes.append(row)
     before, collision, end = (phases[key] for key in ("before-command", "after-collision", "end"))
-    frame_count = 146 if recovery else 76
+    frame_count = last_frame + 1 if last_frame is not None else 146 if recovery else 76
     for phase, samples in (("input", before), ("collision", collision), ("end", end)):
         assert_equal(set(range(frame_count)), set(samples), f"native {phase} trace")
     mirror = name.startswith("mirror-")
@@ -66,17 +66,18 @@ def native_case(reference, name, *, recovery=False):
     moves = [{**row, "hostSeat": (row["seat"] - 1) ^ mirror, "move": NATIVE_MOVES[row["to"]]}
              for row in changes if row["to"] in NATIVE_MOVES]
     distance = abs(before[0]["chars"][0]["pos"][0] - before[0]["chars"][1]["pos"][0])
-    guard = 150 if any(contact["kind"] == "Blocked" for contact in contacts) else None
+    has_guard = any(contact["kind"].endswith("Blocked") for contact in contacts)
+    guard = (151 if "crouch-guard" in name else 150) if has_guard else None
     last = 112 if any(move["move"] == MOVE for move in moves) else 79
     captures = (91, 175) if recovery else (26, last)
     scene = Scene(distance / 2, tuple(keys), tuple(moves), tuple(contacts), guard, captures=captures)
     return scene, phases, changes
 
 
-def runtime_capture(options, scene, output, sprites):
+def runtime_capture(options, scene, output, sprites, *, mode="default", alias=ALIAS, minimum_render_frames=0):
     fixed = options.fps == "fixed"
-    args, capture = runtime_args(options, scene, output, sprites, ("default", "default"),
-                                 visual_alias=lambda _: ALIAS, realtime_tail=72)
+    args, capture = runtime_args(options, scene, output, sprites, (mode, mode),
+                                 visual_alias=lambda _: alias, realtime_tail=72)
     if not fixed:
         args.insert(args.index("--"), "--print-fps")
         if options.disable_vsync:
@@ -94,10 +95,12 @@ def runtime_capture(options, scene, output, sprites):
         args.extend(f"--renderkey={key}" for key in keys)
     if fixed:
         args += ["--damage-audit", "--reentry-audit", "--scripted-pause-audit"]
+        if minimum_render_frames > capture[1] + 18:
+            args = [f"--shotframes={minimum_render_frames}" if arg.startswith("--shotframes=") else arg for arg in args]
     return args, capture
 
 
-def verify_move_instances(scene, events, moves, reentry, *, fixed):
+def verify_move_instances(scene, events, moves, reentry, *, fixed, fighter_id="TerryPowerWave"):
     started = [event for event in events if event["kind"] == "MoveStarted"]
     expected = sorted(scene.moves, key=lambda row: (row["frame"], row["hostSeat"]))
     started.sort(key=lambda row: (row["frame"], row["source"]))
@@ -105,7 +108,7 @@ def verify_move_instances(scene, events, moves, reentry, *, fixed):
                  [(event["source"], event["move"]) for event in started], "native entry order")
     if not fixed:
         return started
-    assert_equal({"TerryPowerWave"}, {row["id"] for row in moves.values()}, "actual profile")
+    assert_equal({fighter_id}, {row["id"] for row in moves.values()}, "actual profile")
     for event, native in zip(started, expected, strict=True):
         logic, seat = event["frame"], event["source"]
         assert_equal(native["frame"] + 14, logic, "native-to-Godot entry timing")
@@ -124,7 +127,7 @@ def fighter_poses(scene, events, committed, timelines, modes):
     windows = []
     for index, event in enumerate(starts):
         move, seat = event["move"], event["source"]
-        action = ACTIONS.get(move, 1000 if move == MOVE else 210)
+        action = ACTIONS.get(move, 1000 if move == MOVE else (211 if modes[seat] == "mode2" else 210))
         begin = finish = event["frame"] + 1
         next_start = next((row["frame"] + 1 for row in starts[index + 1:] if row["source"] == seat), None)
         clock = []
@@ -266,9 +269,11 @@ def verify_grounded_wave_recovery(scene, phases, moves):
     return samples
 
 
-def verify_pause(phases, lines, moves, damage, entities, *, strict_native):
+def verify_pause(phases, lines, moves, damage, entities, *, strict_native, allow_inactive=False):
     rows = audit_rows(lines, "ScriptedPauseAudit")
     if not rows:
+        if allow_inactive and not entities and not any(row.get("globalPause") for row in phases["end"].values()):
+            return rows
         raise ValueError("missing opt-in scripted Pause trace")
     if strict_native and "globalPause" in phases["end"][0]:
         expected = [frame + 14 for frame, row in phases["end"].items() if row["globalPause"] == 1]
@@ -370,22 +375,26 @@ def verify_recovery(phases, lines, moves, captures, *, mirrored):
     return samples
 
 
-def run_case(options, name, reference, timelines, profile):
-    scene, phases, changes = native_case(reference, name, recovery=options.recovery)
+def run_case(options, name, reference, timelines, profile, *, mode="default", alias=ALIAS,
+             prepared_scene=None, fixed_checks=None, contact_check=verify_contacts,
+             minimum_render_frames=0, partial_capture=False):
+    scene, phases, changes = prepared_scene or native_case(reference, name, recovery=options.recovery)
     fixed = options.fps == "fixed"
     logs = []
     for variant in ("sprite", "plain") if options.compare_plain else ("sprite",):
         output = options.output / name / variant
         output.mkdir(parents=True)
         sprites = variant == "sprite"
-        args, capture = runtime_capture(options, scene, output, sprites)
+        args, capture = runtime_capture(options, scene, output, sprites, mode=mode, alias=alias,
+                                        minimum_render_frames=minimum_render_frames)
         log = run_godot(options.godot, args, output / "duel.log", output / "end.png")
         lines = log.decode("utf-8").splitlines()
         events = battle_events(lines)
         moves = indexed(audit_rows(lines, "MoveAudit"))
         reentry = indexed(audit_rows(lines, "ReentryAudit"))
         damage = indexed(audit_rows(lines, "DamageAudit"))
-        started = verify_move_instances(scene, events, moves, reentry, fixed=fixed)
+        started = verify_move_instances(scene, events, moves, reentry, fixed=fixed,
+                                        fighter_id=profile["fighterId"])
         strict_native = True
         entities = verify_entities(lines, phases, started, moves, fixed=fixed, strict_native=strict_native)
         pause = []
@@ -394,10 +403,11 @@ def run_case(options, name, reference, timelines, profile):
         if fixed:
             verify_scripted_keys(lines, BOOT_KEYS + scene.keys)
             known_second_light = {"hit-23": "Hitstun", "guard-23": "Blockstun"}.get(name)
-            divergences = verify_contacts(scene, events, moves, damage, profile,
+            divergences = contact_check(scene, events, moves, damage, profile,
                                          known_second_light=known_second_light, strict_native=strict_native)
             ground_recovery = verify_grounded_wave_recovery(scene, phases, moves)
-            pause = verify_pause(phases, lines, moves, damage, entities, strict_native=strict_native)
+            pause = verify_pause(phases, lines, moves, damage, entities, strict_native=strict_native, allow_inactive=mode == "mode2")
+            additional = fixed_checks(scene, phases, events, moves, reentry, lines) if fixed_checks else {}
         warning_states = []
         last_logic = -1
         for line in lines:
@@ -408,9 +418,9 @@ def run_case(options, name, reference, timelines, profile):
         if options.require_no_backlog and warning_states:
             raise ValueError("realtime capture exceeded the battle time budget")
         if sprites:
-            captures_require_full_moves = fixed and not options.recovery
-            capture_scene = replace(scene, guard_action=None) if options.recovery else scene
-            windows, images = validate_captures(capture_scene, events, lines, output, capture, timelines, ("default", "default"), captures_require_full_moves,
+            captures_require_full_moves = fixed and not (options.recovery or partial_capture)
+            capture_scene = replace(scene, guard_action=None) if options.recovery or partial_capture else scene
+            windows, images = validate_captures(capture_scene, events, lines, output, capture, timelines, (mode, mode), captures_require_full_moves,
                                                 move_validator=fighter_poses, check_reactions=False)
             verify_rendered_entities(lines, images, entities, timelines[1020])
             if not fixed and not any(image["entities"] for image in images):
@@ -432,6 +442,10 @@ def run_case(options, name, reference, timelines, profile):
                 result["rendererFps"] = [line for line in lines if line.startswith("Project FPS:")]
             if options.recovery:
                 result["recovery"] = verify_recovery(phases, lines, moves, images, mirrored=name.startswith("mirror-"))
+            if fixed:
+                result.update(additional)
+            if scene.differences:
+                result["sourceDifferences"] = scene.differences
             (output / "trace.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         logs.append([line for line in log.splitlines() if line.startswith(AUTHORITY)])
     if options.compare_plain:

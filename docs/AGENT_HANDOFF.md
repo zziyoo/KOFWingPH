@@ -1627,3 +1627,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - 阶段 19 PASS。`TerryPowerWave` 由原始归档、Manifest 和冻结的阶段 18 数据生成。使用 `tools/Stage19Validation` 生成配置、别名和复跑固定帧及实时样本。验证结果及范围见[阶段 19 验收](STAGE19_ACCEPTANCE.md)。
 - 查验击飞边界时，优先用 `--scripted-pause-audit` 的实体、全局 Pause 与反应记录，按 `state=logic+1` 关联同次 `FramePostDraw` 图像。视觉覆盖开关对照仍比较权威行。已冻结的 13C–18 黄金数据与用户的 `project.godot` 修改分别保留。
+
+### 阶段 20 近身轻拳取消
+
+- 默认实验配置 `TerryPowerWaveRoutes` 保留 200→1000，并从原始 State 205 AIR 和 State −2 生成独立的 205→1000 窗口。阶段 19 配置哈希不变。模式 2 普通技对照仍走原有重进。取证与实际门禁见[阶段 20 验收](STAGE20_ACCEPTANCE.md)。
+- 阶段 20 正式 PASS。固定帧用于源轨迹和图像的完整对照，实时样本用稀疏审计保留 30 FPS 及 60／58 FPS 的实际取证。证据、双覆盖复跑及历史门禁已归档。下一步可先取证默认模式 215→1000，重点核对跨两段攻击的许可和旧接触组清理。 [复现命令](../tools/Stage20Validation/README.md)
