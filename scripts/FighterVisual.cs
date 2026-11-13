@@ -28,6 +28,7 @@ public sealed class FighterVisual
     private MugenSpriteVisual? _sprite;
     private readonly VisualFlash _flash = new();
     private readonly GuardVisualPose _guardPose = new();
+    private readonly HitReactionVisualPose _hitReaction = new();
     private CommandDirection? _walkDirection;
     private readonly ThrowVisual? _throwVisual;
 
@@ -70,16 +71,22 @@ public sealed class FighterVisual
     private string VisualId(AnimationSet set) => SpriteBinding.SelectVisualId(set.FighterId, _visualOverride, _overrideFighter);
     private bool OverrideApplies(AnimationSet set) => _visualOverride is not null &&
         (_overrideFighter is null || _overrideFighter == set.FighterId);
-    private string SpriteClip(FighterState fighter, string clip)
+    private (string Clip, int? Tick) SpriteClip(FighterState fighter, string clip)
     {
         if (_throwVisual?.Clip(fighter) is string throwClip && _sprite?.HasClip(throwClip) == true)
-            return throwClip;
+            return (throwClip, null);
+        if (fighter.LogicState == FighterLogicState.Hitstun &&
+            _sprite?.HitReactionClip(_hitReaction.MoveId, _hitReaction.Elapsed) is { } hitClip)
+            return hitClip;
         if (fighter.LogicState == FighterLogicState.Blockstun && _guardPose.Crouching &&
             _sprite?.HasClip("guard_crouch") == true)
-            return "guard_crouch";
+            return ("guard_crouch", null);
+        string state = fighter.LogicState == FighterLogicState.Standing && _walkDirection is not null
+            ? "Walking" : fighter.LogicState.ToString();
+        clip = _sprite?.StateClip(clip, state) ?? clip;
         if (clip == "walk" && _walkDirection == CommandDirection.Back &&
             _sprite?.HasClip("walk_back") == true)
-            return "walk_back";
+            return ("walk_back", null);
         if (clip == "jump" && _sprite is not null)
         {
             string variant = fighter.LogicState == FighterLogicState.PreJump ? "pre_jump"
@@ -87,9 +94,9 @@ public sealed class FighterVisual
                 : (fighter.VelocityX > FixedPoint.Zero) == (fighter.Facing == Facing.Right)
                     ? "jump_forward" : "jump_back";
             if (_sprite.HasClip(variant))
-                return variant;
+                return (variant, null);
         }
-        return clip;
+        return (clip, null);
     }
 
     /// <summary>重置动画时钟（新回合/新交锋）。</summary>
@@ -98,6 +105,7 @@ public sealed class FighterVisual
         _clock.Reset();
         _flash.Reset();
         _guardPose.Reset();
+        _hitReaction.Reset();
         _walkDirection = null;
         _sprite?.SetFlash(false);
     }
@@ -132,7 +140,10 @@ public sealed class FighterVisual
         var directions = after.RecognitionState.Directions;
         _guardPose.Observe(before.LogicState, after.LogicState, frozen,
             directions.Count > 0 ? directions[^1].Direction : null, blocked);
-        string clip = SpriteClip(after, AnimationResolver.ResolveClipName(after, _set, _walkDirection));
+        string? incoming = frame.Events.FirstOrDefault(e => e.TargetFighterId == fighterIndex
+            && e.Type is BattleEventType.Hit or BattleEventType.ProjectileHit).MoveId;
+        _hitReaction.Observe(after.LogicState == FighterLogicState.Hitstun, frozen, incoming);
+        (string clip, int? tick) = SpriteClip(after, AnimationResolver.ResolveClipName(after, _set, _walkDirection));
         _clock.Observe(
             frame.LogicFrame,
             after.LogicState,
@@ -143,7 +154,7 @@ public sealed class FighterVisual
         {
             bool resolveMove = _throwVisual?.Clip(after) != clip;
             GD.Print($"[SpriteFrameAudit] fighter={fighterIndex} logic={frame.LogicFrame} state={after.LogicState} move={after.MoveId ?? "-"} frozen={frozen} facing={after.Facing} " +
-                _sprite.Describe(clip, _clock.VisualFrame, after.MoveElapsedFrames, after.IsInMove, resolveMove ? after.MoveId : null, after.LogicState.ToString()));
+                _sprite.Describe(clip, tick ?? _clock.VisualFrame, after.MoveElapsedFrames, after.IsInMove, resolveMove ? after.MoveId : null, after.LogicState.ToString()));
         }
     }
 
@@ -155,7 +166,8 @@ public sealed class FighterVisual
 
         ResolvedPose pose = AnimationResolver.Resolve(fighter, _set, visualFrame, _walkDirection);
         PoseFrame frame = pose.Frame;
-        string spriteClip = SpriteClip(fighter, pose.ClipName);
+        (string spriteClip, int? tick) = SpriteClip(fighter, pose.ClipName);
+        visualFrame = tick ?? visualFrame;
         CurrentClip = $"{pose.ClipName}#{pose.FrameIndex}";
 
         bool facingLeft = fighter.Facing == Facing.Left;

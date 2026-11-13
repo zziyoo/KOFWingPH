@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NewKOF.BattleCore.Combat;
 
 namespace NewKOF.BattleCore.Presentation;
 
@@ -17,6 +18,8 @@ public sealed record SpriteClipBinding(int Action, bool MoveClock, int StartTick
 /// <summary>Validated visual-only mapping. Version 1 integer clips remain supported.</summary>
 public sealed class SpriteBinding
 {
+    private sealed record HitReactionBinding(string Initial, string Followup, int FollowupTick);
+
     public string VisualId { get; private init; } = "";
     public double Scale { get; private init; }
     public int OffsetX { get; private init; }
@@ -24,9 +27,23 @@ public sealed class SpriteBinding
     public string? Fallback { get; private init; }
     public IReadOnlyDictionary<string, SpriteClipBinding> Clips { get; private init; } = null!;
     private Dictionary<string, Dictionary<string, string>> _moves = new(StringComparer.Ordinal);
+    private Dictionary<string, HitReactionBinding> _hitReactions = new(StringComparer.Ordinal);
+    private Dictionary<string, string> _states = new(StringComparer.Ordinal);
     public string ResolveClip(string defaultClip, string? moveId, string phase) =>
         moveId is not null && _moves.TryGetValue(moveId, out var stages) && stages.TryGetValue(phase, out var clip)
             ? clip : defaultClip;
+
+    public string ResolveStateClip(string defaultClip, string state) =>
+        _states.TryGetValue(state, out string? clip) ? clip : defaultClip;
+
+    public (string Clip, int Tick)? ResolveHitReaction(string? moveId, int elapsed)
+    {
+        if (moveId is null || !_hitReactions.TryGetValue(moveId, out HitReactionBinding? reaction))
+            return null;
+        return elapsed < reaction.FollowupTick
+            ? (reaction.Initial, Math.Max(0, elapsed - 1))
+            : (reaction.Followup, elapsed - reaction.FollowupTick);
+    }
     public static bool ValidId(string id) => id.Length is > 0 and <= 80 && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
     public static string SelectVisualId(string fighterId, string? visualOverride, string? onlyFighter) =>
         visualOverride is not null && (onlyFighter is null || onlyFighter == fighterId) ? visualOverride : fighterId;
@@ -90,6 +107,35 @@ public sealed class SpriteBinding
                 moves.Add(move.Name, stages);
             }
         }
-        return new SpriteBinding { VisualId = id, Scale = scale, OffsetX = x, OffsetY = y, Clips = clips, Fallback = fallback, _moves = moves };
+        var reactions = new Dictionary<string, HitReactionBinding>(StringComparer.Ordinal);
+        if (root.TryGetProperty("hitReactions", out var reactionData))
+        {
+            foreach (var item in reactionData.EnumerateObject())
+            {
+                var reaction = item.Value;
+                if (string.IsNullOrWhiteSpace(item.Name)
+                    || !reaction.TryGetProperty("initial", out var initial) || initial.GetString() is not string initialName
+                    || !reaction.TryGetProperty("followup", out var followup) || followup.GetString() is not string followupName
+                    || !reaction.TryGetProperty("followupTick", out var tick) || !tick.TryGetInt32(out int switchTick)
+                    || switchTick < 1 || initialName == followupName
+                    || !clips.ContainsKey(initialName) || !clips.ContainsKey(followupName))
+                    throw new ArgumentException($"Invalid hit reaction binding for {item.Name}.");
+                reactions.Add(item.Name, new HitReactionBinding(initialName, followupName, switchTick));
+            }
+        }
+        var states = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (root.TryGetProperty("states", out var stateData))
+        {
+            foreach (var item in stateData.EnumerateObject())
+            {
+                string target = item.Value.GetString() ?? "";
+                if ((item.Name != "Walking" && !Enum.GetNames<FighterLogicState>().Contains(item.Name))
+                    || !clips.ContainsKey(target))
+                    throw new ArgumentException($"Invalid state clip binding for {item.Name}.");
+                states.Add(item.Name, target);
+            }
+        }
+        return new SpriteBinding { VisualId = id, Scale = scale, OffsetX = x, OffsetY = y, Clips = clips,
+            Fallback = fallback, _moves = moves, _hitReactions = reactions, _states = states };
     }
 }

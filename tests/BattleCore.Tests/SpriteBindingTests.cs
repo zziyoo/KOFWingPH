@@ -91,4 +91,56 @@ public class SpriteBindingTests
         Assert.Equal("idle", binding.ResolveClip("idle", "SweepPrototype", "Recovery"));
         Assert.Equal("idle", binding.ResolveClip("idle", "other", "Active"));
     }
+
+    [Fact]
+    public void HitReactionTracksTheCommittedMoveAndCountsOnlyAfterFreeze()
+    {
+        var binding = SpriteBinding.Parse("""
+            {"schemaVersion":2,"visualId":"x","clips":{"heavy":5002,"falloff":5007},
+             "hitReactions":{"Heavy":{"initial":"heavy","followup":"falloff","followupTick":4}}}
+            """, "x");
+        var pose = new HitReactionVisualPose();
+        pose.Observe(hitstun: true, frozen: false, "Heavy");
+        for (int i = 0; i < 13; i++)
+            pose.Observe(hitstun: true, frozen: true, null);
+        Assert.Equal(("heavy", 0), binding.ResolveHitReaction(pose.MoveId, pose.Elapsed));
+        var initial = new SpriteTimeline(new[] { 1, 2 }, 0, false);
+        for (int i = 1; i <= 4; i++)
+        {
+            pose.Observe(hitstun: true, frozen: false, null);
+            Assert.Equal(i < 4 ? "heavy" : "falloff", binding.ResolveHitReaction(pose.MoveId, pose.Elapsed)!.Value.Clip);
+            if (i < 4)
+                Assert.Equal(i == 1 ? 0 : 1, initial.FrameAt(binding.ResolveHitReaction(pose.MoveId, pose.Elapsed)!.Value.Tick));
+        }
+        pose.Observe(hitstun: true, frozen: false, "Light");
+        Assert.Null(binding.ResolveHitReaction(pose.MoveId, pose.Elapsed));
+        pose.Observe(hitstun: true, frozen: false, "Heavy");
+        pose.Observe(hitstun: false, frozen: false, null);
+        Assert.Null(binding.ResolveHitReaction(pose.MoveId, pose.Elapsed));
+    }
+
+    [Fact]
+    public void HitReactionRejectsUnknownClipAndMissingSwitchTick()
+    {
+        Assert.Throws<ArgumentException>(() => SpriteBinding.Parse("""
+            {"schemaVersion":2,"visualId":"x","clips":{"initial":5002},
+             "hitReactions":{"Heavy":{"initial":"initial","followup":"missing","followupTick":4}}}
+            """, "x"));
+        Assert.Throws<ArgumentException>(() => SpriteBinding.Parse("""
+            {"schemaVersion":2,"visualId":"x","clips":{"initial":5002,"followup":5007},
+             "hitReactions":{"Heavy":{"initial":"initial","followup":"followup"}}}
+            """, "x"));
+    }
+
+    [Fact]
+    public void StateBindingSelectsGuardEvenWithGenericHurtClip()
+    {
+        var binding = SpriteBinding.Parse("""
+            {"schemaVersion":2,"visualId":"x","clips":{"guard":150,"hurt":5000,"walk":20},
+             "states":{"Blockstun":"guard","Walking":"walk"}}
+            """, "x");
+        Assert.Equal("guard", binding.ResolveStateClip("hurt", "Blockstun"));
+        Assert.Equal("walk", binding.ResolveStateClip("idle", "Walking"));
+        Assert.Equal("hurt", binding.ResolveStateClip("hurt", "Hitstun"));
+    }
 }

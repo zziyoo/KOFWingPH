@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Godot;
 using NewKOF.BattleCore;
@@ -57,6 +58,7 @@ public partial class BattleScene : Node2D
     private readonly InputTrace _trace = new();
     private bool _diagnostics;
     private bool _moveAudit;
+    internal bool CaptureInputOnly { get; private set; }
 
     private Node2D? _fighter1Node;
     private Node2D? _fighter2Node;
@@ -111,6 +113,7 @@ public partial class BattleScene : Node2D
 
         _diagnostics = HasArg("--inputdiag");
         _moveAudit = HasArg("--move-audit");
+        CaptureInputOnly = HasArg("--capture-input-only") && ArgValue("--shot") is not null;
         _trace.Enabled = _diagnostics;
 
         _catalog = LoadFighterCatalog();
@@ -249,11 +252,11 @@ public partial class BattleScene : Node2D
     private static BattleState CreateDuelInitialState(MatchRules rules)
     {
         int health = CapByDebugHealth(1000);
-        int distance = InitialDistanceFromArgs();
+        FixedPoint distance = DuelDistanceFromArgs();
         IReadOnlyList<FighterState> fighters = new[]
         {
-            FighterState.Create(0, 1000, -distance, Facing.Right) with { Health = health },
-            FighterState.Create(1, 1000, distance, Facing.Left) with { Health = health },
+            FighterState.Create(0, 1000, 0, Facing.Right) with { Health = health, PositionX = -distance },
+            FighterState.Create(1, 1000, 0, Facing.Left) with { Health = health, PositionX = distance },
         };
 
         return new BattleState(0, fighters, BattleState.CreateDefault().StateVersion,
@@ -352,6 +355,19 @@ public partial class BattleScene : Node2D
         return 120;
     }
 
+    private static FixedPoint DuelDistanceFromArgs()
+    {
+        foreach (string arg in OS.GetCmdlineUserArgs())
+        {
+            if (arg.StartsWith("--duel=", StringComparison.Ordinal)
+                && decimal.TryParse(arg["--duel=".Length..], NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture, out decimal halfDistance)
+                && halfDistance is >= 30 and <= 600 && halfDistance * 4 % 1 == 0)
+                return FixedPoint.FromFraction((long)(halfDistance * 4), 4);
+        }
+        return InitialDistanceFromArgs();
+    }
+
     /// <summary>当前逻辑帧号（只读；调试工具读取权威值）。</summary>
     public int CurrentLogicFrame => TeamActive
         ? _team.CurrentBattleState?.Frame ?? 0
@@ -369,6 +385,18 @@ public partial class BattleScene : Node2D
     // ── 输入 ────────────────────────────────────────────────────────
 
     public override void _Input(InputEvent @event)
+    {
+        if (!CaptureInputOnly)
+            HandleInput(@event);
+    }
+
+    internal void HandleCaptureInput(InputEventKey @event)
+    {
+        if (CaptureInputOnly)
+            HandleInput(@event);
+    }
+
+    private void HandleInput(InputEvent @event)
     {
         if (@event is InputEventKey key && _diagnostics)
         {
@@ -742,7 +770,7 @@ public partial class BattleScene : Node2D
     /// <summary>窗口失焦时清空按住状态，避免松开事件丢失导致「永远按住」。</summary>
     public override void _Notification(int what)
     {
-        if (what == NotificationApplicationFocusOut)
+        if (what == NotificationApplicationFocusOut && !CaptureInputOnly)
             _inputMap?.ReleaseAll();
     }
 

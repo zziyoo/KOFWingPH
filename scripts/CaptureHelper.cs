@@ -29,6 +29,7 @@ namespace NewKOF;
 /// <para>
 /// 注入走 <see cref="Input.ParseInputEvent"/>，与真实键盘同一条路径：
 /// <c>_Input</c> → <see cref="KeyboardInputMap"/> → <see cref="BattleCore.Input.InputBuffer"/>。
+/// 启用 <c>--capture-input-only</c> 时直接进入同一对局输入处理，避免桌面事件干扰。
 /// </para>
 /// </summary>
 public partial class CaptureHelper : Node
@@ -167,12 +168,16 @@ public partial class CaptureHelper : Node
             KeyStep step = _keyScript[i];
             if (step.RenderFrame != _renderFrame) continue;
 
-            Input.ParseInputEvent(new InputEventKey
+            var key = new InputEventKey
             {
                 Keycode = step.Keycode,
                 PhysicalKeycode = step.Keycode,
                 Pressed = step.Down,
-            });
+            };
+            if (GetParent() is BattleScene { CaptureInputOnly: true } battle)
+                battle.HandleCaptureInput(key);
+            else
+                Input.ParseInputEvent(key);
 
             GD.Print($"[CaptureHelper] 渲染帧 {_renderFrame} 注入 {step.Keycode} {(step.Down ? "按下" : "松开")}" +
                      $"（当时逻辑帧 {LogicFrame()}）");

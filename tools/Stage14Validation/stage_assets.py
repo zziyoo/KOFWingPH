@@ -1,4 +1,4 @@
-"""Stage an independent local State 200 visual alias from an existing Terry import."""
+"""Stage an independent local experimental alias from an existing Terry import."""
 
 import argparse
 import json
@@ -11,6 +11,7 @@ from frozen_authority import ROOT
 IMPORTS = ROOT / "data/imported-characters"
 TERRY = IMPORTS / "terry98"
 ALIAS = "terry98-stage14"
+ALIASES = (ALIAS, "terry98-stage15-default", "terry98-stage15-mode2")
 
 
 def stage(source, binding, destination):
@@ -41,8 +42,8 @@ def main():
     options = parser.parse_args()
     try:
         destination = options.destination.resolve()
-        if destination.parent != IMPORTS.resolve() or destination.name != ALIAS:
-            parser.error(f"--destination must be the ignored {ALIAS} import directory")
+        if destination.parent != IMPORTS.resolve() or destination.name not in ALIASES:
+            parser.error(f"--destination must be an ignored experimental import directory: {', '.join(ALIASES)}")
         stage(options.source.resolve(strict=True), options.binding.resolve(strict=True), destination)
     except (OSError, ValueError) as error:
         parser.exit(1, f"Visual staging failed: {error}\n")
