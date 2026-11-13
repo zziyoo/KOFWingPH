@@ -1600,4 +1600,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - 生成目录 `data/imported-characters/terry98-stage15-data/` 的 `default.fighter.json`、`mode2.fighter.json` 同时提供 `5A` 和 `5B`。对应视觉别名 `terry98-stage15-default`、`terry98-stage15-mode2`。保持阶段 14 的独立配置与冻结证据。
 - 原引擎规范轨迹、分数距离补测及四个互动复验都在 `local-mugen` 的阶段 15 目录。Godot 输出在 `local-mugen/stage15-validation/`。按 [阶段 15 验收](STAGE15_ACCEPTANCE.md) 和 [取证命令](../tools/Stage15Validation/README.md) 用新目录复现。
+
+### 阶段 16 交接
+
+- 两套 `terry98-stage16-data/{default,mode2}.fighter.json` 通过显式席位覆盖载入，对应 `terry98-stage16-default` 与 `terry98-stage16-mode2` 视觉别名。实验范围为普通地面选招，包含中立跳避让验证。历史 TerryS200、阶段 15 配置与默认阵容保持。
+- [阶段 16 正式验收](STAGE16_ACCEPTANCE.md) 记录 58 个 Vulkan 固定帧场景、实时 30/60 FPS、165 个 C# 专项及 1261 个全量测试。阶段 14/15 和 13C 冻结门禁通过。原引擎 46 个标准场景、6 个防御释放场景、4 个同席双键场景均有本地轨迹与校验哈希，复现见 [原引擎基准](STAGE16_REFERENCE.md)。
+- 原版完整模式选择、脚本取消、同招重进、原脚本随机伤害与守势移动仍为后续范围。保留原工作区 `project.godot` 差异和第三方资源诊断。
 - 近身 205/215、原版模式交互、动态反击变量及 RNG、取消、守势惯性和空中规则仍在后续范围。继续保留原 `project.godot` 差异及素材诊断。
