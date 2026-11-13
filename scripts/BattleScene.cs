@@ -61,6 +61,7 @@ public partial class BattleScene : Node2D
     private Dictionary<string, AnimationSet> _presentationSets = new(StringComparer.Ordinal);
 
     private readonly FeedbackDirector _feedback = new();
+    private readonly ThrowVisual _throwVisual = new();
     private readonly HitShake _shake = new();
     private readonly PresentationFrameBuffer _frameBuffer = new();
     private CombatFeedbackLayer _fx = null!;
@@ -1217,9 +1218,9 @@ public partial class BattleScene
         static string? Option(string name) => OS.GetCmdlineUserArgs()
             .FirstOrDefault(arg => arg.StartsWith(name + "=", StringComparison.Ordinal))?[(name.Length + 1)..];
         if (_fighter1Node?.GetNodeOrNull<ColorRect>("Body") is ColorRect body1)
-            _visual1 = new FighterVisual(_fighter1Node, body1, SetFor(DefaultFighterId(0)), Option("--p1-visual"), Option("--p1-visual-fighter"));
+            _visual1 = new FighterVisual(_fighter1Node, body1, SetFor(DefaultFighterId(0)), Option("--p1-visual"), Option("--p1-visual-fighter"), _throwVisual);
         if (_fighter2Node?.GetNodeOrNull<ColorRect>("Body") is ColorRect body2)
-            _visual2 = new FighterVisual(_fighter2Node, body2, SetFor(DefaultFighterId(1)), Option("--p2-visual"), Option("--p2-visual-fighter"));
+            _visual2 = new FighterVisual(_fighter2Node, body2, SetFor(DefaultFighterId(1)), Option("--p2-visual"), Option("--p2-visual-fighter"), _throwVisual);
     }
 
     private string DefaultFighterId(int player) =>
@@ -1290,6 +1291,7 @@ public partial class BattleScene
         // ① 动画时钟：无论本帧有没有事件都要观察（冻结/恢复信息在无事件帧里）。
         for (int i = 0; i < frames.Count; i++)
         {
+            _throwVisual.Observe(frames[i].StateAfter, frames[i].Events);
             _visual1?.ObserveFrame(frames[i], 0);
             _visual2?.ObserveFrame(frames[i], 1);
             if (HasArg("--visual-audit"))
@@ -1371,6 +1373,7 @@ public partial class BattleScene
     /// <summary>清空瞬时表现（新回合/换人/关闭特效）：不动权威状态，也不清事件去重。</summary>
     private void ResetFeedbackLayer()
     {
+        _throwVisual.Reset();
         _frameBuffer.Clear();
         _fx.Clear();
         _shake.Reset();

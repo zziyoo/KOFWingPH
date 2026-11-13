@@ -29,17 +29,20 @@ public sealed class FighterVisual
     private readonly VisualFlash _flash = new();
     private readonly GuardVisualPose _guardPose = new();
     private CommandDirection? _walkDirection;
+    private readonly ThrowVisual? _throwVisual;
 
     private readonly string? _visualOverride;
     private readonly string? _overrideFighter;
 
-    public FighterVisual(Node2D root, ColorRect body, AnimationSet set, string? visualOverride = null, string? overrideFighter = null)
+    public FighterVisual(Node2D root, ColorRect body, AnimationSet set, string? visualOverride = null,
+        string? overrideFighter = null, ThrowVisual? throwVisual = null)
     {
         _root = root ?? throw new System.ArgumentNullException(nameof(root));
         _body = body ?? throw new System.ArgumentNullException(nameof(body));
         _set = set ?? throw new System.ArgumentNullException(nameof(set));
         _visualOverride = visualOverride;
         _overrideFighter = overrideFighter;
+        _throwVisual = throwVisual;
         _sprite = MugenSpriteVisual.TryLoad(_root, VisualId(set), OverrideApplies(set));
     }
 
@@ -68,6 +71,8 @@ public sealed class FighterVisual
         (_overrideFighter is null || _overrideFighter == set.FighterId);
     private string SpriteClip(FighterState fighter, string clip)
     {
+        if (_throwVisual?.Clip(fighter) is string throwClip && _sprite?.HasClip(throwClip) == true)
+            return throwClip;
         if (fighter.LogicState == FighterLogicState.Blockstun && _guardPose.Crouching &&
             _sprite?.HasClip("guard_crouch") == true)
             return "guard_crouch";
@@ -112,7 +117,7 @@ public sealed class FighterVisual
     {
         FighterState before = frame.StateBefore.Fighter(fighterIndex);
         FighterState after = frame.StateAfter.Fighter(fighterIndex);
-        bool frozen = before.HitstopRemainingFrames > 0;
+        bool frozen = before.HitstopRemainingFrames > 0 || frame.StateBefore.PendingThrow is not null;
         if (!frozen || after.LogicState != before.LogicState)
             _walkDirection = AnimationResolver.ResolveWalkDirection(before, after);
         bool blocked = frame.Events.Any(e => e.TargetFighterId == fighterIndex &&
@@ -129,8 +134,9 @@ public sealed class FighterVisual
             clip);
         if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
         {
+            bool resolveMove = _throwVisual?.Clip(after) != clip;
             GD.Print($"[SpriteFrameAudit] fighter={fighterIndex} logic={frame.LogicFrame} state={after.LogicState} move={after.MoveId ?? "-"} frozen={frozen} facing={after.Facing} " +
-                _sprite.Describe(clip, _clock.VisualFrame, after.MoveElapsedFrames, after.IsInMove, after.MoveId, after.LogicState.ToString()));
+                _sprite.Describe(clip, _clock.VisualFrame, after.MoveElapsedFrames, after.IsInMove, resolveMove ? after.MoveId : null, after.LogicState.ToString()));
         }
     }
 
@@ -146,11 +152,12 @@ public sealed class FighterVisual
         CurrentClip = $"{pose.ClipName}#{pose.FrameIndex}";
 
         bool facingLeft = fighter.Facing == Facing.Left;
+        string? moveId = _throwVisual?.Clip(fighter) == spriteClip ? null : fighter.MoveId;
         bool usedSprite = _sprite?.Apply(spriteClip, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, facingLeft,
-            fighter.MoveId, fighter.LogicState.ToString()) == true;
+            moveId, fighter.LogicState.ToString()) == true;
         if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
             GD.Print($"[SpriteRenderAudit] fighter={fighter.Id} logic={logicFrame} state={fighter.LogicState} sprite_selected={usedSprite} " +
-                _sprite.Describe(spriteClip, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, fighter.MoveId, fighter.LogicState.ToString()));
+                _sprite.Describe(spriteClip, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, moveId, fighter.LogicState.ToString()));
         _sprite?.SetFlash(_flash.ActiveAt(logicFrame));
         _body.Visible = !usedSprite;
         if (usedSprite)

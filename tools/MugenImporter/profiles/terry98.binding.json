@@ -135,10 +135,35 @@
       "loop": false,
       "frameSchedule": [0, 1, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 6]
     },
-    "unmapped_throw": {
-      "action": -999,
+    "throw_attempt": {
+      "action": 810,
       "clock": "move",
+      "firstFrame": 0,
+      "lastFrame": 0,
       "loop": false
+    },
+    "throw_whiff_recovery": {
+      "action": 800,
+      "loop": false
+    },
+    "throw_hold": {
+      "action": 810,
+      "firstFrame": 1,
+      "lastFrame": 1,
+      "loop": false
+    },
+    "throw_caught": {
+      "action": 815,
+      "firstFrame": 1,
+      "lastFrame": 1,
+      "loop": false
+    },
+    "throw_release": {
+      "action": 810,
+      "clock": "phase",
+      "loop": false,
+      "firstFrame": 4,
+      "lastFrame": 7
     },
     "guard_crouch": {
       "action": 151
@@ -171,9 +196,9 @@
       "Recovery": "temp_sweep"
     },
     "StandingThrow": {
-      "Startup": "unmapped_throw",
-      "Active": "unmapped_throw",
-      "Recovery": "unmapped_throw"
+      "Startup": "throw_attempt",
+      "Active": "throw_attempt",
+      "Recovery": "throw_whiff_recovery"
     }
   }
 }
