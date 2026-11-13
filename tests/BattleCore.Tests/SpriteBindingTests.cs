@@ -6,6 +6,20 @@ namespace NewKOF.BattleCore.Tests;
 public class SpriteBindingTests
 {
     [Fact]
+    public void OptionalClipAppearanceDoesNotAffectLegacyClips()
+    {
+        var binding = SpriteBinding.Parse("""
+            {"clips":{"idle":0,"projectile_Fireball":{"action":1070,"offsetX":16,
+              "offsetY":48,"silhouetteColor":"#FFBC5B"}}}
+            """, "x");
+        Assert.Equal((16, 48, "#FFBC5B"), (binding.Clips["projectile_Fireball"].OffsetX,
+            binding.Clips["projectile_Fireball"].OffsetY, binding.Clips["projectile_Fireball"].SilhouetteColor));
+        Assert.Equal(0, binding.Clips["idle"].OffsetX);
+        Assert.Null(binding.Clips["idle"].SilhouetteColor);
+        Assert.Throws<ArgumentException>(() =>
+            SpriteBinding.Parse("""{"clips":{"bad":{"action":1,"silhouetteColor":"orange"}}}""", "x"));
+    }
+    [Fact]
     public void ExplicitFrameScheduleUsesMoveTicksAndLeavesDefaultTimelineUnchanged()
     {
         var binding = SpriteBinding.Parse("""

@@ -62,6 +62,7 @@ public partial class BattleScene : Node2D
 
     private readonly FeedbackDirector _feedback = new();
     private readonly ThrowVisual _throwVisual = new();
+    private ProjectileVisualLayer _projectileVisuals = null!;
     private readonly HitShake _shake = new();
     private readonly PresentationFrameBuffer _frameBuffer = new();
     private CombatFeedbackLayer _fx = null!;
@@ -97,6 +98,8 @@ public partial class BattleScene : Node2D
         _debugBoxes = new DebugBoxDrawer { Enabled = _showDebugBoxes };
         AddChild(_debugBoxes);
 
+        _projectileVisuals = new ProjectileVisualLayer { Name = "ProjectileVisuals" };
+        AddChild(_projectileVisuals);
         _fx = new CombatFeedbackLayer { Name = "CombatFx" };
         AddChild(_fx);
         int hudIndex = GetNodeOrNull<Node>("Hud")?.GetIndex() ?? GetChildCount() - 1;
@@ -785,6 +788,11 @@ public partial class BattleScene : Node2D
         FighterState p1 = state?.Fighter(0) ?? FighterState.Create(0, 1000, -120, Facing.Right);
         FighterState p2 = state?.Fighter(1) ?? FighterState.Create(1, 1000, 120, Facing.Left);
         PlaceFighters(p1, p2, state?.Frame ?? 0);
+        if (state is not null && !state.Round.IsFinished)
+            _projectileVisuals.Apply(state, _visual1, _visual2, new Vector2(640f, 560f) +
+                new Vector2(_shakeOffset.X, _shakeOffset.Y));
+        else
+            _projectileVisuals.Clear();
 
         if (_hudLabel is not null)
             _hudLabel.Text = BuildHud();
@@ -1292,6 +1300,7 @@ public partial class BattleScene
         for (int i = 0; i < frames.Count; i++)
         {
             _throwVisual.Observe(frames[i].StateAfter, frames[i].Events);
+            _projectileVisuals.Observe(frames[i].StateAfter);
             _visual1?.ObserveFrame(frames[i], 0);
             _visual2?.ObserveFrame(frames[i], 1);
             if (HasArg("--visual-audit"))
@@ -1374,6 +1383,7 @@ public partial class BattleScene
     private void ResetFeedbackLayer()
     {
         _throwVisual.Reset();
+        _projectileVisuals.Clear();
         _frameBuffer.Clear();
         _fx.Clear();
         _shake.Reset();

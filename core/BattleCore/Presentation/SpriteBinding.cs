@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace NewKOF.BattleCore.Presentation;
 
 public sealed record SpriteClipBinding(int Action, bool MoveClock, int StartTick, int FirstFrame, int? LastFrame, bool Loop,
-    IReadOnlyList<int>? FrameSchedule = null)
+    IReadOnlyList<int>? FrameSchedule = null, int OffsetX = 0, int OffsetY = 0, string? SilhouetteColor = null)
 {
     public int FrameAt(SpriteTimeline timeline, int elapsed, int frameCount)
     {
@@ -65,7 +65,13 @@ public sealed class SpriteBinding
                     throw new ArgumentException("Invalid frame schedule.");
                 schedule = Array.AsReadOnly(values);
             }
-            clips.Add(item.Name, new SpriteClipBinding(action, clock == "move", start, first, last, loop, schedule));
+            int offsetX = c.ValueKind == JsonValueKind.Object && c.TryGetProperty("offsetX", out var cx) ? cx.GetInt32() : 0;
+            int offsetY = c.ValueKind == JsonValueKind.Object && c.TryGetProperty("offsetY", out var cy) ? cy.GetInt32() : 0;
+            string? color = c.ValueKind == JsonValueKind.Object && c.TryGetProperty("silhouetteColor", out var sc) ? sc.GetString() : null;
+            if (Math.Abs((long)offsetX) > 8192 || Math.Abs((long)offsetY) > 8192 ||
+                (color is not null && (color.Length != 7 || color[0] != '#' || !color.Skip(1).All(char.IsAsciiHexDigit))))
+                throw new ArgumentException("Invalid clip appearance.");
+            clips.Add(item.Name, new SpriteClipBinding(action, clock == "move", start, first, last, loop, schedule, offsetX, offsetY, color));
         }
         if (fallback is not null && !clips.ContainsKey(fallback)) throw new ArgumentException("Unknown fallback clip.");
         var moves = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);

@@ -104,6 +104,12 @@
       "loop": false,
       "frameSchedule": [0, 1, 2, 3, 5, 6, 7, 7, 7, 7, 7, 8, 8, 8, 9, 9, 9]
     },
+    "projectile_Fireball": {
+      "action": 1070,
+      "offsetX": 16,
+      "offsetY": 48,
+      "silhouetteColor": "#FFBC5B"
+    },
     "temp_rising": {
       "action": 1200,
       "clock": "move",

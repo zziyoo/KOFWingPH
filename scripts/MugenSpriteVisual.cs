@@ -49,12 +49,41 @@ internal sealed class MugenSpriteVisual
                 action.LoopStart, clip.Loop, clip.FirstFrame, clip.LastFrame);
             _clips.Add(name, (clip, action, timeline));
         }
-        _sprite = new Sprite2D { Centered = false, RegionEnabled = true,
+        (_sprite, _flashMaterial) = CreateSprite(root);
+    }
+
+    private MugenSpriteVisual(Node2D root, MugenSpriteVisual source)
+    {
+        _directory = source._directory;
+        _scale = source._scale;
+        _binding = source._binding;
+        _sprites = source._sprites;
+        _loadTexture = source._loadTexture;
+        _clips = source._clips;
+        (_sprite, _flashMaterial) = CreateSprite(root);
+    }
+
+    public MugenSpriteVisual CreateCompanion(Node2D root) => new(root, this);
+
+    private static (Sprite2D Sprite, ShaderMaterial Material) CreateSprite(Node2D root)
+    {
+        var sprite = new Sprite2D { Centered = false, RegionEnabled = true,
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest, Visible = false };
-        _flashMaterial = new ShaderMaterial { Shader = new Shader { Code =
-            "shader_type canvas_item; uniform bool flash = false; void fragment() { if (flash) { COLOR.rgb = vec3(1.0); } }" } };
-        _sprite.Material = _flashMaterial;
-        root.AddChild(_sprite);
+        var material = new ShaderMaterial { Shader = new Shader { Code = """
+            shader_type canvas_item;
+            uniform bool flash = false;
+            uniform vec4 silhouette : source_color = vec4(0.0);
+            void fragment() {
+                if (flash) {
+                    COLOR.rgb = vec3(1.0);
+                } else if (silhouette.a > 0.0) {
+                    COLOR.rgb = silhouette.rgb;
+                }
+            }
+            """ } };
+        sprite.Material = material;
+        root.AddChild(sprite);
+        return (sprite, material);
     }
 
     public static MugenSpriteVisual? TryLoad(Node2D root, string fighterId, bool required = false,
@@ -161,8 +190,11 @@ internal sealed class MugenSpriteVisual
                 return Missing($"invalid atlas region in {clip}");
             _sprite.Texture = texture;
             _sprite.RegionRect = new Rect2(rx, ry, rw, rh);
-            _sprite.Position = new Vector2(face * (x + _binding.OffsetX + (h ? ox : -ox)) * _scale, (y + _binding.OffsetY + (v ? oy : -oy)) * _scale);
+            _sprite.Position = new Vector2(face * (x + _binding.OffsetX + mapped.Clip.OffsetX + (h ? ox : -ox)) * _scale,
+                (y + _binding.OffsetY + mapped.Clip.OffsetY + (v ? oy : -oy)) * _scale);
             _sprite.Scale = new Vector2(face * (h ? -_scale : _scale), v ? -_scale : _scale);
+            _flashMaterial.SetShaderParameter("silhouette", mapped.Clip.SilhouetteColor is string color
+                ? Color.FromHtml(color) : Colors.Transparent);
             _sprite.Visible = true;
             return true;
         }

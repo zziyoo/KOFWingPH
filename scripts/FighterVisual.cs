@@ -48,6 +48,7 @@ public sealed class FighterVisual
 
     /// <summary>当前使用的表现配置。</summary>
     public AnimationSet AnimationSet => _set;
+    internal MugenSpriteVisual? SpriteSource => _sprite;
 
     /// <summary>当前动画名（诊断/HUD 用）。</summary>
     public string CurrentClip { get; private set; } = "-";
