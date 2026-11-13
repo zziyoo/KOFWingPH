@@ -34,11 +34,13 @@ $more = $more | ForEach-Object { "default-crouch-heavy-wave-$_" }
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage23 -Prepare -LastFrame 185 -RunDirectory local-mugen/stage23-reference-supplement -Cases $more
 $boundaries = @('default-crouch-heavy-wave-whiff-8','default-crouch-heavy-wave-incoming-wave-20')
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage23 -Prepare -LastFrame 185 -RunDirectory local-mugen/stage23-reference-boundaries -Cases $boundaries
-$final = @('whiff-7','rising-upper-11','rising-upper-18','guard-release-22','crouch-guard-release-22','down-forward-both-0')
+$final = @('whiff-7','rising-upper-11','rising-upper-18','guard-release-22','crouch-guard-release-22')
 $final = $final | ForEach-Object { "default-crouch-heavy-wave-$_" }
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage23 -Prepare -LastFrame 185 -RunDirectory local-mugen/stage23-reference-final-probes -Cases $final
-py tools/Stage23Reference/Check-Traces.py local-mugen/stage23-reference/results local-mugen/stage23-reference-supplement/results local-mugen/stage23-reference-boundaries/results local-mugen/stage23-reference-final-probes/results
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage23 -Prepare -LastFrame 185 -RunDirectory local-mugen/stage23-reference-combined-input -Cases 'default-crouch-heavy-wave-down-forward-both-0'
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage23 -Prepare -LastFrame 185 -RunDirectory local-mugen/stage23-reference-priority-v2 -Cases 'default-crouch-heavy-wave-dual-button-0'
+py tools/Stage23Reference/Check-Traces.py local-mugen/stage23-reference/results local-mugen/stage23-reference-supplement/results local-mugen/stage23-reference-boundaries/results local-mugen/stage23-reference-final-probes/results local-mugen/stage23-reference-combined-input/results
 py tools/Stage23Reference/Check-Traces.py local-mugen/stage23-reference/results --extract-body local-mugen/stage23-reference-body/results
 ```
 
-45 条原版轨迹和逐场校验哈希位于上述结果目录。本轮实际运行的前下双键探针单独保存在 `local-mugen/stage23-reference-combined-input/results`，校验时额外传入该目录。独立本体子集从原始运行提取，保留逐场日志和哈希。早期主运行的双键轨迹以 F5 的提交状态和时钟确认 State 400 入口，独立复跑 `local-mugen/stage23-reference-priority-v2/results` 也记录了 F5 的 State 10→400 转换事件。
+45 条原版轨迹和逐场校验哈希位于上述五个校验目录。独立本体子集从原始运行提取，保留逐场日志和哈希。早期主运行的双键轨迹以 F5 的提交状态和时钟确认 State 400 入口，独立复跑 `local-mugen/stage23-reference-priority-v2/results` 也记录了 F5 的 State 10→400 转换事件。该复跑供图形工具优先读取，45 条轨迹的转换和统计只计主运行一次。

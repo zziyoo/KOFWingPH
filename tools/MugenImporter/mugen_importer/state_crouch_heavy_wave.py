@@ -202,6 +202,7 @@ def build_profile(audit, native, fighter, binding, mode, *, with_cancel=True):
     fighter, binding = copy.deepcopy((fighter, binding))
     fighter['fighterId'], binding['visualId'] = PRESETS[mode]
     fighter['displayName'] = f'Terry Crouching Heavy ({mode})'
+    fighter['useCommandPriority'] = True
     commands = {command['commandId']: command for command in fighter['commands']}
     require(commands['5B']['buttons'] == ['HeavyPunch'] and commands['5A']['priority'] > commands['5B']['priority'],
             'frozen normal CMD priority or heavy punch input differs')

@@ -209,7 +209,7 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_wave.p
 
 ## 阶段 23 蹲重拳与弱 Power Wave
 
-转换核对六份阶段 22 冻结 JSON 的哈希，以及原始 State 410 的 CNS/CMD、Action 410 和站／蹲受击素材。先按[原版参考](STAGE23_REFERENCE.md)采集轨迹。若需分开校验本体，将输出指定为独立路径并加 `--body-only`。
+转换核对六份阶段 22 冻结 JSON 的哈希，以及原始 State 410 的 CNS/CMD、Action 410 和站／蹲受击素材。先按原版参考采集轨迹。如果本地的阶段 22 文件缺失或哈希不符，先按上一节的命令生成冻结预设。若需分开校验本体，将输出指定为独立路径并加 `--body-only`。 [原版参考](STAGE23_REFERENCE.md)
 
 ```powershell
 $env:PYTHONPATH = 'tools/MugenImporter'

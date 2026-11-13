@@ -62,6 +62,7 @@ def baseline(mode):
     fighter = {
         'moves': [stand, wave, interrupt] if mode == 'default' else [stand, interrupt],
         'commands': commands,
+        'useCommandPriority': mode == 'default',
         'groundHurtboxes': {'crouchRise': [{'frames': 4, 'boxes': []}]},
         'movement': {'groundReaction': {'velocityRetention': {'numerator': 85, 'denominator': 100},
                                        'lastHitStepScale': AUDIT['lastHitStepScale']}},
@@ -129,6 +130,7 @@ class StateCrouchHeavyWaveTests(unittest.TestCase):
     def test_reserved_310_candidate_beats_normal_buttons_but_not_weak_wave(self):
         for mode in ('default', 'mode2'):
             fighter, _ = build_profile(AUDIT, NATIVE, *baseline(mode), mode)
+            self.assertIs(fighter['useCommandPriority'], True)
             commands = {command['commandId']: command for command in fighter['commands']}
             reserve = commands[RESERVED_RISING_UPPER]
             self.assertEqual((['DownForward'], ['HeavyPunch'], True, 0), tuple(reserve[key] for key in
