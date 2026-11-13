@@ -4,6 +4,8 @@
 > 最后更新：2026-11-08（阶段12确定性AI；Debug/Release各1172项通过；StateVersion15/CoreVersion16保持）
 
 > 2026-11-10 阶段补记：13C-A 动作审查/浏览器交互预览通过（Python30项、独立有窗口Edge35项），详见 PROGRESS.md 最终13C-A记录及 MUGEN_IMPORT.md。13C-B/C和完整13C尚未通过，不沿用浏览器验收当作Godot战斗图形验收。
+>
+> 2026-11-13 更新：13C-B 真实 Godot 验收 9/9 PASS，专项 58 项、全量 1195 项、Debug 与 Vulkan 像素夹具通过。完整 13C 尚需 13C-C 与最终跨阶段门禁。
 
 ---
 
@@ -1566,3 +1568,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 最终命令从 tools/MugenImporter 执行：`python -m unittest discover -s tests -v`（30通过）；`python browser_acceptance.py --manifest ../../data/imported-characters/terry98/manifest.json --evidence ../../shots/13c-a`（35通过）。本地图片/自动化结果/HTML在shots/13c-a，不提交第三方图片。
 - Terry仍有126个缺图帧、4个透明图片引用、104个原点警告、重复动作5061/5910和重复Sprite30583,0；工具准确显示这些缺陷，不意味着原素材修复。对合法共享不报错；异常原点/超大图片仅警告需人工复查。所有原资源文件哈希在重复生成前后相同。
 - 开始B前审查现有Terry binding：重攻击210、特殊1000/1100、下段430及投技-999仍是13B临时映射/回退。必须从原素材确认语义后绑定，不能增加Terry战斗规则；StateVersion15/CoreVersion16保持。保留project.godot既有工作区修改，阶段提交只纳入相应文件。
+- A已提交并推送：`e4ea3e10a196e9c4561dca365eb8825f1b88caf8`。B开始后的未提交工作：profiles/terry98.binding.json和本地binding修正站防150/空防132/空防受击152/升龙1200（1100实际是Burn Knuckle）；原binding备份local-mugen/13c-b-binding-before.json。真实Godot623注入已显示1200，截图shots/13c_b_rising.png；仅属B局部验证，未通过B/C及完整13C，详见PROGRESS.md末节。
+- 未提交的SpriteTimeline修复非循环末尾零时长帧错误显示；新增失败复现后相关17项专项测试通过。B仍须完成真实Godot动画连续性、边界及多场景验收，C尚未开始。
+- 防御姿态表现层checkpoint `1a1d3b9` 已推送：在Blocked/ProjectileBlocked事件锁存姿态，配置guard_crouch=151；站/蹲防、松键保持及左右席蹲防有Godot证据。21项专项通过；连续/多段防御、剩余B验收及C尚未完成。详情见PROGRESS末节和STAGE13C_B_ACCEPTANCE.md。
+
+### 13C-B 正式验收交接（2026-11-13）
+
+- 九项结果和本地复现参数、GPU 图像、逐帧日志见 `docs/STAGE13C_B_ACCEPTANCE.md`。工作区 `project.godot` 既有差异继续保留。
+- C 从投技结果驱动的双方演出、飞行道具实体外观及现有事件特效入手。现有投技绑定明确回退，飞行道具在 F2 开启时可显示权威碰撞盒。B 的角色动画与场景证据已通过，C 的演出独立验收。

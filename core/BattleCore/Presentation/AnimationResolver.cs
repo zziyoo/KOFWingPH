@@ -105,7 +105,7 @@ public sealed class FighterVisualClock
 ///
 /// <para>优先级：<br/>
 /// ① 招式状态（Startup / Active / Recovery）且有该 MoveId 的配置 → 对应段；<br/>
-/// ② 站立且带水平速度 → <c>Walking</c>（若配置了）；<br/>
+/// ② 站立且有步行位移 → <c>Walking</c>（若配置了）；<br/>
 /// ③ 逻辑状态名（<see cref="FighterLogicState"/> 的 ToString）——招式缺配置时就靠它回落到
 /// 该阶段的通用动画；<br/>
 /// ④ 仍未命中 → 兜底动画（<c>idle</c>）。</para>
@@ -118,10 +118,11 @@ public static class AnimationResolver
     /// <param name="fighter">权威角色状态（只读）。</param>
     /// <param name="set">表现配置（缺失时用 <see cref="AnimationSet.CreateFallback"/>）。</param>
     /// <param name="visualFrame">表现时钟的当前值（用于非招式循环动画）。</param>
-    public static ResolvedPose Resolve(FighterState fighter, AnimationSet set, int visualFrame)
+    public static ResolvedPose Resolve(FighterState fighter, AnimationSet set, int visualFrame,
+        CommandDirection? walkDirection = null)
     {
         ArgumentNullException.ThrowIfNull(set);
-        string clipName = ResolveClipName(fighter, set);
+        string clipName = ResolveClipName(fighter, set, walkDirection);
         AnimationClip clip = set.FindClip(clipName) ?? set.FallbackClip;
 
         int elapsed = fighter.IsInMove
@@ -133,7 +134,8 @@ public static class AnimationResolver
     }
 
     /// <summary>解析应播放的动画名（缺失时降级，不抛异常）。</summary>
-    public static string ResolveClipName(FighterState fighter, AnimationSet set)
+    public static string ResolveClipName(FighterState fighter, AnimationSet set,
+        CommandDirection? walkDirection = null)
     {
         ArgumentNullException.ThrowIfNull(set);
 
@@ -156,9 +158,9 @@ public static class AnimationResolver
             set.FindClip("air_guard") is not null)
             return "air_guard";
 
-        // ② 站立 + 有水平速度 = 行走（贴地把 PositionY 作为判据，空中不算）。
+        // ② 正常地面步行只提交坐标，不会写入 VelocityX。
         if (fighter.LogicState == FighterLogicState.Standing
-            && fighter.VelocityX != FixedPoint.Zero
+            && (walkDirection is CommandDirection.Forward or CommandDirection.Back || fighter.VelocityX != FixedPoint.Zero)
             && fighter.PositionY == FixedPoint.Zero)
         {
             if (set.States.TryGetValue("Walking", out string? walking))
@@ -174,5 +176,22 @@ public static class AnimationResolver
         if (fighter.IsInMove && set.States.TryGetValue("Startup", out string? startup))
             return startup;
         return set.FallbackClip.Name;
+    }
+
+    /// <summary>识别当前提交帧的地面步行，排除无方向输入的推挤与落地位移。</summary>
+    public static CommandDirection? ResolveWalkDirection(FighterState before, FighterState after)
+    {
+        if (after.LogicState != FighterLogicState.Standing || after.PositionY != FixedPoint.Zero ||
+            before.LogicState.IsAirborneLike() || before.PositionX == after.PositionX)
+            return null;
+
+        var directions = after.RecognitionState.Directions;
+        if (directions.Count == 0)
+            return null;
+
+        // 识别记录使用帧开始朝向，位移也必须用同一朝向解释。
+        bool forward = (after.PositionX > before.PositionX) == (before.Facing == Facing.Right);
+        CommandDirection expected = forward ? CommandDirection.Forward : CommandDirection.Back;
+        return directions[^1].Direction == expected ? expected : null;
     }
 }

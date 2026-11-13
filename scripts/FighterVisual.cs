@@ -2,6 +2,8 @@ using Godot;
 using NewKOF.BattleCore.Presentation;
 using NewKOF.BattleCore.State;
 using NewKOF.BattleCore.Combat;
+using NewKOF.BattleCore.Commands;
+using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.Simulation;
 
 namespace NewKOF;
@@ -26,6 +28,7 @@ public sealed class FighterVisual
     private MugenSpriteVisual? _sprite;
     private readonly VisualFlash _flash = new();
     private readonly GuardVisualPose _guardPose = new();
+    private CommandDirection? _walkDirection;
 
     private readonly string? _visualOverride;
     private readonly string? _overrideFighter;
@@ -57,17 +60,31 @@ public sealed class FighterVisual
         _set = set;
         _sprite?.Dispose();
         _sprite = MugenSpriteVisual.TryLoad(_root, VisualId(set), OverrideApplies(set));
-        _clock.Reset();
-        _flash.Reset();
-        _guardPose.Reset();
+        Reset();
     }
 
     private string VisualId(AnimationSet set) => SpriteBinding.SelectVisualId(set.FighterId, _visualOverride, _overrideFighter);
     private bool OverrideApplies(AnimationSet set) => _visualOverride is not null &&
         (_overrideFighter is null || _overrideFighter == set.FighterId);
-    private string SpriteClip(FighterState fighter, string clip) =>
-        fighter.LogicState == FighterLogicState.Blockstun && _guardPose.Crouching &&
-        _sprite?.HasClip("guard_crouch") == true ? "guard_crouch" : clip;
+    private string SpriteClip(FighterState fighter, string clip)
+    {
+        if (fighter.LogicState == FighterLogicState.Blockstun && _guardPose.Crouching &&
+            _sprite?.HasClip("guard_crouch") == true)
+            return "guard_crouch";
+        if (clip == "walk" && _walkDirection == CommandDirection.Back &&
+            _sprite?.HasClip("walk_back") == true)
+            return "walk_back";
+        if (clip == "jump" && _sprite is not null)
+        {
+            string variant = fighter.LogicState == FighterLogicState.PreJump ? "pre_jump"
+                : fighter.VelocityX == FixedPoint.Zero ? clip
+                : (fighter.VelocityX > FixedPoint.Zero) == (fighter.Facing == Facing.Right)
+                    ? "jump_forward" : "jump_back";
+            if (_sprite.HasClip(variant))
+                return variant;
+        }
+        return clip;
+    }
 
     /// <summary>重置动画时钟（新回合/新交锋）。</summary>
     public void Reset()
@@ -75,6 +92,7 @@ public sealed class FighterVisual
         _clock.Reset();
         _flash.Reset();
         _guardPose.Reset();
+        _walkDirection = null;
         _sprite?.SetFlash(false);
     }
 
@@ -94,21 +112,24 @@ public sealed class FighterVisual
     {
         FighterState before = frame.StateBefore.Fighter(fighterIndex);
         FighterState after = frame.StateAfter.Fighter(fighterIndex);
+        bool frozen = before.HitstopRemainingFrames > 0;
+        if (!frozen || after.LogicState != before.LogicState)
+            _walkDirection = AnimationResolver.ResolveWalkDirection(before, after);
         bool blocked = frame.Events.Any(e => e.TargetFighterId == fighterIndex &&
             e.Type is BattleEventType.Blocked or BattleEventType.ProjectileBlocked);
         var directions = after.RecognitionState.Directions;
-        _guardPose.Observe(before.LogicState, after.LogicState, before.HitstopRemainingFrames > 0,
+        _guardPose.Observe(before.LogicState, after.LogicState, frozen,
             directions.Count > 0 ? directions[^1].Direction : null, blocked);
+        string clip = SpriteClip(after, AnimationResolver.ResolveClipName(after, _set, _walkDirection));
         _clock.Observe(
             frame.LogicFrame,
             after.LogicState,
             after.MoveId,
-            before.HitstopRemainingFrames > 0,
-            AnimationResolver.ResolveClipName(after, _set));
+            frozen,
+            clip);
         if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
         {
-            string clip = SpriteClip(after, AnimationResolver.ResolveClipName(after, _set));
-            GD.Print($"[SpriteFrameAudit] fighter={fighterIndex} logic={frame.LogicFrame} state={after.LogicState} move={after.MoveId ?? "-"} frozen={before.HitstopRemainingFrames > 0} facing={after.Facing} " +
+            GD.Print($"[SpriteFrameAudit] fighter={fighterIndex} logic={frame.LogicFrame} state={after.LogicState} move={after.MoveId ?? "-"} frozen={frozen} facing={after.Facing} " +
                 _sprite.Describe(clip, _clock.VisualFrame, after.MoveElapsedFrames, after.IsInMove, after.MoveId, after.LogicState.ToString()));
         }
     }
@@ -119,7 +140,7 @@ public sealed class FighterVisual
         // 时钟只由 ObserveFrame 推进：渲染频率、重复渲染都不会改变动画时间线。
         int visualFrame = _clock.VisualFrame;
 
-        ResolvedPose pose = AnimationResolver.Resolve(fighter, _set, visualFrame);
+        ResolvedPose pose = AnimationResolver.Resolve(fighter, _set, visualFrame, _walkDirection);
         PoseFrame frame = pose.Frame;
         string spriteClip = SpriteClip(fighter, pose.ClipName);
         CurrentClip = $"{pose.ClipName}#{pose.FrameIndex}";

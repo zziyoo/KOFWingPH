@@ -1,8 +1,11 @@
 using System.Text.Json.Nodes;
 using NewKOF.BattleCore.Combat;
+using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Data;
+using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.Presentation;
+using NewKOF.BattleCore.Simulation;
 using NewKOF.BattleCore.State;
 using Xunit;
 
@@ -112,6 +115,37 @@ public class AnimationTests
             Fighter(state: FighterLogicState.PreJump), set));
         Assert.Equal("jump", AnimationResolver.ResolveClipName(
             Fighter(state: FighterLogicState.Airborne, positionY: 80), set));
+    }
+
+    [Fact]
+    public void Walking_UsesCommittedMovementWithoutVelocity_AndDistinguishesBothDirections()
+    {
+        var simulation = new BattleSimulation();
+        BattleState initial = BattleState.CreateDefault();
+        AnimationSet set = Load("Kai");
+        var forward = simulation.Step(initial, new FrameInput(0, InputBits.Right, InputBits.Left)).State;
+        var backward = simulation.Step(forward, new FrameInput(1, InputBits.Left, InputBits.Right)).State;
+        var stopped = simulation.Step(backward, new FrameInput(2, InputBits.None, InputBits.None)).State;
+        for (int side = 0; side < 2; side++)
+        {
+            FighterState advance = forward.Fighter(side);
+            FighterState retreat = backward.Fighter(side);
+            Assert.Equal(FixedPoint.Zero, advance.VelocityX);
+            Assert.NotEqual(initial.Fighter(side).PositionX, advance.PositionX);
+            var forwardDirection = AnimationResolver.ResolveWalkDirection(initial.Fighter(side), advance);
+            var backwardDirection = AnimationResolver.ResolveWalkDirection(advance, retreat);
+            var stopDirection = AnimationResolver.ResolveWalkDirection(retreat, stopped.Fighter(side));
+            Assert.Equal(CommandDirection.Forward, forwardDirection);
+            Assert.Equal(CommandDirection.Back, backwardDirection);
+            Assert.Null(stopDirection);
+            Assert.Equal("walk", AnimationResolver.ResolveClipName(advance, set, forwardDirection));
+            Assert.Equal("walk", AnimationResolver.ResolveClipName(retreat, set, backwardDirection));
+            Assert.Equal("idle", AnimationResolver.ResolveClipName(stopped.Fighter(side), set, stopDirection));
+        }
+        FighterState idle = stopped.Fighter(0);
+        Assert.Null(AnimationResolver.ResolveWalkDirection(idle, idle with { PositionX = idle.PositionX - FixedPoint.One }));
+        Assert.Null(AnimationResolver.ResolveWalkDirection(
+            forward.Fighter(0) with { LogicState = FighterLogicState.Airborne }, backward.Fighter(0)));
     }
 
     [Fact]

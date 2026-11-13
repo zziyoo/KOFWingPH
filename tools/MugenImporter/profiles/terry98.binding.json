@@ -9,11 +9,26 @@
     "walk": {
       "action": 20
     },
+    "walk_back": {
+      "action": 21
+    },
     "crouch": {
       "action": 11
     },
     "jump": {
       "action": 41,
+      "loop": false
+    },
+    "pre_jump": {
+      "action": 40,
+      "loop": false
+    },
+    "jump_forward": {
+      "action": 42,
+      "loop": false
+    },
+    "jump_back": {
+      "action": 43,
       "loop": false
     },
     "atk_startup": {
@@ -30,6 +45,12 @@
       "action": 200,
       "clock": "move",
       "loop": false
+    },
+    "backdraft": {
+      "action": 200,
+      "clock": "move",
+      "loop": false,
+      "frameSchedule": [0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 2]
     },
     "heavy_startup": {
       "action": 210,
@@ -74,7 +95,14 @@
     "temp_fireball": {
       "action": 1000,
       "clock": "move",
-      "loop": false
+      "loop": false,
+      "frameSchedule": [0, 1, 2, 4, 6, 7, 7, 7, 7, 8, 8, 8, 9, 9, 9]
+    },
+    "projectile_cast": {
+      "action": 1000,
+      "clock": "move",
+      "loop": false,
+      "frameSchedule": [0, 1, 2, 3, 5, 6, 7, 7, 7, 7, 7, 8, 8, 8, 9, 9, 9]
     },
     "temp_rising": {
       "action": 1200,
@@ -102,9 +130,10 @@
       ]
     },
     "temp_sweep": {
-      "action": 430,
+      "action": 440,
       "clock": "move",
-      "loop": false
+      "loop": false,
+      "frameSchedule": [0, 1, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 6]
     },
     "unmapped_throw": {
       "action": -999,
@@ -116,15 +145,20 @@
     }
   },
   "moves": {
+    "BackDraft": {
+      "Startup": "backdraft",
+      "Active": "backdraft",
+      "Recovery": "backdraft"
+    },
     "FireballPrototype": {
       "Startup": "temp_fireball",
       "Active": "temp_fireball",
       "Recovery": "temp_fireball"
     },
     "Fireball": {
-      "Startup": "temp_fireball",
-      "Active": "temp_fireball",
-      "Recovery": "temp_fireball"
+      "Startup": "projectile_cast",
+      "Active": "projectile_cast",
+      "Recovery": "projectile_cast"
     },
     "DragonPunchPrototype": {
       "Startup": "temp_rising",

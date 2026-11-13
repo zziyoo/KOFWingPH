@@ -657,3 +657,9 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - D155：res 图集经 ResourceLoader 缓存，注入式加载接口为后续外部资源保留边界；轴点 = AIR 偏移与 SFF 原点按 localcoord、全局偏移、比例及翻转组合，权威状态只读。
 - D156：角色状态、动作名称切换驱动视觉时钟；招式可用 MoveElapsedFrames 跨逻辑阶段连续播放。Hitstop 沿用提交帧的帧前状态；已停止的回合只让闪白余时收尾，不推进角色动画。
 - D157：Hit、ProjectileHit、ThrowHit 使用保留 alpha 的白色 shader，回合及换人复位。Godot 像素夹具验证白色、透明和恢复；原始第三方素材及本地绑定不纳入 Git。
+
+### 阶段 13C-B 视觉投影
+
+- 地面走路由同一提交帧的实际位移和已识别方向投影，原有状态与速度契约保持。向后步行、起跳预备和方向跳跃可选用素材变体，旧绑定兼容原 clip。
+- 成功防御事件锁存当帧姿态，下一次合法防御可更新。硬直结束、换人或重开复位。站防和蹲防仍共用权威 Blockstun。
+- `frameSchedule` 在绑定中提供显式 move tick 到源帧的映射。Kai/Rei 的招式时序、HitStop 和取消由权威状态驱动。具体绑定与 Vulkan 验收见 `docs/STAGE13C_B_ACCEPTANCE.md`。

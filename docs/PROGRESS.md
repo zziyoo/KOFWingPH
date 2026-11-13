@@ -2576,3 +2576,25 @@ HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本�
 - 真实 Terry：856动作区块、854不同编号、3788帧；编号/帧数/全部时长/偏移/尺寸/原点与原 Manifest 逐项一致。243条可定位诊断：缺图126、原点复查警告104、允许空白4、重复动作条目4（5061/5910）、全透明4、重复Sprite1。无缺页、损坏图集、越界区域、索引不匹配或非法链接。上述素材缺陷未伪造补齐。
 - 两次生成 JSON/HTML 字节相同，原资源目录全部文件 SHA-256 保持。预览 HTML 嵌入本地图集；真实入口 `file:///C:/Users/32360/Desktop/NewKOF/shots/13c-a/terry-preview.html`。截图逐张检查：`shots/13c-a/terry-idle.png`、`terry-attack-mirrored.png`、`terry-missing.png`；原始自动化结果在 `browser-results.json`。这是浏览器真实交互验收，不是 Godot 战斗图形验收。
 - 只读复核发现中间-1帧阻塞手动单步，已修复并补浏览器用例，复核确认无未解决重要问题。13C-B/C 后续仍须独立实现和 Godot 图形验收；本阶段没有更改权威战斗或 project.godot 原有修改。
+
+### 13C-B 历史验收记录
+- 13C-A 独立提交 `e4ea3e10a196e9c4561dca365eb8825f1b88caf8` 已推送，ls-remote 核实本地/远端相同。
+- 从本地ZIP的 Terry-N/Terry-S/common_kof.cns 只读核查素材含义：210确为远距离重拳；1100是Burn Knuckle，1200才是Rising Tackle；空防132、空中防御硬直152、站立防御硬直150。原资料仅用于辨认视觉动作，不导入其战斗规则。
+- `tools/MugenImporter/profiles/terry98.binding.json` 是未提交的B工作文件，本地binding已应用guard150/air_guard132/air_guard_hurt152/rising1200，原binding备份于local-mugen/13c-b-binding-before.json。投技-999仍明确回退；430仍为蹲轻脚代用，待后续处理。不得把此profile当成B最终配置。
+- `dotnet build NewKOF.csproj --no-restore` 成功，0警告0错误。真实Godot Mono 4.7.2 Vulkan/RTX3060运行：修正623输入注入后，日志确认DragonPunchPrototype的Startup→Active→Recovery，`shots/13c_b_rising.png` 显示1200升龙翻转姿态。首轮注入夹了中立方向，只触发轻拳，未计入升龙通过；后续正确623已复现。运行日志local-mugen/13c-b-rising.log。
+- B尚需核查步行方向/跳跃变体、特殊动作与逻辑时长匹配、终止恢复及双方场景；C的投技/飞行道具/特效与多环境图形验收尚未完成。没有改动战斗内核，完整13C不宣称通过。
+- 续测发现非循环 SpriteTimeline 在结尾存在零时长帧时错误停留于最后零帧；新增用例先复现期望1实际3，再修复为保持最后一个非零时长帧，全零序列保留既有回退。`dotnet test tests/BattleCore.Tests/BattleCore.Tests.csproj --filter "FullyQualifiedName~SpriteTimelineTests|FullyQualifiedName~SpriteBindingTests|FullyQualifiedName~SpriteFeedbackTests" --no-restore`：17通过，0失败、0跳过。属于表现时间线修改，不改战斗规则。尚未完成B阶段图形验收或提交。
+- 复跑上述17项全部通过，时间线修复与测试单独提交 `bfa48d1`（13C-B中间checkpoint，非阶段完成）。首次推送报 `Empty reply from server`。`dotnet build NewKOF.csproj --no-restore` 通过0警告0错误；Godot 4.7.2 Mono/Vulkan实测 `DragonPunchPrototype`，`shots/13c_b_checkpoint_rising.png` 与 `local-mugen/13c-b-checkpoint-rising.log` 为单帧及状态证据，不代表连续动作已验收。验收矩阵见 `docs/STAGE13C_B_ACCEPTANCE.md`。
+- 新增未提交的可选 `--sprite-frame-audit`：记录已提交逻辑帧投影和渲染调用的动作编号、帧、图片及持续时间；日志不等同于逐帧图像捕获。Debug构建0警告0错误。真实运行 `local-mugen/13c-b-timeline.log` 表明Action 1200原始13帧共41 tick，战斗动作18 tick后在帧7切回待机，后5帧未显示；升龙连续性目前失败，不能标记B通过。后续需解决视觉时长与状态恢复冲突并逐帧重新验证。
+- 根因证据：Kai的3/5/10在阶段04提交 `b622d0f` 已存在，JSON外置 `20d668e` 保持；Recovery结束按状态机B5同帧回待机。Terry原始Statedef 1200以AnimTime结束转1205，带独立运动和多段HitDef；不同角色规则不能据此修改Kai。分类为素材到原型的视觉绑定时长契约尚未定义，未发现明确允许加速/截断的项目设计依据；尚未实施修复或完成B验收。
+- 用户已确定18 tick视觉适配契约。未提交实现新增绑定 `frameSchedule` 显式逐tick帧表，只允许 move clock、非循环、无片段/偏移；其他绑定继续原时间线。Kai升龙使用 `[0,0,1,2,3,4,5,6,7,8,9,10,10,11,11,12,12,12]`，保留全部源帧并按3/5/10分段，原始帧时长刻意变化。19项相关测试通过、Debug构建通过；真实Godot逐逻辑帧日志匹配该序列，5个独立截图不构成逐帧连续图像，且截图与末条日志有约一帧偏移。HitStop/打断/取消/镜像、3v3及B完整图形验收均未完成，不能宣称PASS。
+- 适配及诊断checkpoint `8a21aea` 已提交推送。FramePostDraw缓冲采集为未提交取证代码：Godot `--fixed-fps 60` 下同次Vulkan运行采得升龙18个连续状态版本，见 `shots/13c_b_fixed_contact.png` 和 `local-mugen/13c-b-fixed.log`，但实时帧率采集中观察到状态跳过，不能以固定步长代替实时验收。另在1v1轻拳命中中验证双方HitStop4帧及受击画面，升龙HitStop/打断/取消、站蹲防御、镜像与3v3仍待验收。无B正式提交。
+- 取证代码 checkpoint `c6e32e6` 已提交推送，相关19项测试重跑通过。真实双Kai相杀在升龙Recovery产生双方4帧HitStop：Action1200 tick3/frame2冻结后恢复tick4/frame3；日志和图像见B矩阵。站/蹲防御真实运行均触发Blocked但都显示Action150，蹲防未用151，标记FAIL待修复；其余矩阵未完成，B未验收。
+- 防御视觉局部checkpoint `1a1d3b9`：Block事件时由表现层锁存该帧防御姿态，Blockstun期间按键变化不改变，退出/换人清除；可选guard_crouch绑定151。专项21通过，Debug构建0警告0错误。真实Godot Vulkan对照中站防150、蹲防151、松键后维持151并恢复待机，P1/P2蹲防均触发Blocked且无伤；证据见B矩阵。仍需连续/多段及其他B项目，13C-B未完成。
+
+### 13C-B 正式验收（2026-11-13）
+
+- 九项现有范围全部通过。提交帧步行位移驱动前后走 20/21，40/41/42/43 区分起跳与跳跃方向。440 取代 430 映射 Rei 重扫，Action 1000、200 对齐现有火球和 BackDraft 生效时机。Kai 升龙继续用原 18 tick 适配。
+- Godot 4.7.2 Mono/Vulkan 实测连续与交替防御、冻结及恢复、单方冻结打断、命中取消、双席镜像、1v1 与 3v3 两次 KO 后换人。复现参数、逐帧日志、截图和旧绑定兼容证据见 `docs/STAGE13C_B_ACCEPTANCE.md`。
+- 专项 58/58、全量 1195/1195、Debug 0 警告 0 错误，原创 Vulkan 像素夹具通过。视觉覆盖开关两次运行的 69 条权威日志一致。保留 `project.godot` 既有差异。
+- Terry 缺图保留诊断。投技、飞行道具实体及演出特效继续由 13C-C 验收。

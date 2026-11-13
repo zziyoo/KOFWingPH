@@ -26,6 +26,10 @@ public partial class MugenVisualSmoke : Node2D
             Require(!visual.Apply("missing_atlas", 0, 0, false, false) && !sprite.Visible, "missing atlas fallback");
             Require(MugenSpriteVisual.TryLoad(root, "absent", false, "res://tests/fixtures/mugen/") is null, "absent visual fallback");
             Require(visual.Apply("hold", 20, 20, false, false) && sprite.Scale == new Vector2(1, -1), "non-loop hold");
+            Require(visual.Apply("trailing_zero", 20, 20, false, false) && sprite.Position == new Vector2(1, -4),
+                "trailing zero frame is skipped");
+            Require(visual.Apply("all_zero", 20, 20, false, false) && sprite.Position == new Vector2(5, -4),
+                "all-zero clip uses its final frame");
             visual.SetFlash(true);
             Require((bool)((ShaderMaterial)sprite.Material).GetShaderParameter("flash"), "flash on");
             visual.SetFlash(false);
@@ -67,9 +71,14 @@ public partial class MugenVisualSmoke : Node2D
         try
         {
             _gpuFrame++;
-            if (_gpuFrame is not (3 or 6 or 9)) return;
+            if (_gpuFrame is not (3 or 6 or 9 or 12 or 15)) return;
             var image = GetViewport().GetTexture().GetImage();
-            Color visible = image.GetPixel(136, 56), transparent = image.GetPixel(120, 40);
+            int visibleX = _gpuFrame == 15 ? 200 : 136;
+            int transparentX = _gpuFrame == 15 ? 136 : 200;
+            Color visible = image.GetPixel(visibleX, 56);
+            Color transparent = image.GetPixel(transparentX, 56);
+            Require(transparent.R < 0.05f && transparent.G < 0.05f && transparent.B < 0.05f, "non-selected frame is absent");
+            transparent = image.GetPixel(visibleX - 16, 40);
             Require(transparent.R < 0.05f && transparent.G < 0.05f && transparent.B < 0.05f, "transparent pixel preserved");
             if (_gpuFrame == 6)
                 Require(visible.R > 0.9f && visible.G > 0.9f && visible.B > 0.9f, "visible pixel is white");
@@ -77,6 +86,10 @@ public partial class MugenVisualSmoke : Node2D
                 Require(visible.R > 0.7f && visible.G < 0.3f && visible.B < 0.3f, "palette color restored");
             if (_gpuFrame == 3) _gpuVisual.SetFlash(true);
             else if (_gpuFrame == 6) _gpuVisual.SetFlash(false);
+            else if (_gpuFrame == 9)
+                Require(_gpuVisual.Apply("trailing_zero", 20, 20, false, false), "GPU trailing zero apply");
+            else if (_gpuFrame == 12)
+                Require(_gpuVisual.Apply("all_zero", 20, 20, false, false), "GPU all-zero apply");
             else { GD.Print("MUGEN_GPU_PIXELS_PASS"); GetTree().Quit(0); }
         }
         catch (Exception ex)

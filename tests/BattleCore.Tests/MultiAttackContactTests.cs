@@ -2,6 +2,7 @@ using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Commands;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Numerics;
+using NewKOF.BattleCore.Presentation;
 using NewKOF.BattleCore.Simulation;
 using NewKOF.BattleCore.State;
 using Xunit;
@@ -183,6 +184,26 @@ public class MultiAttackContactTests
         Assert.Equal(6, P2(after).StunRemainingFrames);
         Assert.DoesNotContain(result.Events, e => e.Type == BattleEventType.Hit);
         Assert.Equal(6, Assert.Single(result.Events, e => e.Type == BattleEventType.BlockstunStarted).Amount);
+    }
+
+    [Fact]
+    public void NextAttackWindowOfSameInstanceDoesNotReplaceLatchedGuard()
+    {
+        var sim = NewSim();
+        var initial = ActiveAt(elapsed: 0);
+        var first = sim.Step(initial, new FrameInput(0, InputBits.None, InputBits.Right | InputBits.Down));
+        var next = sim.Step(first.State, new FrameInput(1, InputBits.None, InputBits.Right));
+        Assert.Single(first.Events, e => e.Type == BattleEventType.Blocked);
+        Assert.Equal(0, Assert.Single(next.Contacts).AttackIndex);
+        Assert.DoesNotContain(next.Events, e => e.Type is BattleEventType.Blocked or BattleEventType.Hit);
+
+        var pose = new GuardVisualPose();
+        pose.Observe(P2(initial).LogicState, P2(first.State).LogicState, false, CommandDirection.DownBack,
+            first.Events.Any(e => e.Type == BattleEventType.Blocked));
+        pose.Observe(P2(first.State).LogicState, P2(next.State).LogicState, false, CommandDirection.Back,
+            next.Events.Any(e => e.Type == BattleEventType.Blocked));
+        Assert.True(pose.Crouching);
+        Assert.Equal(1000, P2(next.State).Health);
     }
 
     // ─────────────────────────────────────────────────────────────
