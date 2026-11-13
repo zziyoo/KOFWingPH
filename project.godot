@@ -1,6 +1,10 @@
 ; Engine configuration file.
-; NewKOF - 新拳皇式 2D 格斗游戏
-; 阶段 01：基础工程与占位战斗场景
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
 
@@ -12,22 +16,16 @@ run/main_scene="res://scenes/Battle.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 
-[dotnet]
-
-project/assembly_name="NewKOF"
-
 [display]
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
 
-[physics]
+[dotnet]
 
-common/physics_ticks_per_second=60
+project/assembly_name="NewKOF"
 
 [rendering]
 
-renderer/rendering_method="forward_plus"
-environment/defaults/default_clear_color=Color(0.09, 0.10, 0.14, 1)
+environment/defaults/default_clear_color=Color(0.09, 0.1, 0.14, 1)
