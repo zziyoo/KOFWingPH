@@ -1,0 +1,174 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"strconv"
+)
+
+var researchCase = os.Getenv("RESEARCH_CASE")
+var researchFrame = -1
+var researchBaseTick = -1
+var researchTraceFile *os.File
+var researchEncoder *json.Encoder
+
+func researchBegin() {
+	if researchCase == "" || (researchBaseTick < 0 && sys.roundState() != 2) {
+		return
+	}
+
+	if researchBaseTick < 0 {
+		researchBaseTick = sys.tickCount
+		distance, err := strconv.ParseFloat(os.Getenv("RESEARCH_DISTANCE"), 32)
+		if err != nil || distance <= 0 {
+			panic("RESEARCH_DISTANCE must be positive")
+		}
+		researchTraceFile, err = os.Create(os.Getenv("RESEARCH_TRACE"))
+		if err != nil {
+			panic(err)
+		}
+		researchEncoder = json.NewEncoder(researchTraceFile)
+		sys.randseed = 1337
+
+		for pn := 0; pn < 2; pn++ {
+			c := sys.chars[pn][0]
+			sign := float32(1 - 2*pn)
+			if researchCase == "mirror" {
+				sign = -sign
+			}
+			c.pos, c.facing = [3]float32{-sign * float32(distance) / 2, 0, 0}, sign
+			c.oldPos, c.interPos, c.vel = c.pos, c.pos, [3]float32{}
+		}
+	}
+
+	researchFrame = sys.tickCount - researchBaseTick
+	researchTrace("before-command")
+}
+
+func researchBits(pn int) InputBits {
+	if pn == 0 && researchFrame == 5 {
+		return IB_X
+	}
+	if pn == 1 && researchCase == "crouch-guard-held" && researchFrame >= 8 && researchFrame <= 28 {
+		return IB_PR | IB_PD
+	}
+	if pn == 1 && researchCase == "crouch-guard-late" && researchFrame >= 8 && researchFrame <= 25 {
+		return IB_PR | IB_PD
+	}
+	if pn == 1 && (researchCase == "guard" || researchCase == "crouch-guard") && researchFrame >= 5 && researchFrame <= 25 {
+		if researchCase == "crouch-guard" {
+			return IB_PR | IB_PD
+		}
+		return IB_PR
+	}
+	return 0
+}
+
+func researchInput(c *Char, original [14]bool) [14]bool {
+	if researchCase == "" || c == nil || c.helperIndex != 0 {
+		return original
+	}
+	return researchBits(c.playerNo).BitsToKeys()
+}
+
+func researchNumbers(numbers ...float32) []interface{} {
+	values := make([]interface{}, len(numbers))
+	for i, number := range numbers {
+		if !math.IsNaN(float64(number)) && !math.IsInf(float64(number), 0) {
+			values[i] = number
+		}
+	}
+	return values
+}
+
+func researchTrace(phase string) {
+	if researchEncoder == nil {
+		return
+	}
+	if phase != "before-command" && phase != "after-command" && phase != "after-collision" && phase != "after-globalTick" && phase != "end" && phase != "hitdef" {
+		return
+	}
+
+	chars := make([]map[string]interface{}, 0, 2)
+	for pn := 0; pn < 2; pn++ {
+		c := sys.chars[pn][0]
+		commands := map[string][]int32{}
+		cl := &c.cmd[c.playerNo]
+		for _, name := range []string{"x", "holdback", "holddown"} {
+			if idx, ok := cl.Names[name]; ok {
+				for _, command := range cl.Commands[idx] {
+					commands[name] = append(commands[name], command.curbuftime)
+				}
+			}
+		}
+		var frame interface{}
+		if af := c.curFrame; af != nil {
+			frame = map[string]interface{}{
+				"sprite": [2]int32{af.Group, af.Number}, "duration": af.Time,
+				"offset": [2]int32{af.Xoffset, af.Yoffset}, "clsn1": af.Clsn1, "clsn2": af.Clsn2,
+			}
+		}
+		var helpers []int32
+		for _, h := range sys.chars[pn][1:] {
+			if h.helperId == 40000 {
+				helpers = append(helpers, h.varGet(0).ToI())
+			}
+		}
+		chars = append(chars, map[string]interface{}{
+			"pn": pn + 1, "state": c.ss.no, "time": c.ss.time, "anim": c.animNo,
+			"elem": c.anim.curelem, "elemTime": c.anim.curelemtime, "frame": frame,
+			"pos": researchNumbers(c.pos[:]...), "vel": researchNumbers(c.vel[:]...), "facing": c.facing, "ctrl": c.scf(SCF_ctrl),
+			"raw": researchBits(pn), "commands": commands, "life": c.life,
+			"hitPause": c.hitPauseTime, "hitShake": c.ghv.hitshaketime,
+			"hitTime": c.ghv.hittime, "slideTime": c.ghv.slidetime, "ctrlTime": c.ghv.ctrltime,
+			"hitVel": researchNumbers(c.ghv.xvel, c.ghv.yvel), "damage": c.ghv.damage,
+			"guarded": c.ghv.guarded, "gethit": c.csf(CSF_gethit),
+			"guardFlag": c.scf(SCF_guard), "guardPointDamage": c.ghv.guardpoints,
+			"moveHit": c.moveHit(), "moveContact": c.moveContact(), "moveGuarded": c.moveGuarded(),
+			"moveType": c.ss.moveType, "stateType": c.ss.stateType,
+			"hitDef": map[string]interface{}{
+				"attr": c.hitdef.attr, "guardFlag": c.hitdef.guardflag,
+				"damage": c.hitdef.hitdamage, "guardDamage": c.hitdef.guarddamage,
+				"hitPause": c.hitdef.pausetime, "guardPause": c.hitdef.guard_pausetime,
+				"hitTime": c.hitdef.ground_hittime, "guardHitTime": c.hitdef.guard_hittime,
+				"guardCtrlTime": c.hitdef.guard_ctrltime, "groundVel": researchNumbers(c.hitdef.ground_velocity[:]...),
+				"guardVel": researchNumbers(c.hitdef.guard_velocity[:]...),
+			},
+			"vars": map[string]interface{}{
+				"var6": c.varGet(6).ToI(), "var12": c.varGet(12).ToI(), "var21": c.varGet(21).ToI(),
+				"var40": c.varGet(40).ToI(), "fvar7": c.fvarGet(7).ToF(), "helper40000var0": helpers,
+			},
+			"friction": researchNumbers(c.getStandFriction(), c.getCrouchFriction()),
+			"attackMul": c.attackMul[0], "attackBase": c.gi().attackBase, "finalDefense": c.finalDefense,
+		})
+	}
+	if err := researchEncoder.Encode(map[string]interface{}{
+		"case": researchCase, "frame": researchFrame, "phase": phase,
+		"tick": sys.tickCount, "matchTime": sys.matchTime, "roundState": sys.roundState(),
+		"chars": chars,
+	}); err != nil {
+		panic(err)
+	}
+}
+
+func researchHitDef(c *Char) {
+	if c.playerNo == 0 && c.helperIndex == 0 && c.ss.no == 200 {
+		researchTrace("hitdef")
+	}
+}
+
+func researchEnd() {
+	if researchEncoder == nil || !sys.tickNextFrame() {
+		return
+	}
+	researchTrace("end")
+	if researchFrame >= 65 {
+		if err := researchTraceFile.Close(); err != nil {
+			panic(err)
+		}
+		fmt.Fprintln(os.Stderr, "COMBAT_RESEARCH_DONE", researchCase)
+		os.Exit(0)
+	}
+}
