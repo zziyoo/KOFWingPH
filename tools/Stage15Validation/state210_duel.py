@@ -76,21 +76,22 @@ def alias(mode):
     return f"terry98-stage15-{mode}"
 
 
-def runtime_args(options, scene, output, sprites, modes):
+def runtime_args(options, scene, output, sprites, modes, visual_alias=alias, realtime_tail=18):
     fixed = options.fps == "fixed"
     capture = scene.captures if fixed else tuple(options.realtime_window or (50, 55))
     args = ["--path", ".", "--rendering-method", "forward_plus", "--rendering-driver", "vulkan",
             "--resolution", "960x540" if fixed else options.realtime_resolution]
     if fixed:
         args += ["--fixed-fps", "60"]
+    tail = 18 if fixed else realtime_tail
     args += ["--", "--visual-audit", "--sprite-frame-audit", "--capture-input-only", f"--duel={scene.half_distance}",
-             f"--shot={output.joinpath('end.png').as_posix()}", f"--shotframes={capture[1] + 18}"]
+             f"--shot={output.joinpath('end.png').as_posix()}", f"--shotframes={capture[1] + tail}"]
     if fixed:
         args += ["--entity-audit", "--move-audit", "--inputdiag"]
     for seat, mode in enumerate(modes, start=1):
         args.append(f"--p{seat}-fighter-file=res://{options.profile_dir}/{mode}.fighter.json")
         if sprites:
-            args.append(f"--p{seat}-visual={alias(mode)}")
+            args.append(f"--p{seat}-visual={visual_alias(mode)}")
     if sprites:
         args += [f"--capture-dir={output.joinpath('frames').as_posix()}",
                  f"--capture-start={capture[0]}", f"--capture-end={capture[1]}"]
@@ -200,10 +201,11 @@ def validate_moves(scene, events, committed, timelines, modes):
     return windows
 
 
-def validate_captures(scene, events, lines, directory, capture_range, timelines, modes, fixed):
+def validate_captures(scene, events, lines, directory, capture_range, timelines, modes, fixed,
+                      move_validator=validate_moves, check_reactions=True):
     committed = {(int(row["fighter"]), int(row["logic"]) + 1): row for row in audit_rows(lines, "SpriteFrameAudit")}
     rendered = {(int(row["fighter"]), int(row["logic"])): row for row in audit_rows(lines, "SpriteRenderAudit")}
-    windows = validate_moves(scene, events, committed, timelines, modes)
+    windows = move_validator(scene, events, committed, timelines, modes)
     captures = []
     for line in lines:
         match = CAPTURE.match(line)
@@ -236,7 +238,7 @@ def validate_captures(scene, events, lines, directory, capture_range, timelines,
     ):
         raise ValueError(f"no image with defender Action {scene.guard_action} during Blockstun")
     for event in events:
-        if event["kind"] != "Hit" or event["move"] != HEAVY:
+        if not check_reactions or event["kind"] != "Hit" or event["move"] != HEAVY:
             continue
         defender, contact = event["target"], event["frame"] + 1
         first = committed[defender, contact]
