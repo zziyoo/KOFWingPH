@@ -8,6 +8,7 @@
 
 - 近身空挥样本起始中心距 36，P2 F0 垂直跳，P1 F13 首次按 `x`，进入 205。F17、18、19 完成手势，同帧由旧时间 4、5、6 进入 1000。F16 已完成手势时旧时间仍为 3，F17 根命令已无效，Helper 值 11 触发合法取消。F16 样本为避免覆盖 F13 首次 `x`，第一拍下方向放在 F12，F14 下前、F15 前、F16 前加 `x`。
 - F20 完成手势时，旧时间 7、`var(1)=0`，根 QCF 和普通 `x` 同时有效。F20 选择新 205，F23 接触当时尚在空中的目标，伤害 22。F25 完成手势时旧时间 12、`var(2)=1`，仍可由普通许可进入 1000。F25 属于 205 收招结束边界。
+- 收招竞争补测沿用同一近身空挥开局。F24 只按 `y`，F25 按 `x`，旧时间 12 时重拳根缓冲已空但 Helper 重拳值仍为 2，原版先选择 205，F28 命中 30。另一场 F22 下、F23 下前、F24 前加 `y`、F25 前加 `x`。F25 根 QCF、根 `x`、Helper 重拳值 2 均可用，原版先选 1000，F41 的 Helper 命中 84。两场均由 `var(2)=1` 的普通许可进入，`var(1)=0`。
 - F16／17 的空挥取消均在 F17 进入 1000，Helper 在 F33 命中尚在空中的目标，原版 Y 为 −4.640022。F18／19 的取消样本中，Helper 分别在 F34／35 命中已落地的目标，伤害均为 76。旧近轻空挥的证据与 Helper 碰撞时的目标姿态分别记录。
 
 ## 近身命中、格挡与回落
@@ -36,4 +37,12 @@ $run = 'tools/Stage14Reference/Run-Reference.ps1'
 $mixed = 'default-near-wave-mixed-sequential','default-near-wave-mirror-mixed-sequential'
 & $run -CaptureProfile Stage20 -LastFrame 175 -Prepare -Cases $mixed -RunDirectory local-mugen/stage20-reference-mixed-new
 python tools/Stage20Reference/Check-Traces.py local-mugen/stage20-reference-new/results local-mugen/stage20-reference-mixed-new/results
+```
+
+另有两个收招竞争样本保存在 `local-mugen/stage20-reference-terminal/results`，验收器合计 35/35。运行元数据 SHA-256 为 `f0bd3fbe9fad1b7b0c6794735271aaae58fa57fae8294246ec86e8f0e3688c5e`，执行文件 SHA-256 为 `6153de72db80ebfc0358651686d2b8645bd94d57c59802f07303cd290a0ae94c`。两项为独立补采，导入器沿用主采集与混合双席证据。
+
+```powershell
+$terminal = 'default-near-wave-whiff-terminal-heavy-light-25','default-near-wave-whiff-terminal-heavy-wave-25'
+& $run -CaptureProfile Stage20 -Prepare -Cases $terminal -RunDirectory local-mugen/stage20-reference-terminal-new
+python tools/Stage20Reference/Check-Traces.py local-mugen/stage20-reference/results local-mugen/stage20-reference-mixed/results local-mugen/stage20-reference-terminal-new/results
 ```

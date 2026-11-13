@@ -245,6 +245,20 @@ func researchNearWaveBits(pn int) InputBits {
 		if researchFrame == first {
 			return IB_X
 		}
+		if strings.HasPrefix(scenario, "whiff-terminal-heavy-") {
+			if researchFrame == button-1 {
+				if strings.Contains(scenario, "-wave-") {
+					return forward | IB_Y
+				}
+				return IB_Y
+			}
+			if strings.Contains(scenario, "-light-") {
+				if researchFrame == button {
+					return IB_X
+				}
+				return 0
+			}
+		}
 		if strings.Contains(scenario, "no-motion") || strings.HasPrefix(scenario, "reentry-") {
 			if researchFrame == button {
 				return IB_X

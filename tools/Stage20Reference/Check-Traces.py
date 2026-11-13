@@ -27,7 +27,8 @@ DEFAULT_CASES = {
 REQUIRED = {f"default-near-wave-{name}" for name in DEFAULT_CASES} | {
     "mode2-near-wave-hit-20", "mode2-near-wave-reentry-23",
 }
-SUPPLEMENT = {"default-near-wave-mixed-sequential", "default-near-wave-mirror-mixed-sequential"}
+MIXED = {"default-near-wave-mixed-sequential", "default-near-wave-mirror-mixed-sequential"}
+TERMINAL = {"default-near-wave-whiff-terminal-heavy-light-25", "default-near-wave-whiff-terminal-heavy-wave-25"}
 
 
 def read_cases(directory):
@@ -79,7 +80,8 @@ def read_cases(directory):
 
 
 def verify_cases(cases):
-    assert REQUIRED <= cases.keys() <= REQUIRED | SUPPLEMENT, (REQUIRED - cases.keys(), cases.keys() - REQUIRED - SUPPLEMENT)
+    allowed = REQUIRED | MIXED | TERMINAL
+    assert REQUIRED <= cases.keys() <= allowed, (REQUIRED - cases.keys(), cases.keys() - allowed)
 
     def default(name):
         return cases[f"default-near-wave-{name}"]
@@ -193,7 +195,7 @@ def verify_cases(cases):
     assert not any(r["to"] in (1000, 1050) for r in mode2_reentry), mode2_reentry
     assert mode2_contacts == [(8, 2, 30, False), (26, 2, 22, False)], mode2_contacts
 
-    for name in sorted(cases.keys() & SUPPLEMENT):
+    for name in sorted(cases.keys() & MIXED):
         simple_name = name.removeprefix("default-near-wave-")
         first = wave(simple_name, 20, 4)
         second = wave(simple_name, 94, 4, source=200, seat=2)
@@ -215,6 +217,25 @@ def verify_cases(cases):
         direction = -1 if "-mirror-" in name else 1
         assert [first_entity["facing"], second_entity["facing"]] == [direction, -direction], name
         assert not living(60, 1) and not living(136, 2), name
+
+    for name in sorted(cases.keys() & TERMINAL):
+        phases, changes, contacts = cases[name]
+        wave_input = "-wave-25" in name
+        assert (phases["before-command"][24]["chars"][0]["raw"], phases["before-command"][25]["chars"][0]["raw"]) == (
+            (264, 136) if wave_input else (256, 128)
+        ), name
+        assert [(row["frame"], row["seat"], row["to"]) for row in changes if row["frame"] < 25] == [(13, 1, 205)], name
+        selected, = [row for row in changes if row["frame"] == 25 and row["seat"] == 1]
+        assert (selected["from"], selected["to"], selected["stateTime"], selected["minus"]) == (
+            205, 1000 if wave_input else 205, 12, -1
+        ), (name, selected)
+        assert (selected["var1"], selected["var2"], selected["helperY"], selected["yBuffer"], selected["xBuffer"]) == (
+            0, 1, 2, False, True
+        ), (name, selected)
+        assert selected["powerWaveCommand"] == wave_input and selected["moveContact"] == 0, (name, selected)
+        assert all(frame > 25 for frame, *_ in contacts), (name, contacts)
+        if wave_input:
+            wave(name.removeprefix("default-near-wave-"), 25, 12)
 
 
 def main():

@@ -220,7 +220,7 @@ if ($CaptureProfile -eq 'Stage20') {
     }
     $distances['mode2-near-wave-hit-20'] = 36
     $distances['mode2-near-wave-reentry-23'] = 36
-    foreach ($scenario in @('mixed-sequential', 'mirror-mixed-sequential')) {
+    foreach ($scenario in @('mixed-sequential', 'mirror-mixed-sequential', 'whiff-terminal-heavy-light-25', 'whiff-terminal-heavy-wave-25')) {
         $supplement = "default-near-wave-$scenario"
         if ($Cases -contains $supplement) { $distances[$supplement] = 36 }
     }
