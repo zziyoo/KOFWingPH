@@ -31,9 +31,9 @@ MIXED = {"default-near-wave-mixed-sequential", "default-near-wave-mirror-mixed-s
 TERMINAL = {"default-near-wave-whiff-terminal-heavy-light-25", "default-near-wave-whiff-terminal-heavy-wave-25"}
 
 
-def read_cases(directory):
+def read_cases(directory, *, capture_profile="Stage20", extra_phases=()):
     run = json.loads((directory / "run-metadata.json").read_bytes())
-    assert (run["engine"], run["commit"], run["capture_profile"]) == ("IKEMEN GO", ENGINE_COMMIT, "Stage20")
+    assert (run["engine"], run["commit"], run["capture_profile"]) == ("IKEMEN GO", ENGINE_COMMIT, capture_profile)
     assert run["terry_archive_sha256"] == ARCHIVE_SHA
     scripts = run["source_sha256"]
     assert all(scripts.get(name) == digest for name, digest in SOURCE_SHA.items()), directory
@@ -74,6 +74,7 @@ def read_cases(directory):
             assert life - damage in [row["chars"][seat - 1]["life"] for row in phases["end"][frame + 1:frame + 4]], (
                 name, frame, seat, damage
             )
+        phases.update((phase, [row for row in rows if row["phase"] == phase]) for phase in extra_phases)
         print(f"{name:38} states={[(r['frame'], r['seat'], r['from'], r['to'], r['stateTime']) for r in transitions]} "
               f"contacts={contacts}")
         yield name, (phases, transitions, contacts)
