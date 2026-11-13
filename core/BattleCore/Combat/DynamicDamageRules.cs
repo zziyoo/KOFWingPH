@@ -76,13 +76,33 @@ public sealed class DynamicDamageRules
         if (raw == 0 || AttackMultiplier.Numerator == 0)
             return 0;
 
+        return RoundAppliedDamage(raw, AttackMultiplier, defenderRules, defenderInHitReaction);
+    }
+
+    internal int ComputeEntity(DynamicAttackDamage attack, DamageScriptState owner,
+        DynamicDamageRules? defenderRules, bool defenderInHitReaction)
+    {
+        int basis = owner.CounterAge > 0 ? attack.CounterBase : attack.NormalBase;
+        Int128 raw = (Int128)(basis - owner.Variance) * BaseScale.Numerator * AttackMultiplier.Numerator
+            / ((Int128)BaseScale.Denominator * AttackMultiplier.Denominator);
+        if (raw <= 0)
+            return 0;
+
+        return RoundAppliedDamage(raw, DamageRatio.One, defenderRules, defenderInHitReaction);
+    }
+
+    internal static int ApplyEntityChip(int raw, DynamicDamageRules? defenderRules, bool defenderInHitReaction) =>
+        raw == 0 ? 0 : RoundAppliedDamage(raw, DamageRatio.One, defenderRules, defenderInHitReaction);
+
+    private static int RoundAppliedDamage(Int128 raw, DamageRatio attack,
+        DynamicDamageRules? defenderRules, bool defenderInHitReaction)
+    {
         DamageRatio defense = defenderRules?.DefenseMultiplier ?? DamageRatio.One;
         DamageRatio reaction = defenderInHitReaction
             ? defenderRules?.HitstunDefenseMultiplier ?? DamageRatio.One : DamageRatio.One;
-        Int128 numerator = raw * AttackMultiplier.Numerator * defense.Numerator * reaction.Numerator;
-        Int128 denominator = (Int128)AttackMultiplier.Denominator * defense.Denominator * reaction.Denominator;
-        Int128 rounded = (2 * numerator + denominator) / (2 * denominator);
-        return (int)Int128.Clamp(rounded, 1, int.MaxValue);
+        Int128 numerator = raw * attack.Numerator * defense.Numerator * reaction.Numerator;
+        Int128 denominator = (Int128)attack.Denominator * defense.Denominator * reaction.Denominator;
+        return (int)Int128.Clamp((2 * numerator + denominator) / (2 * denominator), 1, int.MaxValue);
     }
 }
 

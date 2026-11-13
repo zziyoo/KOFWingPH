@@ -85,7 +85,9 @@ public sealed class FighterDefinition
         GroundBodyWidths? groundBodyWidths = null,
         GroundBodyWidths? airBodyWidths = null,
         IReadOnlyList<FixedRect>? neutralAirHurtboxes = null,
-        DynamicDamageRules? damageRules = null)
+        DynamicDamageRules? damageRules = null,
+        bool useCommandPriority = false,
+        bool allowStrikeClash = true)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -93,6 +95,8 @@ public sealed class FighterDefinition
         ArgumentNullException.ThrowIfNull(moves);
 
         FighterId = fighterId;
+        UseCommandPriority = useCommandPriority;
+        AllowStrikeClash = allowStrikeClash;
 
         // 防御性复制：外部改动源集合不影响配置（B4.6）。
         var commandCopy = commands.ToArray();
@@ -125,6 +129,15 @@ public sealed class FighterDefinition
                     continue;
                 if (damageRules is null || Math.Min(damage.NormalBase, damage.CounterBase) < damageRules.VarianceMaximum)
                     throw new ArgumentException($"招式 {move.MoveId} 的动态伤害需要 damageRules，且基数必须覆盖波动上限。", nameof(moves));
+            }
+            foreach (ProjectileDefinition projectile in move.Projectiles)
+            {
+                if (projectile.Timeline is not { } timeline)
+                    continue;
+                foreach (ProjectileHitSpan span in timeline.HitSpans)
+                    if (span.DynamicDamage is { } damage &&
+                        (damageRules is null || Math.Min(damage.NormalBase, damage.CounterBase) < damageRules.VarianceMaximum))
+                        throw new ArgumentException($"实体 {projectile.ProjectileTypeId} 的动态伤害需要有效的 damageRules 与基数。", nameof(moves));
             }
         }
 
@@ -183,6 +196,10 @@ public sealed class FighterDefinition
 
     /// <summary>该角色的专属指令表（只读，识别器按此匹配）。</summary>
     public IReadOnlyList<CommandDefinition> Commands { get; }
+
+    public bool UseCommandPriority { get; }
+
+    public bool AllowStrikeClash { get; }
 
     /// <summary>该角色的专属招式表（只读）。</summary>
     public IReadOnlyList<MoveDefinition> Moves { get; }

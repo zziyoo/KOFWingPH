@@ -13,15 +13,25 @@ public readonly record struct PressRecord(int Frame, InputBits Bits, bool Consum
 /// <summary>
 /// 缓冲中的一条识别结果及其消费状态（不可变值类型）。<see cref="Match"/> 本身不可变；
 /// <see cref="Consumed"/> 表示该结果已被招式系统取走（每条结果最多消费一次，D60）。
-/// 相等按 (CommandId, RecognizedFrame, Consumed) 判定——同玩家缓冲内 RecognizedFrame
-/// 唯一（每帧最多产生一条胜者），可用于快照结构化比较。
+/// 相等包括可改变后续选招的时钟。启用 CMD 候选时，同一识别帧可有多个互斥候选。
 /// </summary>
 public readonly struct BufferedResult
 {
     public BufferedResult(CommandMatch match, bool consumed)
+        : this(match, consumed, null, 0, 0, InputBits.None)
+    {
+    }
+
+    private BufferedResult(CommandMatch match, bool consumed, CommandBufferPolicy? policy,
+        int rootTicks, int helperTicks, InputBits buttons, bool helperActive = false)
     {
         Match = match;
         Consumed = consumed;
+        Policy = policy;
+        RootTicks = rootTicks;
+        HelperTicks = helperTicks;
+        Buttons = buttons;
+        HelperActive = helperActive;
     }
 
     /// <summary>识别结果（不可变）。</summary>
@@ -30,15 +40,50 @@ public readonly struct BufferedResult
     /// <summary>是否已被消费（每条结果最多一次）。</summary>
     public bool Consumed { get; }
 
+    private CommandBufferPolicy? Policy { get; }
+    private int RootTicks { get; }
+    private int HelperTicks { get; }
+    private InputBits Buttons { get; }
+    private bool HelperActive { get; }
+
+    internal static BufferedResult Recognized(CommandMatch match, CommandDefinition definition, bool inHitPause, bool globalPaused)
+    {
+        if (definition.BufferPolicy is not { } policy)
+            return new BufferedResult(match, false);
+
+        // A root command completed during HitPause receives one extra tick on thaw.
+        int root = checked(definition.BufferLifetimeFrames + 1 + (inHitPause && policy.PreserveDuringHitPause ? 1 : 0));
+        int helper = globalPaused ? 0 : Math.Max(0, policy.HelperTicks - policy.HelperHeldDecay);
+        return new BufferedResult(match, false, policy, root, helper, definition.RequiredButtons);
+    }
+
+    internal BufferedResult AdvanceClock(InputBits held, bool inHitPause, bool globalPaused)
+    {
+        if (Policy is not { } policy)
+            return this;
+
+        int root = inHitPause && policy.PreserveDuringHitPause ? RootTicks : Math.Max(0, RootTicks - 1);
+        int decay = (held & Buttons) == Buttons ? policy.HelperHeldDecay : policy.HelperReleasedDecay;
+        int helper = globalPaused ? HelperTicks : Math.Max(0, HelperTicks - decay);
+        return new BufferedResult(Match, Consumed, policy, root, helper, Buttons, HelperTicks > 0);
+    }
+
+    internal bool IsExpiredAt(int frame) => Policy is null ? Match.IsExpiredAt(frame) : RootTicks == 0 && !HelperActive;
+
+    internal BufferedResult WithoutRootClock() => new(Match, Consumed, Policy, 0, HelperTicks, Buttons, HelperActive);
+    internal BufferedResult Consume() => new(Match, true, Policy, RootTicks, HelperTicks, Buttons, HelperActive);
+
     public bool Equals(BufferedResult other) =>
         Consumed == other.Consumed &&
         Match.RecognizedFrame == other.Match.RecognizedFrame &&
-        string.Equals(Match.CommandId, other.Match.CommandId, StringComparison.Ordinal);
+        string.Equals(Match.CommandId, other.Match.CommandId, StringComparison.Ordinal) &&
+        Policy == other.Policy && RootTicks == other.RootTicks && HelperTicks == other.HelperTicks &&
+        Buttons == other.Buttons && HelperActive == other.HelperActive;
 
     public override bool Equals(object? obj) => obj is BufferedResult other && Equals(other);
 
     public override int GetHashCode() =>
-        HashCode.Combine(Match.CommandId, Match.RecognizedFrame, Consumed);
+        HashCode.Combine(Match.CommandId, Match.RecognizedFrame, Consumed, Policy, RootTicks, HelperTicks, Buttons, HelperActive);
 
     public static bool operator ==(BufferedResult left, BufferedResult right) => left.Equals(right);
 
@@ -152,12 +197,18 @@ public sealed class RecognitionState
     /// <param name="frame">本逻辑帧号（必须严格逐帧连续）。</param>
     /// <param name="playerIndex">玩家索引（0/1，进入识别结果的 PlayerIndex）。</param>
     /// <param name="definitions">该角色的指令表（来自角色配置，不属于状态）。</param>
+    /// <param name="useCommandPriority">Retain concurrent candidates for state-dependent CMD selection.</param>
+    /// <param name="inHitPause">Keep root clocks for commands whose policy permits it.</param>
+    /// <param name="globalPaused">Suspend helper controllers while root input remains observable.</param>
     public RecognitionState Advance(
         InputBits bits,
         Facing facing,
         int frame,
         int playerIndex,
-        IReadOnlyList<CommandDefinition> definitions)
+        IReadOnlyList<CommandDefinition> definitions,
+        bool useCommandPriority = false,
+        bool inHitPause = false,
+        bool globalPaused = false)
     {
         ArgumentNullException.ThrowIfNull(definitions);
         if (frame < 0)
@@ -198,14 +249,19 @@ public sealed class RecognitionState
         // 3) 裁剪过旧历史（内存上界；被裁条目已不可能参与任何匹配）。
         Prune(directions, presses, consumedEndFrames, definitions, frame);
 
-        // 4) 过期结果移除（逻辑帧计时，暂停时不流逝）。
-        buffer.RemoveAll(result => result.Match.IsExpiredAt(frame));
+        // Legacy results keep their absolute expiry. Scoped root and helper clocks advance independently.
+        if (useCommandPriority)
+            for (int i = 0; i < buffer.Count; i++)
+                buffer[i] = buffer[i].AdvanceClock(attacks, inHitPause, globalPaused);
+        buffer.RemoveAll(result => result.IsExpiredAt(frame));
 
         // 5) 同帧所有指令一起评估，再按稳定优先级取唯一胜者（D40/D47/D53）。
         CommandMatch? best = null;
         int bestEndFrame = -1;
         var candidatePressIndexes = new List<int>();
         var candidateChargeIndexes = new List<int>();
+        List<(CommandMatch Match, CommandDefinition Definition, int EndFrame)>? candidates =
+            useCommandPriority ? new() : null;
         for (int definitionIndex = 0; definitionIndex < definitions.Count; definitionIndex++)
         {
             CommandDefinition definition = definitions[definitionIndex];
@@ -217,6 +273,7 @@ public sealed class RecognitionState
                 candidatePressIndexes.Add(pressIndex);
             if (definition.ChargeHoldFrames > 0)
                 candidateChargeIndexes.Add(definitionIndex);
+            candidates?.Add((match, definition, endFrame));
 
             if (best is null || IsBetterThan(match, best))
             {
@@ -244,13 +301,36 @@ public sealed class RecognitionState
         foreach (int definitionIndex in candidateChargeIndexes)
             pendings[definitionIndex] = ChargePending.Cleared;
 
-        // 抑制「同一手势」被其他指令在后续帧补完（D43/D47）。
-        // 裸按键指令没有方向手势（matchedEndFrame = -1），不加入手势锁。
-        if (bestEndFrame >= 0)
-            consumedEndFrames.Add(bestEndFrame);
-
-        // 胜者进缓冲（未消费），Last 更新（LastMatch 仅供显示，D41）。
-        buffer.Add(new BufferedResult(best, false));
+        if (candidates is null)
+        {
+            // Legacy D43/D47 consumes a gesture immediately and retains its one winning command.
+            if (bestEndFrame >= 0)
+                consumedEndFrames.Add(bestEndFrame);
+            buffer.Add(new BufferedResult(best, false));
+        }
+        else
+        {
+            foreach (var candidate in candidates)
+            {
+                // During global Pause only the root can refresh this command. Keep the helper's original edge.
+                if (candidate.Definition.BufferPolicy is not null)
+                {
+                    for (int i = buffer.Count - 1; i >= 0; i--)
+                    {
+                        if (!string.Equals(buffer[i].Match.CommandId, candidate.Match.CommandId, StringComparison.Ordinal))
+                            continue;
+                        BufferedResult helper = buffer[i].WithoutRootClock();
+                        if (globalPaused && !helper.IsExpiredAt(frame))
+                            buffer[i] = helper;
+                        else
+                            buffer.RemoveAt(i);
+                    }
+                }
+                if (candidate.EndFrame >= 0 && !consumedEndFrames.Contains(candidate.EndFrame))
+                    consumedEndFrames.Add(candidate.EndFrame);
+                buffer.Add(BufferedResult.Recognized(candidate.Match, candidate.Definition, inHitPause, globalPaused));
+            }
+        }
 
         return new RecognitionState(frame, attacks,
             new ReadOnlyCollection<DirectionEntry>(directions),
@@ -262,7 +342,7 @@ public sealed class RecognitionState
     }
 
     /// <summary>
-    /// 把缓冲中指定识别帧的<b>未消费</b>结果标记为已消费，返回全新状态（D60）。
+    /// 把缓冲中指定识别帧的所有<b>未消费</b>候选标记为已消费，返回全新状态（D60）。
     /// 结果不存在或已被消费时抛出——消费请求必须显式失败，不得静默重复。
     /// </summary>
     public RecognitionState WithResultConsumed(int recognizedFrame)
@@ -286,7 +366,9 @@ public sealed class RecognitionState
         var buffer = new BufferedResult[Buffer.Count];
         for (int i = 0; i < Buffer.Count; i++)
             buffer[i] = Buffer[i];
-        buffer[index] = new BufferedResult(Buffer[index].Match, true);
+        for (int i = index; i < buffer.Length; i++)
+            if (!buffer[i].Consumed && buffer[i].Match.RecognizedFrame == recognizedFrame)
+                buffer[i] = buffer[i].Consume();
 
         // 其余四个集合复用旧状态的只读包装（只读实例可安全共享）；Buffer 换新包装。
         return new RecognitionState(LastObservedFrame, HeldAttacks, Directions, Presses,
@@ -404,6 +486,10 @@ public sealed class RecognitionState
             return true;
         }
 
+        if (definition.MatchHeldMotion)
+            return TryMatchHeldMotion(definition, directions, presses, consumedEndFrames, frame, playerIndex,
+                out match, out pressIndex, out matchedEndFrame);
+
         // 蓄力指令（D51）：蓄力方向来自释放挂起状态（与历史条目解耦），
         // 历史只需容纳「尾段」（第 2 个及以后元素）；普通指令需要完整序列。
         bool isCharge = definition.ChargeHoldFrames > 0;
@@ -482,6 +568,38 @@ public sealed class RecognitionState
         }
 
         return false;
+    }
+
+    private static bool TryMatchHeldMotion(CommandDefinition definition, List<DirectionEntry> directions,
+        List<PressRecord> presses, IReadOnlyList<int> consumedEndFrames, int frame, int playerIndex,
+        out CommandMatch match, out int pressIndex, out int matchedEndFrame)
+    {
+        match = null!;
+        matchedEndFrame = -1;
+        pressIndex = FindPressIndex(presses, definition.RequiredButtons, frame, tolerance: 0);
+        IReadOnlyList<CommandDirection> sequence = definition.DirectionSequence;
+        if (pressIndex < 0 || directions[^1].Direction != sequence[^1] || consumedEndFrames.Contains(directions[^1].Frame))
+            return false;
+
+        var matched = new int[sequence.Count];
+        int cursor = directions.Count - 1;
+        for (int element = sequence.Count - 1; element >= 0; element--)
+        {
+            while (cursor >= 0 && directions[cursor].Direction == CommandDirection.Neutral)
+                cursor--;
+            if (cursor < 0 || directions[cursor].Direction != sequence[element])
+                return false;
+            DirectionEntry direction = directions[cursor--];
+            // The first source step is a release. Its timer starts when the held interval ends.
+            matched[element] = element == 0 ? direction.EndFrame + 1 : direction.Frame;
+        }
+
+        if (frame - matched[0] > definition.MaxSequenceFrames)
+            return false;
+        matchedEndFrame = matched[^1];
+        match = new CommandMatch(definition.CommandId, playerIndex, frame, matched[0], matchedEndFrame, frame,
+            definition.Priority, matched.Length, checked(frame + definition.BufferLifetimeFrames), matched);
+        return true;
     }
 
     /// <summary>检查压缩历史的 <paramref name="endIndex"/> 结尾是否恰好等于序列的最后
@@ -599,9 +717,11 @@ public sealed class RecognitionState
             ? 0
             : definitions.Max(d => d.ButtonToleranceFrames);
         int oldestUsefulFrame = frame - maxSequenceFrames - maxButtonTolerance;
+        bool includesHeldMotion = definitions.Any(definition => definition.MatchHeldMotion);
 
         // 至少保留最后一个条目：它是「当前方向」，也是下一次变化判断的基准。
-        while (directions.Count > 1 && directions[0].Frame < oldestUsefulFrame)
+        while (directions.Count > 1 &&
+            (includesHeldMotion ? (long)directions[0].EndFrame + 1 : directions[0].Frame) < oldestUsefulFrame)
             directions.RemoveAt(0);
 
         while (directions.Count > MaxDirectionEntries)

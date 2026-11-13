@@ -2,6 +2,29 @@ using NewKOF.BattleCore.Input;
 
 namespace NewKOF.BattleCore.Commands;
 
+/// <summary>Optional root and helper clocks for a recognized command.</summary>
+public sealed record CommandBufferPolicy
+{
+    public CommandBufferPolicy(bool preserveDuringHitPause, int helperTicks, int helperHeldDecay, int helperReleasedDecay)
+    {
+        if (helperTicks is < 0 or > 120)
+            throw new ArgumentOutOfRangeException(nameof(helperTicks));
+        if (helperHeldDecay is < 1 or > 120)
+            throw new ArgumentOutOfRangeException(nameof(helperHeldDecay));
+        if (helperReleasedDecay is < 1 or > 120)
+            throw new ArgumentOutOfRangeException(nameof(helperReleasedDecay));
+        PreserveDuringHitPause = preserveDuringHitPause;
+        HelperTicks = helperTicks;
+        HelperHeldDecay = helperHeldDecay;
+        HelperReleasedDecay = helperReleasedDecay;
+    }
+
+    public bool PreserveDuringHitPause { get; }
+    public int HelperTicks { get; }
+    public int HelperHeldDecay { get; }
+    public int HelperReleasedDecay { get; }
+}
+
 /// <summary>
 /// 一条可识别的指令定义 —— <b>纯数据</b>，不含任何识别流程。
 ///
@@ -56,6 +79,8 @@ public sealed class CommandDefinition
     /// 仅 <paramref name="chargeHoldFrames"/> &gt; 0 时有意义，默认
     /// <see cref="CommandCatalog.DefaultChargeReleaseToleranceFrames"/>。
     /// </param>
+    /// <param name="matchHeldMotion">Match the button edge on the held final direction, with neutral releases between motion steps.</param>
+    /// <param name="bufferPolicy">Optional independent root and helper clocks.</param>
     /// <exception cref="ArgumentException">ID 为空 / 序列为空 / 含非攻击键位 /
     /// 蓄力指令序列不足 2 个元素。</exception>
     /// <exception cref="ArgumentOutOfRangeException">帧数参数为负。</exception>
@@ -68,7 +93,9 @@ public sealed class CommandDefinition
         int priority = 0,
         int bufferLifetimeFrames = 8,
         int chargeHoldFrames = 0,
-        int chargeReleaseToleranceFrames = CommandCatalog.DefaultChargeReleaseToleranceFrames)
+        int chargeReleaseToleranceFrames = CommandCatalog.DefaultChargeReleaseToleranceFrames,
+        bool matchHeldMotion = false,
+        CommandBufferPolicy? bufferPolicy = null)
     {
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("指令 ID 不能为空。", nameof(commandId));
@@ -124,6 +151,13 @@ public sealed class CommandDefinition
                 "蓄力指令的方向序列至少需要 2 个元素（蓄力方向 + 释放方向）。",
                 nameof(directionSequence));
 
+        if (matchHeldMotion && (sequence.Length < 2 || requiredButtons == InputBits.None ||
+            chargeHoldFrames != 0 || buttonToleranceFrames != 0 || sequence.Contains(CommandDirection.Neutral)))
+            throw new ArgumentException("Held motions require a button, distinct non-neutral directions, and no charge or button tolerance.",
+                nameof(matchHeldMotion));
+        if (bufferPolicy is { HelperTicks: > 0 } && requiredButtons == InputBits.None)
+            throw new ArgumentException("A helper command buffer requires attack buttons.", nameof(bufferPolicy));
+
         CommandId = commandId;
         DirectionSequence = Array.AsReadOnly(sequence);
         RequiredButtons = requiredButtons;
@@ -133,6 +167,8 @@ public sealed class CommandDefinition
         BufferLifetimeFrames = bufferLifetimeFrames;
         ChargeHoldFrames = chargeHoldFrames;
         ChargeReleaseToleranceFrames = chargeReleaseToleranceFrames;
+        MatchHeldMotion = matchHeldMotion;
+        BufferPolicy = bufferPolicy;
     }
 
     /// <summary>唯一标识，如 <c>236A</c>。</summary>
@@ -169,4 +205,7 @@ public sealed class CommandDefinition
     /// 出现无关方向立即失效；蓄力不足 <see cref="ChargeHoldFrames"/> 不能靠窗口补足（D52）。
     /// </summary>
     public int ChargeReleaseToleranceFrames { get; }
+
+    public bool MatchHeldMotion { get; }
+    public CommandBufferPolicy? BufferPolicy { get; }
 }

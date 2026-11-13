@@ -17,7 +17,8 @@ namespace NewKOF.BattleCore.Combat;
 /// </list>
 ///
 /// <para><b>生成时机</b>：发射者在该招式的 Active 阶段、经过帧 == <see cref="SpawnAtActiveFrame"/> 的那一帧
-/// 生成实体；<b>生成当帧只建立实体</b>（不运动、不判定），下一个逻辑帧才开始移动与命中（D99）。</para>
+/// 生成实体。普通投掷物从下一帧移动与命中；配置 <see cref="Timeline"/> 的实体从生成帧移动，
+/// 并按实体年龄选择判定。</para>
 /// </summary>
 public sealed class ProjectileDefinition
 {
@@ -37,7 +38,8 @@ public sealed class ProjectileDefinition
         FixedPoint speedY = default,
         int lifetimeFrames = 120,
         int maxAlive = 1,
-        int spawnAtActiveFrame = 0)
+        int spawnAtActiveFrame = 0,
+        ProjectileTimeline? timeline = null)
     {
         ArgumentNullException.ThrowIfNull(hit);
 
@@ -78,6 +80,9 @@ public sealed class ProjectileDefinition
             throw new ArgumentOutOfRangeException(nameof(spawnAtActiveFrame), spawnAtActiveFrame,
                 "投掷物出生帧不能为负。");
 
+        if (timeline is not null && (timeline.MovementFrames > lifetimeFrames || timeline.HitSpans[^1].LastFrame >= lifetimeFrames))
+            throw new ArgumentException("Entity movement and hit spans must fit its lifetime.", nameof(timeline));
+
         ProjectileTypeId = projectileTypeId;
         Hit = hit;
         SpeedX = speedX;
@@ -85,6 +90,7 @@ public sealed class ProjectileDefinition
         LifetimeFrames = lifetimeFrames;
         MaxAlive = maxAlive;
         SpawnAtActiveFrame = spawnAtActiveFrame;
+        Timeline = timeline;
     }
 
     /// <summary>投掷物类型 ID（同一招式内唯一；事件 MoveId 用它）。</summary>
@@ -107,6 +113,8 @@ public sealed class ProjectileDefinition
 
     /// <summary>在 Active 阶段的哪一经过帧生成（0 起始）。</summary>
     public int SpawnAtActiveFrame { get; }
+
+    public ProjectileTimeline? Timeline { get; }
 
     /// <summary>单帧速度上限（健全性边界）。</summary>
     public const int MaxSpeedUnits = 64;

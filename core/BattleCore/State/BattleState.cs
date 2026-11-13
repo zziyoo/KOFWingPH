@@ -17,6 +17,8 @@ public sealed record BattleState
 
     public PendingThrow? PendingThrow { get; }
 
+    public ScriptedPauseState ScriptedPause { get; }
+
     /// <summary>1v1 固定两名角色。数组本身在构造时复制，对外只读。</summary>
     public IReadOnlyList<FighterState> Fighters { get; }
 
@@ -57,7 +59,8 @@ public sealed record BattleState
         IReadOnlyList<ProjectileState>? projectiles = null,
         int nextProjectileId = 1,
         int? roundTimerRemainingFrames = null,
-        PendingThrow? pendingThrow = null)
+        PendingThrow? pendingThrow = null,
+        ScriptedPauseState scriptedPause = default)
     {
         if (frame < 0)
             throw new ArgumentOutOfRangeException(nameof(frame), frame, "逻辑帧号不能为负。");
@@ -74,6 +77,8 @@ public sealed record BattleState
         StateVersion = stateVersion;
         Round = round ?? RoundState.InProgress;
         Round.Validate();
+        scriptedPause.Validate(Round.IsFinished);
+        ScriptedPause = scriptedPause;
 
         ProjectileState[] projectileCopy = (projectiles ?? Array.Empty<ProjectileState>()).ToArray();
         var seenIds = new HashSet<int>();

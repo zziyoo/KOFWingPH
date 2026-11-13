@@ -20,7 +20,7 @@ public readonly record struct AirborneTick(
 /// <summary>
 /// 空中运动（阶段 05B，D69）：纯函数定点积分。
 ///
-/// <para><b>每帧积分顺序（任务书 B4 推荐序列，全阶段唯一、文档固定）：</b></para>
+/// <para><b>默认积分顺序（任务书 B4 推荐序列）：</b></para>
 /// <list type="number">
 /// <item>按当帧逻辑状态决定加速度——空中恒为重力（<b>-Y</b> 方向，大小来自配置）；</item>
 /// <item>更新垂直速度：<c>vy' = vy - g</c>（起跳帧同样施加重力，无例外）；</item>
@@ -46,12 +46,14 @@ public static class AirborneMovement
     /// <param name="velocityX">帧开始水平速度（起跳帧为锁定后的初速）。</param>
     /// <param name="velocityY">帧开始垂直速度（起跳帧为锁定后的初速）。</param>
     /// <param name="gravity">重力大小（世界单位/帧²，&gt; 0；本函数向 -Y 施加）。</param>
+    /// <param name="velocityBeforeGravity">受击轨迹可使用本帧施加重力前的速度更新坐标。</param>
     public static AirborneTick Integrate(
         FixedPoint positionX,
         FixedPoint positionY,
         FixedPoint velocityX,
         FixedPoint velocityY,
-        FixedPoint gravity)
+        FixedPoint gravity,
+        bool velocityBeforeGravity = false)
     {
         if (gravity <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(gravity), gravity, "重力大小必须为正。");
@@ -59,7 +61,7 @@ public static class AirborneMovement
         // ① 加速度（重力向下）→ ② 垂直速度 → ③ 坐标 → ④ 触地判断。
         FixedPoint nextVy = velocityY - gravity;
         FixedPoint nextX = positionX + velocityX;
-        FixedPoint nextY = positionY + nextVy;
+        FixedPoint nextY = positionY + (velocityBeforeGravity ? velocityY : nextVy);
 
         if (nextY <= FixedPoint.Zero)
         {

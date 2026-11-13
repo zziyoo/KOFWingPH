@@ -21,7 +21,9 @@ public readonly record struct ProjectileState(
     FixedPoint PositionY,
     FixedPoint VelocityX,
     FixedPoint VelocityY,
-    int RemainingLifetime)
+    int RemainingLifetime,
+    Facing? SpawnFacing = null,
+    bool HasContact = false)
 {
     /// <summary>校验基本不变式（非法实体不允许进入快照）。</summary>
     public void Validate()
@@ -38,5 +40,8 @@ public readonly record struct ProjectileState(
         if (RemainingLifetime < 1)
             throw new InvalidOperationException(
                 $"投掷物 {ProjectileId} 的剩余寿命为 {RemainingLifetime}（存活实体必须 ≥ 1，寿命归零应被移除）。");
+        if ((SpawnFacing is { } facing && facing is not (Facing.Left or Facing.Right)) ||
+            (HasContact && SpawnFacing is null))
+            throw new InvalidOperationException($"投掷物 {ProjectileId} 的实体朝向或接触历史非法。");
     }
 }

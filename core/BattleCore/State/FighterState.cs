@@ -69,7 +69,9 @@ public readonly record struct FighterState(
     int LastThrowStartFrame = -1,
     int ProjectileSpawnMask = 0,
     uint LastHitContactGroups = 0,
-    DamageScriptState DamageScript = default)
+    DamageScriptState DamageScript = default,
+    FixedPoint? HitLaunchGravity = null,
+    int LogicStateTicks = 0)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -129,6 +131,8 @@ public readonly record struct FighterState(
     /// <summary>校验基础不变式。用于尽早暴露非法初态，而不是让错误无声传播。</summary>
     public void Validate()
     {
+        if (LogicStateTicks < 0)
+            throw new InvalidOperationException($"角色 {Id} 的状态时间不能为负。");
         if (Id < 0)
             throw new InvalidOperationException($"角色 Id 不能为负：{Id}。");
         if (MaxHealth <= 0)
@@ -265,6 +269,10 @@ public readonly record struct FighterState(
             throw new InvalidOperationException(
                 $"角色 {Id} 处于 {LogicState} 但携带硬直剩余帧数 {StunRemainingFrames}（必须为 0）。");
         }
+
+        if (HitLaunchGravity is { } hitGravity && (LogicState != FighterLogicState.AirHitstun ||
+            hitGravity <= FixedPoint.Zero || hitGravity > FixedPoint.FromInt(MovementDefinition.MaxGravityUnits)))
+            throw new InvalidOperationException($"角色 {Id} 的受击重力 {HitLaunchGravity} 与当前状态不符。");
 
         // 落地计划（阶段 07C，D93）：AirHitstun 携带「倒地/起身帧数」计划；
         // 落地后倒地帧数转为 StunRemaining，起身帧数继续携带到倒地结束。

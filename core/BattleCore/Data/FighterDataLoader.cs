@@ -122,7 +122,7 @@ public static class FighterDataLoader
 
         FighterDefinition definition = Guard(
             () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes, groundBodyWidths,
-                airBodyWidths, neutralAirHurtboxes, damageRules),
+                airBodyWidths, neutralAirHurtboxes, damageRules, dto.UseCommandPriority, dto.AllowStrikeClash),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }
@@ -217,7 +217,14 @@ public static class FighterDataLoader
                 path + ".bufferLifetimeFrames"),
             chargeHoldFrames: RequiredInt(dto.ChargeHoldFrames, source, path + ".chargeHoldFrames"),
             chargeReleaseToleranceFrames: RequiredInt(dto.ChargeReleaseToleranceFrames, source,
-                path + ".chargeReleaseToleranceFrames")),
+                path + ".chargeReleaseToleranceFrames"),
+            bufferPolicy: dto.BufferPolicy is { } buffer
+                ? new CommandBufferPolicy(buffer.PreserveDuringHitPause,
+                    RequiredInt(buffer.HelperTicks, source, path + ".bufferPolicy.helperTicks"),
+                    RequiredInt(buffer.HelperHeldDecay, source, path + ".bufferPolicy.helperHeldDecay"),
+                    RequiredInt(buffer.HelperReleasedDecay, source, path + ".bufferPolicy.helperReleasedDecay"))
+                : null,
+            matchHeldMotion: dto.MatchHeldMotion),
         source, path);
 
     private static MoveDefinition BuildMove(MoveDto dto, string source, string path) => Guard(
@@ -277,10 +284,13 @@ public static class FighterDataLoader
             counterDamage: dto.CounterDamage,
             contactGroup: dto.ContactGroup,
             damageAfterPriorContact: dto.DamageAfterPriorContact,
-            dynamicDamage: dto.DynamicDamage is { } damage ? new DynamicAttackDamage(
-                RequiredInt(damage.NormalBase, source, path + ".dynamicDamage.normalBase"),
-                RequiredInt(damage.CounterBase, source, path + ".dynamicDamage.counterBase"), damage.UseContactDivisor) : null),
+            dynamicDamage: BuildDynamicDamage(dto.DynamicDamage, source, path + ".dynamicDamage")),
         source, path);
+
+    private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>
+        damage is null ? null : new DynamicAttackDamage(
+            RequiredInt(damage.NormalBase, source, path + ".normalBase"),
+            RequiredInt(damage.CounterBase, source, path + ".counterBase"), damage.UseContactDivisor);
 
     private static HitstopPair BuildHitstopPair(HitstopPairDto? dto, string source, string path)
     {
@@ -348,7 +358,23 @@ public static class FighterDataLoader
             lifetimeFrames: RequiredInt(dto.LifetimeFrames, source, path + ".lifetimeFrames"),
             maxAlive: RequiredInt(dto.MaxAlive, source, path + ".maxAlive"),
             spawnAtActiveFrame: RequiredInt(dto.SpawnAtActiveFrame, source,
-                path + ".spawnAtActiveFrame")),
+                path + ".spawnAtActiveFrame"),
+            timeline: dto.Timeline is { } timeline ? new ProjectileTimeline(
+                RequiredInt(timeline.MovementFrames, source, path + ".timeline.movementFrames"),
+                BuildArray(timeline.HitSpans, source, path + ".timeline.hitSpans", BuildProjectileHitSpan),
+                timeline.RequestPauseOnHit) : null),
+        source, path);
+
+    private static ProjectileHitSpan BuildProjectileHitSpan(ProjectileHitSpanDto dto, string source, string path) => Guard(
+        () => new ProjectileHitSpan(
+            RequiredInt(dto.FirstFrame, source, path + ".firstFrame"),
+            RequiredInt(dto.LastFrame, source, path + ".lastFrame"),
+            BuildHurtbox(dto.LocalHitbox ?? throw Fail(source, path + ".localHitbox", "必填对象缺失或为 null。"),
+                source, path + ".localHitbox"),
+            BuildAttack(dto.Hit ?? throw Fail(source, path + ".hit", "必填对象缺失或为 null。"),
+                source, path + ".hit"),
+            dto.GuardDamage, BuildDynamicDamage(dto.DynamicDamage, source, path + ".dynamicDamage"), dto.ContactOnEdge,
+            dto.LaunchGravity is { } gravity ? Fraction(gravity, source, path + ".launchGravity") : null),
         source, path);
 
     // ── 字段级校验 ──────────────────────────────────────────────────

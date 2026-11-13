@@ -1,3 +1,4 @@
+using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.State;
 
@@ -18,6 +19,7 @@ public sealed class ProjectileVisuals
     }
 
     public int Age(ProjectileState projectile) => _initialLife[projectile.ProjectileId] - projectile.RemainingLifetime;
-    public static bool FacesLeft(ProjectileState projectile) => projectile.VelocityX < FixedPoint.Zero;
+    public static bool FacesLeft(ProjectileState projectile) => projectile.SpawnFacing is { } facing
+        ? facing == Facing.Left : projectile.VelocityX < FixedPoint.Zero;
     public void Reset() => _initialLife.Clear();
 }

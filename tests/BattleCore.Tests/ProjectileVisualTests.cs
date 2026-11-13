@@ -10,6 +10,16 @@ namespace NewKOF.BattleCore.Tests;
 public class ProjectileVisualTests
 {
     [Fact]
+    public void StoppedEntityKeepsItsAuthoritativeSpawnFacing()
+    {
+        var left = new ProjectileState(1, 1, "TerryPowerWave1020", "TerryPowerWave1000",
+            default, default, default, default, 10, SpawnFacing: Facing.Left);
+
+        Assert.True(ProjectileVisuals.FacesLeft(left));
+        Assert.False(ProjectileVisuals.FacesLeft(left with { SpawnFacing = Facing.Right }));
+    }
+
+    [Fact]
     public void OwnerInterruptionDoesNotResetExistingProjectileAge()
     {
         var state = BattleState.CreateDefault();

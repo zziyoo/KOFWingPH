@@ -30,6 +30,12 @@ public sealed class FighterDocumentDto
     [JsonPropertyName("commands")]
     public List<CommandDto>? Commands { get; set; }
 
+    [JsonPropertyName("useCommandPriority")]
+    public bool UseCommandPriority { get; set; }
+
+    [JsonPropertyName("allowStrikeClash")]
+    public bool AllowStrikeClash { get; set; } = true;
+
     [JsonPropertyName("moves")]
     public List<MoveDto>? Moves { get; set; }
 
@@ -198,6 +204,27 @@ public sealed class CommandDto
 
     [JsonPropertyName("chargeReleaseToleranceFrames")]
     public int? ChargeReleaseToleranceFrames { get; set; }
+
+    [JsonPropertyName("matchHeldMotion")]
+    public bool MatchHeldMotion { get; set; }
+
+    [JsonPropertyName("bufferPolicy")]
+    public CommandBufferPolicyDto? BufferPolicy { get; set; }
+}
+
+public sealed class CommandBufferPolicyDto
+{
+    [JsonPropertyName("preserveDuringHitPause")]
+    public bool PreserveDuringHitPause { get; set; }
+
+    [JsonPropertyName("helperTicks")]
+    public int? HelperTicks { get; set; }
+
+    [JsonPropertyName("helperHeldDecay")]
+    public int? HelperHeldDecay { get; set; }
+
+    [JsonPropertyName("helperReleasedDecay")]
+    public int? HelperReleasedDecay { get; set; }
 }
 
 public sealed class MoveDto
@@ -439,4 +466,46 @@ public sealed class ProjectileDto
 
     [JsonPropertyName("spawnAtActiveFrame")]
     public int? SpawnAtActiveFrame { get; set; }
+
+    [JsonPropertyName("timeline")]
+    public ProjectileTimelineDto? Timeline { get; set; }
+}
+
+public sealed class ProjectileTimelineDto
+{
+    [JsonPropertyName("movementFrames")]
+    public int? MovementFrames { get; set; }
+
+    [JsonPropertyName("hitSpans")]
+    public List<ProjectileHitSpanDto>? HitSpans { get; set; }
+
+    [JsonPropertyName("requestPauseOnHit")]
+    public bool RequestPauseOnHit { get; set; }
+}
+
+public sealed class ProjectileHitSpanDto
+{
+    [JsonPropertyName("firstFrame")]
+    public int? FirstFrame { get; set; }
+
+    [JsonPropertyName("lastFrame")]
+    public int? LastFrame { get; set; }
+
+    [JsonPropertyName("localHitbox")]
+    public HurtboxDto? LocalHitbox { get; set; }
+
+    [JsonPropertyName("hit")]
+    public AttackDto? Hit { get; set; }
+
+    [JsonPropertyName("guardDamage")]
+    public int GuardDamage { get; set; }
+
+    [JsonPropertyName("dynamicDamage")]
+    public DynamicAttackDamageDto? DynamicDamage { get; set; }
+
+    [JsonPropertyName("contactOnEdge")]
+    public bool ContactOnEdge { get; set; } = true;
+
+    [JsonPropertyName("launchGravity")]
+    public FractionDto? LaunchGravity { get; set; }
 }

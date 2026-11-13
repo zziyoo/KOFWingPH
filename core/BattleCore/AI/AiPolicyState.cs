@@ -60,6 +60,7 @@ public sealed record AiPolicyState
             pair.First.State.Projectiles.SequenceEqual(pair.Second.State.Projectiles) &&
             pair.First.State.NextProjectileId==pair.Second.State.NextProjectileId &&
             pair.First.State.StateVersion==pair.Second.State.StateVersion &&
+            pair.First.State.ScriptedPause==pair.Second.State.ScriptedPause &&
             pair.First.State.PendingThrow==pair.Second.State.PendingThrow &&
             pair.First.State.Round==pair.Second.State.Round && pair.First.Timer==pair.Second.Timer);
 

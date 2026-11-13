@@ -240,8 +240,9 @@ public static class FighterStateMachine
             ? FighterLogicState.Crouching
             : FighterLogicState.Standing;
 
-        // 4) 指令消费（D60）：缓冲顺序即选择顺序（识别帧升序，确定性）。
-        foreach (BufferedResult result in recognition.Buffer)
+        // Default D60 uses FIFO. An opted-in fighter evaluates eligible commands in its CMD order.
+        HashSet<int>? failedDistanceInputs = definition.UseCommandPriority ? new() : null;
+        foreach (BufferedResult result in CommandCandidates(recognition, definition))
         {
             if (result.Consumed)
                 continue;
@@ -259,6 +260,8 @@ public static class FighterStateMachine
                 if (!move.CanStartAtDistance(opponentDistance, opponentBodyDistance))
                     continue;
 
+                if (failedDistanceInputs is not null)
+                    ConsumeRejected(ref recognition, failedDistanceInputs, match.RecognizedFrame);
                 return new FighterActionTick(
                     FighterLogicState.Startup,
                     move.MoveId,
@@ -271,8 +274,16 @@ public static class FighterStateMachine
 
             // 距离未通过的输入不能等到距离变化时自动发动；姿态未通过仍沿用缓冲规则。
             if (eligiblePosture)
-                recognition = recognition.WithResultConsumed(match.RecognizedFrame);
+            {
+                if (failedDistanceInputs is null)
+                    recognition = recognition.WithResultConsumed(match.RecognizedFrame);
+                else
+                    failedDistanceInputs.Add(match.RecognizedFrame);
+            }
         }
+
+        if (failedDistanceInputs is not null)
+            ConsumeRejected(ref recognition, failedDistanceInputs);
 
         return new FighterActionTick(idle, MoveId: null, 0, recognition, ConsumedMatch: null);
     }
@@ -343,6 +354,10 @@ public static class FighterStateMachine
         if (elapsed < 0)
             return null;
 
+        if (definition.UseCommandPriority)
+            return TryPriorityCancel(state, move, definition, ref recognition, input, frame, moveStartedFrame,
+                elapsed, hitConfirmFrame, blockConfirmFrame, opponentDistance, opponentBodyDistance);
+
         HashSet<int>? rejectedStandingInputs = null;
         foreach (CancelDefinition cancel in move.Cancels)
         {
@@ -389,6 +404,61 @@ public static class FighterStateMachine
                 recognition = recognition.WithResultConsumed(recognizedFrame);
 
         return null;
+    }
+
+    private static IEnumerable<BufferedResult> CommandCandidates(RecognitionState recognition, FighterDefinition definition) =>
+        definition.UseCommandPriority
+            ? recognition.Buffer.OrderByDescending(result => result.Match.Priority)
+                .ThenByDescending(result => result.Match.SequenceLength)
+                .ThenBy(result => result.Match.CommandId, StringComparer.Ordinal)
+                .ThenByDescending(result => result.Match.RecognizedFrame)
+            : recognition.Buffer;
+
+    private static FighterActionTick? TryPriorityCancel(FighterLogicState state, MoveDefinition move,
+        FighterDefinition definition, ref RecognitionState recognition, RelativeInput input, int frame,
+        int moveStartedFrame, int elapsed, int hitConfirmFrame, int blockConfirmFrame,
+        FixedPoint opponentDistance, FixedPoint opponentBodyDistance)
+    {
+        HashSet<int>? rejectedStandingInputs = null;
+        foreach (BufferedResult result in CommandCandidates(recognition, definition))
+        {
+            if (result.Consumed)
+                continue;
+            CommandMatch match = result.Match;
+            foreach (CancelDefinition cancel in move.Cancels)
+            {
+                if (!IsWindowOpen(cancel, state, elapsed) ||
+                    !cancel.ConfirmSatisfied(frame, hitConfirmFrame, blockConfirmFrame, moveStartedFrame))
+                    continue;
+                MoveDefinition? target = definition.FindMoveById(cancel.TargetMoveId);
+                if (target is null || !string.Equals(match.CommandId, target.CommandId, StringComparison.Ordinal) ||
+                    !target.CanStartAtDistance(opponentDistance, opponentBodyDistance))
+                    continue;
+                if (cancel.MaximumInputAge is { } age && (match.ButtonFrame < 0 || frame - match.ButtonFrame > age))
+                    continue;
+                if (cancel.StandingInputOnly && input.Down)
+                {
+                    (rejectedStandingInputs ??= new HashSet<int>()).Add(match.RecognizedFrame);
+                    continue;
+                }
+
+                if (rejectedStandingInputs is not null)
+                    ConsumeRejected(ref recognition, rejectedStandingInputs, match.RecognizedFrame);
+                return new FighterActionTick(FighterLogicState.Startup, target.MoveId, target.StartupFrames,
+                    recognition.WithResultConsumed(match.RecognizedFrame), match, MoveStartedFrame: frame, MoveElapsedFrames: 0);
+            }
+        }
+
+        if (rejectedStandingInputs is not null)
+            ConsumeRejected(ref recognition, rejectedStandingInputs);
+        return null;
+    }
+
+    private static void ConsumeRejected(ref RecognitionState recognition, HashSet<int> rejectedFrames, int exceptFrame = -1)
+    {
+        foreach (int rejected in rejectedFrames)
+            if (rejected != exceptFrame)
+                recognition = recognition.WithResultConsumed(rejected);
     }
 
     /// <summary>是否处于招式阶段（Startup/Active/Recovery）。</summary>

@@ -132,7 +132,8 @@ public sealed class FighterVisual
     {
         FighterState before = frame.StateBefore.Fighter(fighterIndex);
         FighterState after = frame.StateAfter.Fighter(fighterIndex);
-        bool frozen = before.HitstopRemainingFrames > 0 || frame.StateBefore.PendingThrow is not null;
+        bool frozen = before.HitstopRemainingFrames > 0 || frame.StateBefore.PendingThrow is not null
+            || frame.StateBefore.ScriptedPause.IsActive;
         if (!frozen || after.LogicState != before.LogicState)
             _walkDirection = AnimationResolver.ResolveWalkDirection(before, after);
         bool blocked = frame.Events.Any(e => e.TargetFighterId == fighterIndex &&

@@ -1428,6 +1428,17 @@ public partial class BattleScene
                         GD.Print($"[DamageAudit] logic={frame.LogicFrame} fighter={seat} rng={script.RandomState} " +
                             $"variance={script.Variance} counter={script.CounterAge} divisor={script.ContactDivisor} pause={script.Pause}");
                 }
+            if (HasArg("--scripted-pause-audit"))
+            {
+                ScriptedPauseState pause = frame.StateAfter.ScriptedPause;
+                GD.Print($"[ScriptedPauseAudit] logic={frame.LogicFrame} active={frame.StateBefore.ScriptedPause.IsActive} " +
+                    $"next={pause.IsActive} count={pause.Player1Counter},{pause.Player2Counter}");
+                foreach (ProjectileState entity in frame.StateAfter.Projectiles)
+                    if (entity.SpawnFacing is { } facing)
+                        GD.Print($"[WaveEntityAudit] logic={frame.LogicFrame} id={entity.ProjectileId} owner={entity.OwnerFighterId} " +
+                            $"x={entity.PositionX.RawValue} y={entity.PositionY.RawValue} vx={entity.VelocityX.RawValue} " +
+                            $"vy={entity.VelocityY.RawValue} life={entity.RemainingLifetime} left={facing == Facing.Left} contact={entity.HasContact}");
+            }
             if (HasArg("--visual-audit"))
             {
                 var a = frame.StateAfter.Fighter(0);
