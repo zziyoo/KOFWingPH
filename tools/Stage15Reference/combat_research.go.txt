@@ -18,6 +18,9 @@ var researchModeFile *os.File
 var researchModeEncoder *json.Encoder
 var researchMode2 = strings.HasPrefix(researchCase, "mode2-")
 var researchScenario = strings.TrimPrefix(strings.TrimPrefix(researchCase, "mode2-"), "default-")
+var researchStage17 = strings.HasPrefix(researchScenario, "damage-")
+var researchDamageScenario = strings.TrimPrefix(researchScenario, "damage-")
+var researchDamageMirror = researchStage17 && strings.HasPrefix(researchDamageScenario, "mirror-")
 var researchStage16 = strings.HasPrefix(researchScenario, "light-") || strings.HasPrefix(researchScenario, "heavy-")
 var researchTraceFile *os.File
 var researchEncoder *json.Encoder
@@ -61,11 +64,18 @@ func researchBegin() {
 		}
 		researchEncoder = json.NewEncoder(researchTraceFile)
 		sys.randseed = 1337
+		if researchStage17 {
+			seed, err := strconv.ParseInt(os.Getenv("RESEARCH_SEED"), 10, 32)
+			if err != nil || seed <= 0 || seed >= int64(IMax) {
+				panic("RESEARCH_SEED must be between 1 and 2147483646")
+			}
+			sys.randseed = int32(seed)
+		}
 
 		for pn := 0; pn < 2; pn++ {
 			c := sys.chars[pn][0]
 			sign := float32(1 - 2*pn)
-			if researchScenario == "mirror" || researchStage16 && strings.HasSuffix(researchScenario, "-mirror") {
+			if researchScenario == "mirror" || researchStage16 && strings.HasSuffix(researchScenario, "-mirror") || researchDamageMirror {
 				sign = -sign
 			}
 			c.pos, c.facing = [3]float32{-sign * float32(distance) / 2, 0, 0}, sign
@@ -92,6 +102,9 @@ func researchBits(pn int) InputBits {
 	if researchStage16 {
 		return researchCloseNormalBits(pn)
 	}
+	if researchStage17 {
+		return researchDamageBits(pn)
+	}
 	if pn == 0 && researchFrame == 5 {
 		return IB_Y
 	}
@@ -117,6 +130,67 @@ func researchBits(pn int) InputBits {
 			if researchFrame >= 10 && researchFrame <= 39 {
 				return IB_PR | IB_PD
 			}
+		}
+	}
+	return 0
+}
+
+func researchDamageBits(pn int) InputBits {
+	scenario := strings.TrimPrefix(researchDamageScenario, "mirror-")
+	if pn == 0 {
+		attackFrame := 5
+		switch scenario {
+		case "carry-expired":
+			attackFrame = 8
+		case "carry-last":
+			attackFrame = 6
+		}
+		if researchFrame == attackFrame {
+			if scenario == "light-near" || scenario == "light-far" || scenario == "near-trade" {
+				return IB_X
+			}
+			return IB_Y
+		}
+		return 0
+	}
+	switch scenario {
+	case "interrupt", "near-heavy-trade":
+		if researchFrame == 5 {
+			return IB_X
+		}
+	case "far-trade":
+		if researchFrame == 7 {
+			return IB_X
+		}
+	case "near-trade":
+		if researchFrame == 5 {
+			return IB_Y
+		}
+	case "second-only":
+		if researchFrame == 5 {
+			if researchDamageMirror {
+				return IB_PL
+			}
+			return IB_PR
+		}
+	case "heavy-guard", "heavy-far-guard":
+		guardFrame := 7
+		if scenario == "heavy-far-guard" {
+			guardFrame = 4
+		}
+		if researchFrame >= guardFrame {
+			if researchDamageMirror {
+				return IB_PL
+			}
+			return IB_PR
+		}
+	case "carry-live":
+		if researchFrame == 2 {
+			return IB_X
+		}
+	case "carry-last", "carry-expired", "carry-edge":
+		if researchFrame == 1 {
+			return IB_X
 		}
 	}
 	return 0
@@ -289,22 +363,63 @@ func researchTraceWithOwner(phase string, owner int) {
 			"friction": researchNumbers(c.getStandFriction(), c.getCrouchFriction()),
 			"attackMul": c.attackMul[0], "attackBase": c.gi().attackBase, "finalDefense": c.finalDefense,
 		}
-		if researchStage16 {
+		if researchStage16 || researchStage17 {
 			char["vars"].(map[string]interface{})["var23"] = c.varGet(23).ToI()
 		}
 		chars = append(chars, char)
 	}
-	if err := researchEncoder.Encode(map[string]interface{}{
+	row := map[string]interface{}{
 		"case": researchCase, "frame": researchFrame, "phase": phase, "hitDefOwner": owner,
 		"tick": sys.tickCount, "matchTime": sys.matchTime, "roundState": sys.roundState(),
 		"chars": chars,
-	}); err != nil {
+	}
+	if researchStage17 {
+		row["rng"] = sys.randseed
+	}
+	if err := researchEncoder.Encode(row); err != nil {
 		panic(err)
 	}
 }
 
+func researchStage17Event(kind string, values map[string]interface{}) {
+	if !researchStage17 || researchEncoder == nil {
+		return
+	}
+	values["case"], values["frame"], values["tick"], values["phase"] = researchCase, researchFrame, sys.tickCount, kind
+	if err := researchEncoder.Encode(values); err != nil {
+		panic(err)
+	}
+}
+
+func researchRandom(before, after int32) {
+	if researchStage17 && researchEncoder != nil {
+		researchStage17Event("rng-draw", map[string]interface{}{"before": before, "after": after})
+	}
+}
+
+func researchVarRandom(c *Char, variable, minimum, maximum, value int32) {
+	if researchStage17 && researchEncoder != nil && c.helperIndex == 0 && variable == 21 {
+		researchStage17Event("var21-draw", map[string]interface{}{
+			"seat": c.playerNo + 1, "state": c.ss.no, "min": minimum, "max": maximum, "value": value, "rng": sys.randseed,
+		})
+	}
+}
+
+func researchDamageVariable(c *Char, operation string, index, before, after int32) {
+	if researchStage17 && researchEncoder != nil && c.helperIndex == 0 && (index == 6 || index == 23) {
+		var opponentMoveType MoveType
+		if opponent := c.p2(); opponent != nil {
+			opponentMoveType = opponent.ss.moveType
+		}
+		researchStage17Event("damage-var", map[string]interface{}{
+			"seat": c.playerNo + 1, "state": c.ss.no, "moveType": c.ss.moveType, "opponentMoveType": opponentMoveType,
+			"variable": index, "operation": operation, "before": before, "after": after, "hitPause": c.hitPauseTime,
+		})
+	}
+}
+
 func researchHitDef(c *Char) {
-	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || researchStage16 && c.ss.no == 205) {
+	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || (researchStage16 || researchStage17) && c.ss.no == 205) {
 		researchTraceWithOwner("hitdef", c.playerNo+1)
 	}
 }

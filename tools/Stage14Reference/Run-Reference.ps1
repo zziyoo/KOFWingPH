@@ -1,9 +1,11 @@
 param(
     [string]$IkemenRoot = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Ikemen-GO'),
     [switch]$Prepare,
-    [ValidateSet('Stage14', 'Stage15', 'Stage16')]
+    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17')]
     [string]$CaptureProfile = 'Stage14',
     [string]$RunDirectory = 'local-mugen/stage14-reference',
+    [ValidateRange(1, 2147483646)]
+    [int]$Seed = 1337,
     [string[]]$Cases
 )
 
@@ -77,6 +79,27 @@ if ($CaptureProfile -eq 'Stage16') {
         }
     }
 }
+if ($CaptureProfile -eq 'Stage17') {
+    $captureDir = Join-Path $root 'tools/Stage15Reference'
+    $fixtures = [ordered]@{
+        'light-near' = 44; 'light-far' = 60; 'heavy-near' = 62; 'heavy-far' = 72
+        'far-trade' = 72; 'near-trade' = 44; 'near-heavy-trade' = 62; 'interrupt' = 72; 'second-only' = 64
+        'carry-live' = 80; 'carry-last' = 80; 'carry-expired' = 80
+        'mirror-heavy-near' = 62; 'mirror-heavy-far' = 72; 'mirror-far-trade' = 72; 'mirror-second-only' = 64
+    }
+    $distances = [ordered]@{}
+    foreach ($mode in @('default', 'mode2')) {
+        foreach ($fixture in $fixtures.GetEnumerator()) {
+            $distances["$mode-damage-$($fixture.Key)"] = $fixture.Value
+        }
+        $carryEdgeCase = "$mode-damage-carry-edge"
+        if ($Cases -contains $carryEdgeCase) { $distances[$carryEdgeCase] = 80 }
+        foreach ($guardFixture in @('heavy-guard', 'mirror-heavy-guard', 'heavy-far-guard', 'mirror-heavy-far-guard')) {
+            $guardCase = "$mode-damage-$guardFixture"
+            if ($Cases -contains $guardCase) { $distances[$guardCase] = 62 }
+        }
+    }
+}
 if (!$Cases) { $Cases = @($distances.Keys) }
 foreach ($caseName in $Cases) {
     if (!$distances.Contains($caseName)) { throw "Unknown $CaptureProfile case $caseName" }
@@ -89,6 +112,9 @@ $expectedSourceHashes = @{
     'Terry-N.cns' = 'dcbee6b2378faf00c7b7912a393e3c640ff3b9179b113b14b7c2ce9a5ecbab75'
     'Terry.cmd' = 'ee57ffe1d6d4a2770b47590ab69177de79b24ccfc0153702dd3602f633507b59'
     'Terry.air' = '252646cc2940f776e94df0b7b7fd3772e098d75fda6e9b781135eaa36e0fd851'
+}
+if ($CaptureProfile -eq 'Stage17') {
+    $expectedSourceHashes['Terry-2-3.cns'] = '90b83cdacd33a3800a825ee42bdbd6502b7989f4dec358126587edeb4495fdc4'
 }
 
 if ((Get-FileHash -LiteralPath $archive).Hash -ne $terryHash) {
@@ -133,6 +159,9 @@ if ($Prepare) {
     if ($index -lt 0) { throw 'Cannot find HitDef finalization in pinned source' }
     $source = $source.Insert($index + $before.Length, [string][char]9 + 'researchHitDef(crun)' + $newline)
     [IO.File]::WriteAllText($bytecode, $source)
+    if ($CaptureProfile -eq 'Stage17') {
+        & (Join-Path $root 'tools/Stage17Reference/Install-TraceHooks.ps1') -Engine $engine
+    }
     $env:MSYSTEM = 'MINGW64'
     $env:GOFLAGS = '-buildvcs=false'
     $env:STAGE14_IKEMEN_ENGINE = $engine
@@ -163,10 +192,17 @@ $metadata = [ordered]@{
     scenario_distance = $distances
 }
 if ($CaptureProfile -ne 'Stage14') { $metadata.capture_profile = $CaptureProfile }
+if ($CaptureProfile -eq 'Stage17') {
+    $metadata.rng_seed = $Seed
+    $metadata.executed_cases = @($Cases)
+}
 [IO.File]::WriteAllText((Join-Path $results 'run-metadata.json'), ($metadata | ConvertTo-Json -Depth 6) + [char]10, $enc)
 foreach ($caseName in $Cases) {
     $env:RESEARCH_CASE = $caseName
     $env:RESEARCH_DISTANCE = $distances[$caseName].ToString([Globalization.CultureInfo]::InvariantCulture)
+    if ($CaptureProfile -eq 'Stage17') {
+        $env:RESEARCH_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
+    }
     $env:RESEARCH_TRACE = Join-Path $results "$caseName.jsonl"
     $stderr = Join-Path $results "$caseName-stderr.txt"
     $caseArguments = $arguments
@@ -194,6 +230,7 @@ foreach ($caseName in $Cases) {
         trace_sha256 = $trace.Hash.ToLowerInvariant()
     }
     if ($CaptureProfile -ne 'Stage14') { $caseMetadata.arguments = $caseArguments }
+    if ($CaptureProfile -eq 'Stage17') { $caseMetadata.rng_seed = $Seed }
     [IO.File]::WriteAllText((Join-Path $results "$caseName-metadata.json"), ($caseMetadata | ConvertTo-Json) + [char]10, $enc)
     $trace
 }
