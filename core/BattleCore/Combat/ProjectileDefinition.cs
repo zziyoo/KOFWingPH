@@ -80,8 +80,9 @@ public sealed class ProjectileDefinition
             throw new ArgumentOutOfRangeException(nameof(spawnAtActiveFrame), spawnAtActiveFrame,
                 "投掷物出生帧不能为负。");
 
-        if (timeline is not null && (timeline.MovementFrames > lifetimeFrames || timeline.HitSpans[^1].LastFrame >= lifetimeFrames))
-            throw new ArgumentException("Entity movement and hit spans must fit its lifetime.", nameof(timeline));
+        if (timeline is not null && (timeline.MovementFrames > lifetimeFrames ||
+            timeline.HitSpans[^1].LastFrame >= lifetimeFrames || timeline.GuardThreatFrames > lifetimeFrames))
+            throw new ArgumentException("Entity movement, hit spans and guard threat must fit its lifetime.", nameof(timeline));
 
         ProjectileTypeId = projectileTypeId;
         Hit = hit;

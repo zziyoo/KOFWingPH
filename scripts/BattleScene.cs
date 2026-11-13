@@ -1433,6 +1433,9 @@ public partial class BattleScene
                 ScriptedPauseState pause = frame.StateAfter.ScriptedPause;
                 GD.Print($"[ScriptedPauseAudit] logic={frame.LogicFrame} active={frame.StateBefore.ScriptedPause.IsActive} " +
                     $"next={pause.IsActive} count={pause.Player1Counter},{pause.Player2Counter}");
+                for (int seat = 0; seat < 2; seat++)
+                    if (frame.StateAfter.Fighter(seat).LaunchReaction is { } launch)
+                        GD.Print($"[LaunchReactionAudit] logic={frame.LogicFrame} fighter={seat} phase={launch.Phase} tick={launch.Ticks}");
                 foreach (ProjectileState entity in frame.StateAfter.Projectiles)
                     if (entity.SpawnFacing is { } facing)
                         GD.Print($"[WaveEntityAudit] logic={frame.LogicFrame} id={entity.ProjectileId} owner={entity.OwnerFighterId} " +

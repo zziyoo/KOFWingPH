@@ -75,6 +75,12 @@ public sealed class FighterVisual
     {
         if (_throwVisual?.Clip(fighter) is string throwClip && _sprite?.HasClip(throwClip) == true)
             return (throwClip, null);
+        if (_sprite is not null && fighter.LaunchReaction is { } reaction)
+        {
+            string launch = $"launch_{reaction.Phase}";
+            if (_sprite.HasClip(launch))
+                return (launch, reaction.Phase is LaunchReactionPhase.Shake or LaunchReactionPhase.Lift ? 0 : reaction.Ticks);
+        }
         if (fighter.LogicState == FighterLogicState.Hitstun &&
             _sprite?.HitReactionClip(_hitReaction.MoveId, _hitReaction.Elapsed) is { } hitClip)
             return hitClip;

@@ -92,13 +92,43 @@ public sealed class ScriptedPauseTests
         Assert.Equal(991, state.Fighter(1).Health);
     }
 
-    private static (BattleSimulation Simulation, BattleState State) Setup()
+    [Fact]
+    public void MutualWaveLaunchPausesAtShakeEndBeforeEitherTargetMoves()
+    {
+        var (simulation, state) = Setup(dualLaunch: true);
+        var frozenFrames = new List<int>();
+        var heights = new List<(int Frame, FixedPoint Height, FixedPoint Velocity)>();
+        for (int frame = 0; frame < 30; frame++)
+        {
+            if (state.ScriptedPause.IsActive)
+                frozenFrames.Add(frame);
+            var step = simulation.Step(state, new FrameInput(frame,
+                frame == 0 ? InputBits.LightPunch : InputBits.None,
+                frame == 0 ? InputBits.LightPunch : InputBits.None));
+            state = step.State;
+            if (state.Fighter(0).PositionY != FixedPoint.Zero)
+                heights.Add((frame, state.Fighter(0).PositionY, state.Fighter(0).VelocityY));
+        }
+
+        Assert.Equal(new[] { 16, 21, 24 }, frozenFrames.Take(3));
+        Assert.Equal((17, FixedPoint.FromFraction(13, 2), FixedPoint.FromFraction(13, 2)), heights[0]);
+        Assert.Equal((18, FixedPoint.FromInt(12), FixedPoint.FromFraction(11, 2)), heights[1]);
+    }
+
+    private static (BattleSimulation Simulation, BattleState State) Setup(bool dualLaunch = false)
     {
         AttackDefinition hit = new(0, 30, 25, 20, 0, 0, AttackHeight.Mid, 76, 5, 4,
-            hitstopByOutcome: new HitstopByOutcome(new HitstopPair(0, 2), new HitstopPair(0, 1)));
+            launchVelocityX: dualLaunch ? FixedPoint.FromFraction(9, 2) : FixedPoint.Zero,
+            launchVelocityY: dualLaunch ? FixedPoint.FromFraction(13, 2) : FixedPoint.Zero,
+            knockdownFrames: dualLaunch ? 20 : 0,
+            hitstopByOutcome: new HitstopByOutcome(new HitstopPair(0, dualLaunch ? 13 : 2), new HitstopPair(0, 1)));
         var timeline = new ProjectileTimeline(4, new[]
         {
-            new ProjectileHitSpan(1, 2, new FixedRect(0, 80, 10, 50), hit, guardDamage: 9),
+            new ProjectileHitSpan(1, 2, new FixedRect(0, 80, 10, 50), hit, guardDamage: 9,
+                launchGravity: dualLaunch ? FixedPoint.FromFraction(1, 2) : null,
+                launchReaction: dualLaunch ? new LaunchReactionProfile(4, FixedPoint.FromFraction(3, 4),
+                    FixedPoint.FromFraction(7, 2), FixedPoint.FromFraction(1, 2), 13, 25,
+                    riseFrames: 8, lieImpactFrames: 3, transitionGravitySteps: 2) : null),
         }, requestPauseOnHit: true);
         var wave = new ProjectileDefinition("WaveEntity",
             new AttackDefinition(0, 0, 1, 1, 0, 0, AttackHeight.Mid, 0, 1, 1),
@@ -107,7 +137,7 @@ public sealed class ScriptedPauseTests
             new[] { new CommandDefinition("5A", Array.Empty<CommandDirection>(), InputBits.LightPunch) },
             new[] { new MoveDefinition("Wave", "5A", 1, 1, 58, projectiles: new[] { wave }) },
             damageRules: new DynamicDamageRules(DamageRatio.One, DamageRatio.One, DamageRatio.One, DamageRatio.One, 2, 2));
-        var simulation = new BattleSimulation(new FightRoster(definition, FightRoster.CreateEmpty().Player2));
+        var simulation = new BattleSimulation(new FightRoster(definition, dualLaunch ? definition : FightRoster.CreateEmpty().Player2));
         return (simulation, new BattleState(0,
             new[] { FighterState.Create(0, 1000, -40, Facing.Right), FighterState.Create(1, 1000, 40, Facing.Left) },
             BattleState.CreateDefault().StateVersion, roundTimerRemainingFrames: 100));

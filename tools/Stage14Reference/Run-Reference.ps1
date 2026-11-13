@@ -6,10 +6,15 @@ param(
     [string]$RunDirectory = 'local-mugen/stage14-reference',
     [ValidateRange(1, 2147483646)]
     [int]$Seed = 1337,
+    [ValidateRange(75, 600)]
+    [int]$LastFrame = 75,
     [string[]]$Cases
 )
 
 $ErrorActionPreference = 'Stop'
+if ($LastFrame -ne 75 -and $CaptureProfile -ne 'Stage19') {
+    throw 'Extended reference traces are only enabled for Stage19'
+}
 $commit = '5dac5caf9a02a9b81bf2264e88a1bbf68e21bba0'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $workspace = [IO.Path]::GetFullPath((Join-Path $root $RunDirectory))
@@ -296,12 +301,18 @@ if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19')) {
     $metadata.rng_seed = $Seed
     $metadata.executed_cases = @($Cases)
 }
+if ($LastFrame -ne 75) {
+    $metadata.last_frame = $LastFrame
+}
 [IO.File]::WriteAllText((Join-Path $results 'run-metadata.json'), ($metadata | ConvertTo-Json -Depth 6) + [char]10, $enc)
 foreach ($caseName in $Cases) {
     $env:RESEARCH_CASE = $caseName
     $env:RESEARCH_DISTANCE = $distances[$caseName].ToString([Globalization.CultureInfo]::InvariantCulture)
     if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19')) {
         $env:RESEARCH_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($CaptureProfile -eq 'Stage19') {
+        $env:RESEARCH_LAST_FRAME = $LastFrame.ToString([Globalization.CultureInfo]::InvariantCulture)
     }
     $env:RESEARCH_TRACE = Join-Path $results "$caseName.jsonl"
     $stderr = Join-Path $results "$caseName-stderr.txt"

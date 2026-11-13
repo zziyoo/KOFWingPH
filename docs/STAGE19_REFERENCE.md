@@ -27,6 +27,15 @@
 - 中心距 100 的空挥取消样本 F25 由早段 Helper 接触。中心距 60 的命中取消样本在 F36 由 Helper 实扣 76，目标 Shake 13 并进入击飞。对应站防 F36 削血 9、Shake 11，HP 991。Helper 的 HitDef 配置攻方停顿 0，碰撞中间记录的 1 在同帧结束归零，根角色没有自身 HitPause。早段地面速度为 −4.5、−6.5，设置 fall。
 - 中心距 142 的较远样本在 F33 仅晚段命中，Helper 元素零基 5、伤害 92、地面类别 Low、无 fall、地面速度 −10.5、0。F68 根动作仍在本地时间 52 退出，绝对帧较无接触样本延后。Helper 命中后给父角色 `var(31)=1`（`Terry-S.cns:374–377`）。State −2 在敌方 Shake 结束后按条件发出一 tick 全局 Pause（`Terry-2-3.cns:624–640`），补测 F48、F54、F60 可见 `globalPause=1` 且 `turbo=1`。原版局部动作时钟在这些帧保持。
 - 双方中心距 100 同时输入，F9 两边进入 1000，F24 分别创建两个不同实体。F25 各命中对方根角色，P1 实扣 107，P2 实扣 99，双方 1000 被打断到 5000，已存在的两个 Helper 继续至 F54 销毁。镜像保持相同结算值。原版以 Helper 实现 1020，并非标准 Projectile 槽，本样本无弹体互相抵消。模式 2 的 1050／1070 使用另一套行为，本轮只记录分支及观察结果。
+- 双发样本中，F38 开始时双方 State 5000 的本地时间为 12、Shake 为 1，根角色 HitPause 为 0。F38 结束时本地时间 13、Shake 0。F39 全局 Pause 保持时间与位置，F40 才进入 5030。固定引擎的 `src/char.go:12435–12641` 在每个角色的 `actionRun` 先执行 State −2，再推进该角色的本地时间与受击 Shake；同为受击根角色时低 ID 先执行（`src/char.go:13957–13990`）。因此 F38 后执行的一方读到对手已归零的 Shake，在自身偶数时间 12 触发暂停。`src/char.go:9405–9423` 写入暂停缓冲，`src/system.go:2875–2890` 提交给下一帧。单发晚段的首次暂停仍是 F48。
+
+## 击飞、落地与起身
+
+补采默认远身轻拳空挥取消、位置镜像空挥取消、远身轻拳命中取消三个场景，从 F0 到 F145。中心距 100 的两个空挥取消样本的目标在 F25 进入 5000，F39 进入 5030（首帧上移 6.5，向远侧移 4.5），F41 进入 5035（累计上移 12，竖直速度 5.5），F53 进入 5050。5030 的首帧 `HitVelSet` 覆盖先前的加速度，进入 5035 时两个状态分别施加 `.5`，其后每本地 tick 施加 `.5`。Action 5035 持续 8 tick，见 `Terry.air:4837–4845` 与 `common_kof.cns:1629–1706`。
+
+- F76 穿过地平面 6 单位，水平累计位移 117。F77 进入 5100 并将高度归零，水平位置保持，共 4 tick。NewKOF 快照高度下限为 0，F76 在地面高度保留独立的越界标记，下一 tick 按原版进入冲击阶段。
+- F81 进入 5101／Action 5160。水平速度乘 `.75` 变为 3.375，竖直速度从 3.5 扣首 tick 重力 `.5`，仍由冲击阶段的 `PosFreeze` 保持位置。F82 起反弹，F92 回到地面，水平累计位移 154.125。F93 进入 5110／Action 5170，前三 tick 后换 Action 5110，共倒地 13 tick。F106 进入 5120，25 tick 后 F131 恢复 Standing 与控制权。
+- 镜像样本的世界 X 全程反号，局部速度及其余边界相同。中心距 60 的首段命中取消，飞行道具在 F36 接触，后续上述边界整体延后 11 世界 tick，F142 恢复控制。落地、反弹、倒地与起身控制器见 `common_kof.cns:1931–2239`，文件 SHA-256 为 `3b934b5390e0b805df549db35601b4882d6c28b9165b56e3dcff72d3bd86c65b`。静态脚本还规定起身全程及控制恢复当帧 `NotHitBy SCA`，恢复当帧刷新 `NotHitBy AT` 8 tick。三条延长轨迹没有安排起身中的追击，故碰撞限制来自脚本而非本组采样。
 
 ## 证据和复现
 
@@ -40,4 +49,12 @@ $supplement = 'default-special-outside-whiff-9','default-special-far-whiff-9','d
 python tools/Stage19Reference/Check-Traces.py local-mugen/stage19-reference/results local-mugen/stage19-reference-supplement/results
 ```
 
-验证器逐项检查来源哈希、原版完成标记、逻辑帧、状态切换、根与 Helper 输入、接触及实体生命周期，共 30/30。该结果作为后续实现依据。
+延长的三场保存在 `local-mugen/stage19-reference-launch-recovery/results`。运行元数据 SHA-256 为 `fd742a92165718c75bcaa21b8c9dd723fb33fd0d9a943e405928ec9f1d8e8d9a`，执行文件 SHA-256 为 `e48b4a16652f88c3f4846638617a537595b10fbade70a3771f277c5f377366fa`。空挥、镜像空挥、命中三条轨迹 SHA-256 依次为 `31c8094c206a8ff80573626c5b709bcfc3390adb10e4a1bf449c29d4c8ceecdf`、`535305c2c23a54bab6c518e22a445067d3963f708cd46100ae90f5639003d9e4`、`fedc6da379ad610eba9be79bf5d9b2049136002ab53da79ba379d55a1ee740a9`。首次隔离编译因 C 盘临时空间不足失败，最终使用 D 盘任务专用 Go 编译缓存成功。角色包及旧采集目录保留原样。
+
+```powershell
+$launch = 'default-special-whiff-9','default-special-mirror-whiff-9','default-special-hit-20'
+& $run -CaptureProfile Stage19 -LastFrame 145 -Prepare -Cases $launch -RunDirectory local-mugen/stage19-reference-launch-recovery-new
+python tools/Stage19Reference/Check-Traces.py local-mugen/stage19-reference/results local-mugen/stage19-reference-supplement/results --launch-recovery local-mugen/stage19-reference-launch-recovery/results
+```
+
+验证器检查来源哈希、原版完成标记、逻辑帧、状态切换、根与 Helper 输入、接触及实体生命周期，常规 30/30。延长采集另有 3/3，断言镜像、轨迹和控制权恢复。

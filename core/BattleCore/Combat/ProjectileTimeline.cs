@@ -7,7 +7,7 @@ public sealed class ProjectileHitSpan
 {
     public ProjectileHitSpan(int firstFrame, int lastFrame, FixedRect localHitbox, AttackDefinition hit,
         int guardDamage = 0, DynamicAttackDamage? dynamicDamage = null, bool contactOnEdge = true,
-        FixedPoint? launchGravity = null)
+        FixedPoint? launchGravity = null, LaunchReactionProfile? launchReaction = null)
     {
         ArgumentNullException.ThrowIfNull(hit);
         if (firstFrame < 1 || lastFrame < firstFrame)
@@ -19,6 +19,8 @@ public sealed class ProjectileHitSpan
         if (launchGravity is { } gravity && (!hit.Launches || gravity <= FixedPoint.Zero ||
             gravity > FixedPoint.FromInt(MovementDefinition.MaxGravityUnits)))
             throw new ArgumentException("Entity launch gravity requires a launch and a valid gravity value.", nameof(launchGravity));
+        if (launchReaction is not null && launchGravity is null)
+            throw new ArgumentException("Entity launch reaction requires launch gravity.", nameof(launchReaction));
         if (hit.HitstopByOutcome is { } stop && (stop.Hit.AttackerFrames != 0 || stop.Block.AttackerFrames != 0))
             throw new ArgumentException("Entity contact can only freeze the defender.", nameof(hit));
         if (hit.DynamicDamage is not null || hit.CounterDamage is not null || hit.ContactGroup != 0 ||
@@ -33,6 +35,7 @@ public sealed class ProjectileHitSpan
         DynamicDamage = dynamicDamage;
         ContactOnEdge = contactOnEdge;
         LaunchGravity = launchGravity;
+        LaunchReaction = launchReaction;
     }
 
     public int FirstFrame { get; }
@@ -43,16 +46,20 @@ public sealed class ProjectileHitSpan
     public DynamicAttackDamage? DynamicDamage { get; }
     public bool ContactOnEdge { get; }
     public FixedPoint? LaunchGravity { get; }
+    public LaunchReactionProfile? LaunchReaction { get; }
 }
 
 /// <summary>Authoritative entity animation timing, with spawn-frame movement and one lifetime contact.</summary>
 public sealed class ProjectileTimeline
 {
-    public ProjectileTimeline(int movementFrames, IReadOnlyList<ProjectileHitSpan> hitSpans, bool requestPauseOnHit = false)
+    public ProjectileTimeline(int movementFrames, IReadOnlyList<ProjectileHitSpan> hitSpans,
+        bool requestPauseOnHit = false, int? guardThreatFrames = null)
     {
         ArgumentNullException.ThrowIfNull(hitSpans);
         if (movementFrames < 1)
             throw new ArgumentOutOfRangeException(nameof(movementFrames));
+        if (guardThreatFrames is < 1)
+            throw new ArgumentOutOfRangeException(nameof(guardThreatFrames));
         var spans = hitSpans.ToArray();
         if (spans.Length == 0)
             throw new ArgumentException("Entity timeline requires at least one hit span.", nameof(hitSpans));
@@ -67,11 +74,13 @@ public sealed class ProjectileTimeline
         MovementFrames = movementFrames;
         HitSpans = Array.AsReadOnly(spans);
         RequestPauseOnHit = requestPauseOnHit;
+        GuardThreatFrames = guardThreatFrames;
     }
 
     public int MovementFrames { get; }
     public IReadOnlyList<ProjectileHitSpan> HitSpans { get; }
     public bool RequestPauseOnHit { get; }
+    public int? GuardThreatFrames { get; }
 
     internal ProjectileHitSpan? HitAt(int age)
     {

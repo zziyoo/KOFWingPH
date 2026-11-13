@@ -128,6 +128,9 @@ public sealed class BattleSimulation
         public int MoveElapsedFrames;
         public int HitstopRemainingFrames;
         public int ProjectileSpawnMask;
+        public FixedPoint? HitLaunchGravity;
+        public LaunchReactionState? LaunchReaction;
+        public bool ProtectWakeup;
 
         /// <summary>是否处于地面可转向状态（站立/蹲下；动作与空中朝向冻结，D72）。</summary>
         public readonly bool CanTurn =>
@@ -230,6 +233,9 @@ public sealed class BattleSimulation
                     LandingWakeupFrames = fighter.LandingWakeupFrames,
                     HitstopRemainingFrames = Math.Max(0, fighter.HitstopRemainingFrames - 1),
                     ProjectileSpawnMask = fighter.ProjectileSpawnMask,
+                    HitLaunchGravity = fighter.HitLaunchGravity,
+                    LaunchReaction = fighter.LaunchReaction,
+                    ProtectWakeup = fighter.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup,
                 };
                 frozenThisFrame[i] = true;
                 continue;
@@ -242,6 +248,34 @@ public sealed class BattleSimulation
 
             // 2) 动作状态机 + 起跳 + 指令消费（D58/D60/D67/D68）；硬直倒计时（D78）。
             RelativeInput resolved = DirectionResolver.Resolve(bits, fighter.Facing);
+
+            if (fighter.LaunchReaction is not null)
+            {
+                // The source recovery controller owns movement until control returns on the next tick.
+                FighterState reaction = ScriptedLaunchLanding.Advance(fighter);
+                candidates[i] = new FighterCandidate
+                {
+                    LogicState = reaction.LogicState,
+                    Recognition = recognition,
+                    PositionX = reaction.PositionX,
+                    PositionY = reaction.PositionY,
+                    VelocityX = reaction.VelocityX,
+                    VelocityY = reaction.VelocityY,
+                    Facing = reaction.Facing,
+                    UpHeld = resolved.Up,
+                    BackHeld = resolved.Back,
+                    Health = reaction.Health,
+                    StunRemainingFrames = reaction.StunRemainingFrames,
+                    MoveStartedFrame = -1,
+                    LandingKnockdownFrames = reaction.LandingKnockdownFrames,
+                    LandingWakeupFrames = reaction.LandingWakeupFrames,
+                    HitLaunchGravity = reaction.HitLaunchGravity,
+                    LaunchReaction = reaction.LaunchReaction,
+                    ProtectWakeup = fighter.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup ||
+                        reaction.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup,
+                };
+                continue;
+            }
 
             // 动作有效经过帧数（D96）：帧开始时已在招式中 → 上一帧值 + 1；
             // 本帧发动/取消时由状态机返回 0（新实例）。
@@ -309,13 +343,14 @@ public sealed class BattleSimulation
             else if (tick.State == FighterLogicState.AirHitstun)
             {
                 // 空中受击（D93）：与跳跃共用同一套定点积分；落地转倒地 / 起身 / 站立。
+                FixedPoint? scriptedGravity = fighter.HitLaunchGravity;
                 AirborneTick air = AirborneMovement.Integrate(
                     fighter.PositionX,
                     fighter.PositionY,
                     fighter.VelocityX,
                     fighter.VelocityY,
-                    fighter.HitLaunchGravity ?? definition.Movement.JumpGravity,
-                    velocityBeforeGravity: fighter.HitLaunchGravity.HasValue);
+                    scriptedGravity ?? definition.Movement.JumpGravity,
+                    velocityBeforeGravity: scriptedGravity.HasValue);
 
                 x = air.PositionX;
                 y = air.PositionY;
@@ -380,7 +415,8 @@ public sealed class BattleSimulation
             else if (tick.State == FighterLogicState.Standing)
             {
                 // 地面步行（D65）：仅站立待机响应前后输入。
-                x = GroundMovement.StepX(tick.State, fighter.PositionX, fighter.Facing, resolved, definition.Movement);
+                if (!resolved.Back || !HasForwardGuardThreat(state, i))
+                    x = GroundMovement.StepX(tick.State, fighter.PositionX, fighter.Facing, resolved, definition.Movement);
             }
             // PreJump / Crouching / 动作三阶段 / 倒地 / 起身：原地（速度归零，坐标不变）。
 
@@ -411,6 +447,7 @@ public sealed class BattleSimulation
                 ProjectileSpawnMask = tick.MoveStartedFrame == fighter.MoveStartedFrame
                     ? fighter.ProjectileSpawnMask
                     : 0,
+                HitLaunchGravity = fighter.HitLaunchGravity,
             };
         }
 
@@ -454,6 +491,8 @@ public sealed class BattleSimulation
                 MoveElapsedFrames = candidates[i].MoveElapsedFrames,
                 HitstopRemainingFrames = candidates[i].HitstopRemainingFrames,
                 ProjectileSpawnMask = candidates[i].ProjectileSpawnMask,
+                HitLaunchGravity = candidates[i].HitLaunchGravity,
+                LaunchReaction = candidates[i].LaunchReaction,
             };
 
             // 命中/防御确认属于「当前攻击实例」：换招、被中断或回到待机后必须清空（D91）。
@@ -468,7 +507,8 @@ public sealed class BattleSimulation
         //    + 攻击实例去重（同一发动对同一目标只结算一次，被防御亦算已结算）。
         IReadOnlyList<AttackContact> contacts = state.PendingThrow is not null ? Array.Empty<AttackContact>() : HitDetection.Detect(
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1),
-            state.Fighters[0].LogicState, state.Fighters[1].LogicState);
+            state.Fighters[0].LogicState, state.Fighters[1].LogicState,
+            candidates[0].ProtectWakeup, candidates[1].ProtectWakeup);
 
         // ── 第 6a 阶段：攻击相杀（D98）——两个攻击实例的攻击框正面积重叠，
         //    且双方都<b>没有</b>打中对方受击框（攻击在空中对撞）。任一方真正命中的帧
@@ -482,7 +522,7 @@ public sealed class BattleSimulation
         // 从 Active 直接改成 Recovery，若先改写再采集，首个 Active 帧相杀时两条 AttackActive
         // （以及投技尝试）会全部丢失。事件组装只读这两份快照，绝不回读改写后的状态。
         AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster, frozenThisFrame);
-        ThrowAttempt[] throwAttempts = CollectThrowAttempts(nextFighters, _roster, frozenThisFrame);
+        ThrowAttempt[] throwAttempts = CollectThrowAttempts(nextFighters, _roster, frozenThisFrame, candidates);
 
         if (strikeClash)
             ApplyStrikeClash(nextFighters, _roster);
@@ -648,12 +688,48 @@ public sealed class BattleSimulation
                 : current.LogicState == previous.LogicState;
             bool newReaction = current.HitstopRemainingFrames > previous.HitstopRemainingFrames &&
                 HasHitMoveType(current.LogicState);
+            bool sourceFlightTransition = previous.LaunchReaction?.Phase != current.LaunchReaction?.Phase &&
+                (previous.LaunchReaction?.Phase, current.LaunchReaction?.Phase) !=
+                    (LaunchReactionPhase.LyingImpact, LaunchReactionPhase.Lying);
             if (newReaction)
                 fighters[seat] = current with { LogicStateTicks = 0 };
-            else if (!sameState)
+            else if (!sameState || sourceFlightTransition)
                 fighters[seat] = current with { LogicStateTicks = 1 };
             else if (state.PendingThrow is null && (previous.HitstopRemainingFrames == 0 || HasHitMoveType(previous.LogicState)))
                 fighters[seat] = current with { LogicStateTicks = checked(previous.LogicStateTicks + 1) };
+        }
+    }
+
+    private bool HasForwardGuardThreat(BattleState state, int defendingSeat)
+    {
+        int attackingSeat = 1 - defendingSeat;
+        FighterDefinition attackerDefinition = _roster.Fighter(attackingSeat);
+        if (attackerDefinition.ForwardGuardDistance is not { } range)
+            return false;
+
+        FighterState attacker = state.Fighter(attackingSeat);
+        FighterState defender = state.Fighter(defendingSeat);
+        if (attacker.MoveId is { } move && attackerDefinition.FindMoveById(move)?.GuardThreatFrames is { } moveEnd &&
+            attacker.MoveElapsedFrames < moveEnd && IsAhead(attacker.PositionX, attacker.Facing))
+            return true;
+
+        foreach (ProjectileState entity in state.Projectiles)
+        {
+            if (entity.OwnerFighterId != attackingSeat || entity.SpawnFacing is not { } facing)
+                continue;
+            ProjectileDefinition definition = ResolveProjectile(entity);
+            if (definition.Timeline?.GuardThreatFrames is { } entityEnd &&
+                definition.LifetimeFrames - entity.RemainingLifetime < entityEnd && IsAhead(entity.PositionX, facing))
+                return true;
+        }
+        return false;
+
+        bool IsAhead(FixedPoint source, Facing facing)
+        {
+            Int128 distance = (Int128)defender.PositionX.RawValue - source.RawValue;
+            if (facing == Facing.Left)
+                distance = -distance;
+            return distance > 0 && distance < range.RawValue;
         }
     }
 
@@ -664,12 +740,18 @@ public sealed class BattleSimulation
         int AdvanceSeat(int seat)
         {
             FighterState previous = state.Fighter(seat);
+            FighterState target = state.Fighter(1 - seat);
             int counter = state.ScriptedPause.ForSeat(seat);
-            if (counter != 0 && previous.HitstopRemainingFrames == 0 && state.PendingThrow is null)
+            // Native victim shake keeps State -2 running. When both roots are in hit reactions,
+            // the second root observes the first root's completed shake in the same native tick.
+            bool scriptedShake = previous.HitLaunchGravity.HasValue && previous.HitstopRemainingFrames > 0;
+            bool targetShakeEndsEarlier = seat == 1 && HasHitMoveType(previous.LogicState) &&
+                target.HitLaunchGravity.HasValue && target.HitstopRemainingFrames == 1;
+            if (counter != 0 && (previous.HitstopRemainingFrames == 0 || scriptedShake) && state.PendingThrow is null)
             {
                 if (counter == ScriptedPauseState.ResetCounter)
                     counter = 0;
-                if (counter > 0 && state.Fighter(1 - seat).HitstopRemainingFrames == 0)
+                if (counter > 0 && (target.HitstopRemainingFrames == 0 || targetShakeEndsEarlier))
                     counter++;
 
                 request |= counter >= 2 && previous.LogicStateTicks % 2 == 0;
@@ -841,6 +923,7 @@ public sealed class BattleSimulation
                     LandingKnockdownFrames = settled.KnockdownFrames,
                     LandingWakeupFrames = settled.WakeupFrames,
                     HitLaunchGravity = null,
+                    LaunchReaction = null,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     LastHitContactGroups = settled.ContactGroups,
                     MoveStartedFrame = -1,
@@ -866,6 +949,7 @@ public sealed class BattleSimulation
                     KnockbackFriction = FixedPoint.Zero,
                     LandingKnockdownFrames = 0,
                     LandingWakeupFrames = 0,
+                    HitLaunchGravity = defenderState.LaunchReaction is null ? null : defenderState.HitLaunchGravity,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     LastHitContactGroups = settled.ContactGroups,
                     MoveStartedFrame = -1,
@@ -930,7 +1014,7 @@ public sealed class BattleSimulation
     /// 目标在投技者<b>面前</b>且水平距离 ≤ 范围 + 本实例尚未抓过该目标（D81 同构去重）。</para>
     /// </summary>
     private static ThrowAttempt[] CollectThrowAttempts(
-        FighterState[] fighters, FightRoster roster, bool[] frozenThisFrame)
+        FighterState[] fighters, FightRoster roster, bool[] frozenThisFrame, FighterCandidate[] candidates)
     {
         var attempts = new ThrowAttempt[fighters.Length];
 
@@ -969,7 +1053,7 @@ public sealed class BattleSimulation
 
             int target = 1 - i;
             FighterState defender = fighters[target];
-            bool inRange = definition.AllowsTarget(defender.LogicState)
+            bool inRange = !candidates[target].ProtectWakeup && definition.AllowsTarget(defender.LogicState)
                 && defender.LastThrowStartFrame != attacker.MoveStartedFrame
                 && IsWithinThrowReach(attacker, defender, definition.Range);
 
@@ -1323,7 +1407,7 @@ public sealed class BattleSimulation
 
             ProjectileState projectile = alive[i];
             int target = 1 - projectile.OwnerFighterId;
-            if (alreadyHit[target])
+            if (alreadyHit[target] || candidates[target].ProtectWakeup)
             {
                 survivors.Add(projectile); // 本帧该目标已被另一枚命中：这枚继续飞（不消失）。
                 continue;
@@ -1575,6 +1659,9 @@ public sealed class BattleSimulation
                 LandingKnockdownFrames = hit.KnockdownFrames,
                 LandingWakeupFrames = hit.WakeupFrames,
                 HitLaunchGravity = span?.LaunchGravity,
+                LaunchReaction = span?.LaunchReaction is { } launchReaction
+                    ? new LaunchReactionState(launchReaction, LaunchReactionPhase.Shake, 0)
+                    : null,
                 MoveStartedFrame = -1,
                 MoveElapsedFrames = 0,
                 ProjectileSpawnMask = 0,
@@ -1598,7 +1685,7 @@ public sealed class BattleSimulation
                 KnockbackFriction = FixedPoint.Zero,
                 LandingKnockdownFrames = 0,
                 LandingWakeupFrames = 0,
-                HitLaunchGravity = null,
+                HitLaunchGravity = defender.LaunchReaction is null ? null : defender.HitLaunchGravity,
                 MoveStartedFrame = -1,
                 MoveElapsedFrames = 0,
                 ProjectileSpawnMask = 0,
@@ -1688,6 +1775,9 @@ public sealed class BattleSimulation
     /// </summary>
     private static FighterState NormalizeLandingPlan(FighterState fighter)
     {
+        if (fighter.LaunchReaction is { } reaction && reaction.LogicState != fighter.LogicState)
+            fighter = fighter with { LaunchReaction = null };
+
         if (fighter.LogicState == FighterLogicState.AirHitstun)
             return fighter;
 

@@ -83,6 +83,114 @@ public sealed class ProjectileTimelineTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void ScriptedLaunchMatchesBothAirArcsAndRecovery(bool mirrored)
+    {
+        var simulation = CreateSimulation(scriptedLaunch: true);
+        BattleState state = Cast(simulation, Duel(60, mirrored), both: false);
+        BattleState Step() => state = simulation.Step(state, FrameInput.Empty(state.Frame)).State;
+        FighterState target = Step().Fighter(1);
+        Assert.Equal(LaunchReactionPhase.Shake, target.LaunchReaction!.Value.Phase);
+        for (int frame = 0; frame < 13; frame++)
+        {
+            target = Step().Fighter(1);
+            Assert.Equal(LaunchReactionPhase.Shake, target.LaunchReaction!.Value.Phase);
+            Assert.Equal(FixedPoint.Zero, target.PositionY);
+        }
+
+        var samples = new Dictionary<int, FighterState>();
+        for (int frame = 1; frame <= 81; frame++)
+            samples[frame] = Step().Fighter(1);
+
+        int direction = mirrored ? -1 : 1;
+        void Verify(int frame, LaunchReactionPhase phase, int ticks, FixedPoint x, FixedPoint y,
+            FixedPoint vy, bool groundCrossed = false)
+        {
+            FighterState sample = samples[frame];
+            LaunchReactionState reaction = sample.LaunchReaction!.Value;
+            Assert.Equal((phase, ticks, groundCrossed), (reaction.Phase, reaction.Ticks, reaction.GroundCrossed));
+            Assert.Equal((x * direction, y, vy), (sample.PositionX, sample.PositionY, sample.VelocityY));
+        }
+
+        Verify(1, LaunchReactionPhase.Lift, 1, FixedPoint.FromFraction(69, 2), FixedPoint.FromFraction(13, 2),
+            FixedPoint.FromFraction(13, 2));
+        Verify(2, LaunchReactionPhase.Rise, 1, 39, 12, FixedPoint.FromFraction(11, 2));
+        Verify(9, LaunchReactionPhase.Rise, 8, FixedPoint.FromFraction(141, 2), FixedPoint.FromFraction(73, 2), 2);
+        Verify(10, LaunchReactionPhase.Fall, 1, 75, 38, FixedPoint.FromFraction(3, 2));
+        Verify(26, LaunchReactionPhase.Fall, 17, 147, 0, FixedPoint.FromFraction(-13, 2), groundCrossed: true);
+        Verify(27, LaunchReactionPhase.Impact, 1, 147, 0, 0);
+        Verify(30, LaunchReactionPhase.Impact, 4, 147, 0, 0);
+        Verify(31, LaunchReactionPhase.Bounce, 1, 147, 0, 3);
+        Verify(32, LaunchReactionPhase.Bounce, 2, FixedPoint.FromFraction(1203, 8),
+            FixedPoint.FromFraction(5, 2), FixedPoint.FromFraction(5, 2));
+        FixedPoint restingX = FixedPoint.FromFraction(1473, 8);
+        Verify(42, LaunchReactionPhase.Bounce, 12, restingX, 0, FixedPoint.FromFraction(-5, 2), groundCrossed: true);
+        Verify(43, LaunchReactionPhase.LyingImpact, 1, restingX, 0, 0);
+        Verify(45, LaunchReactionPhase.LyingImpact, 3, restingX, 0, 0);
+        Verify(46, LaunchReactionPhase.Lying, 1, restingX, 0, 0);
+        Verify(55, LaunchReactionPhase.Lying, 10, restingX, 0, 0);
+        Verify(56, LaunchReactionPhase.Wakeup, 1, restingX, 0, 0);
+        Verify(80, LaunchReactionPhase.Wakeup, 25, restingX, 0, 0);
+        Assert.Equal(FighterLogicState.Standing, samples[81].LogicState);
+        Assert.Null(samples[81].LaunchReaction);
+        Assert.Equal(restingX * direction, samples[81].PositionX);
+    }
+
+    [Theory]
+    [InlineData(26)]
+    [InlineData(42)]
+    public void NonLaunchingStrikeOnGroundCrossingKeepsReactionValid(int crossingFrame)
+    {
+        var simulation = CreateSimulation(scriptedLaunch: true, farJab: true);
+        BattleState state = Cast(simulation, Duel(60), both: false);
+        state = simulation.Step(state, FrameInput.Empty(state.Frame)).State;
+        for (int frame = 0; frame < 13 + crossingFrame - 2; frame++)
+            state = simulation.Step(state, FrameInput.Empty(state.Frame)).State;
+        state = simulation.Step(state, new FrameInput(state.Frame, InputBits.LightPunch, InputBits.None)).State;
+        BattleStepResult struck = simulation.Step(state, FrameInput.Empty(state.Frame));
+        Assert.Contains(struck.Events, e => e.Type == BattleEventType.Hit);
+        FighterState defender = struck.State.Fighter(1);
+        Assert.Equal(FighterLogicState.AirHitstun, defender.LogicState);
+        Assert.True(defender.LaunchReaction!.Value.GroundCrossed);
+        Assert.Equal(FixedPoint.Zero, defender.PositionY);
+        Assert.True(defender.VelocityY < FixedPoint.Zero);
+
+        BattleState landed = simulation.Step(struck.State, FrameInput.Empty(struck.State.Frame)).State;
+        Assert.Equal(FighterLogicState.Knockdown, landed.Fighter(1).LogicState);
+        Assert.Equal(crossingFrame == 26 ? LaunchReactionPhase.Impact : LaunchReactionPhase.LyingImpact,
+            landed.Fighter(1).LaunchReaction!.Value.Phase);
+    }
+
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(24, true)]
+    public void ScriptedWakeupProtectsStrikesThroughTheControlReturnTick(int wakeupTick, bool exits)
+    {
+        var simulation = CreateSimulation(scriptedLaunch: true, farJab: true);
+        BattleState state = Cast(simulation, Duel(60), both: false);
+        while (state.Fighter(1).LaunchReaction is not { Phase: LaunchReactionPhase.Wakeup } reaction ||
+               reaction.Ticks < wakeupTick)
+        {
+            Assert.InRange(state.Frame, 0, 110);
+            state = simulation.Step(state, FrameInput.Empty(state.Frame)).State;
+        }
+
+        int health = state.Fighter(1).Health;
+        state = simulation.Step(state, new FrameInput(state.Frame, InputBits.LightPunch, InputBits.None)).State;
+        BattleStepResult protectedFrame = simulation.Step(state, FrameInput.Empty(state.Frame));
+        Assert.DoesNotContain(protectedFrame.Events, e => e.Type == BattleEventType.Hit);
+        Assert.Equal(health, protectedFrame.State.Fighter(1).Health);
+        Assert.Equal(exits ? FighterLogicState.Standing : FighterLogicState.Wakeup, protectedFrame.State.Fighter(1).LogicState);
+        if (exits)
+        {
+            BattleStepResult after = simulation.Step(protectedFrame.State, FrameInput.Empty(protectedFrame.State.Frame));
+            Assert.Contains(after.Events, e => e.Type == BattleEventType.Hit);
+            Assert.Equal(health - 10, after.State.Fighter(1).Health);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void LethalHitOrChipClearsTimelineEntitiesAtRoundEnd(bool guard)
     {
         var simulation = CreateSimulation();
@@ -156,7 +264,7 @@ public sealed class ProjectileTimelineTests
         Assert.Equal(1, state.NextProjectileId);
     }
 
-    private static BattleSimulation CreateSimulation(bool varyDamage = false)
+    private static BattleSimulation CreateSimulation(bool varyDamage = false, bool scriptedLaunch = false, bool farJab = false)
     {
         AttackDefinition Hit(bool launch) => new(
             0, 0, 1, 1, height: AttackHeight.Mid, hitstunFrames: 18, blockstunFrames: 17,
@@ -167,10 +275,13 @@ public sealed class ProjectileTimelineTests
             knockdownFrames: launch ? 10 : 0, wakeupFrames: launch ? 8 : 0,
             hitstopByOutcome: new HitstopByOutcome(new HitstopPair(0, 13), new HitstopPair(0, 11)));
         var damage = new DynamicAttackDamage(varyDamage ? 7 : 5, varyDamage ? 7 : 5, false);
+        var reaction = scriptedLaunch ? new LaunchReactionProfile(4, FixedPoint.FromFraction(3, 4),
+            FixedPoint.FromFraction(7, 2), FixedPoint.FromFraction(1, 2), 13, 25,
+            riseFrames: 8, lieImpactFrames: 3, transitionGravitySteps: 2) : null;
         var timeline = new ProjectileTimeline(11, new[]
         {
             new ProjectileHitSpan(1, 8, new FixedRect(16, 79, 1, 48), Hit(true), 9, damage,
-                launchGravity: FixedPoint.FromFraction(1, 2)),
+                launchGravity: FixedPoint.FromFraction(1, 2), launchReaction: reaction),
             new ProjectileHitSpan(9, 12, new FixedRect(80, 119, 1, 88), Hit(false), 9, damage),
         });
         var wave = new ProjectileDefinition(Wave, new AttackDefinition(0, 0, 1, 1), Speed,
@@ -181,7 +292,8 @@ public sealed class ProjectileTimelineTests
         var jabCommand = new CommandDefinition("5A", Array.Empty<CommandDirection>(), InputBits.LightPunch,
             priority: 5, bufferLifetimeFrames: 2);
         var jab = new MoveDefinition("Jab", "5A", 1, 2, 5,
-            attacks: new[] { new AttackDefinition(45, 60, 30, 30, damage: 10, hitstunFrames: 10) });
+            attacks: new[] { farJab ? new AttackDefinition(160, 20, 60, 20, damage: 10, hitstunFrames: 10)
+                : new AttackDefinition(45, 60, 30, 30, damage: 10, hitstunFrames: 10) });
         var rules = new DynamicDamageRules(new DamageRatio(3, 2), new DamageRatio(1, 2),
             DamageRatio.One, DamageRatio.One, varianceMaximum: varyDamage ? 2 : 0, counterGraceTicks: 2);
         var movement = new MovementDefinition(2, 2, 2, 6, 8, 1, 2);

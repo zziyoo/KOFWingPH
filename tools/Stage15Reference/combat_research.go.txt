@@ -663,7 +663,13 @@ func researchEnd() {
 		return
 	}
 	researchTrace("end")
-	if researchFrame >= 75 {
+	lastFrame := 75
+	if researchStage19 {
+		if configured, err := strconv.Atoi(os.Getenv("RESEARCH_LAST_FRAME")); err == nil && configured >= 75 {
+			lastFrame = configured
+		}
+	}
+	if researchFrame >= lastFrame {
 		if err := researchTraceFile.Close(); err != nil {
 			panic(err)
 		}

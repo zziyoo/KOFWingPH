@@ -71,7 +71,8 @@ public readonly record struct FighterState(
     uint LastHitContactGroups = 0,
     DamageScriptState DamageScript = default,
     FixedPoint? HitLaunchGravity = null,
-    int LogicStateTicks = 0)
+    int LogicStateTicks = 0,
+    LaunchReactionState? LaunchReaction = null)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -206,7 +207,7 @@ public readonly record struct FighterState(
                 if (PositionY < FixedPoint.Zero)
                     throw new InvalidOperationException(
                         $"角色 {Id} 处于空中受击但高度为负：{PositionY}。");
-                if (PositionY == FixedPoint.Zero && VelocityY <= FixedPoint.Zero)
+                if (PositionY == FixedPoint.Zero && VelocityY <= FixedPoint.Zero && LaunchReaction is not { GroundCrossed: true })
                     throw new InvalidOperationException(
                         $"角色 {Id} 处于空中受击且高度为 0，但垂直速度 {VelocityY} 不为正" +
                         "（击飞首帧之后必须由空中积分抬升；地面受击不应进入该状态）。");
@@ -273,6 +274,14 @@ public readonly record struct FighterState(
         if (HitLaunchGravity is { } hitGravity && (LogicState != FighterLogicState.AirHitstun ||
             hitGravity <= FixedPoint.Zero || hitGravity > FixedPoint.FromInt(MovementDefinition.MaxGravityUnits)))
             throw new InvalidOperationException($"角色 {Id} 的受击重力 {HitLaunchGravity} 与当前状态不符。");
+        if (LaunchReaction is { } reaction && (reaction.Profile is null || !Enum.IsDefined(reaction.Phase) ||
+            reaction.LogicState != LogicState || reaction.Ticks < 0 ||
+            (reaction.Phase == LaunchReactionPhase.Shake) != (reaction.Ticks == 0) ||
+            HitLaunchGravity is null && reaction.Phase is (LaunchReactionPhase.Shake or LaunchReactionPhase.Lift or
+                LaunchReactionPhase.Rise or LaunchReactionPhase.Fall) ||
+            reaction.GroundCrossed && (PositionY != FixedPoint.Zero || VelocityY >= FixedPoint.Zero ||
+                reaction.Phase is not (LaunchReactionPhase.Fall or LaunchReactionPhase.Rise or LaunchReactionPhase.Bounce))))
+            throw new InvalidOperationException($"角色 {Id} 的击飞恢复快照与当前状态不符。");
 
         // 落地计划（阶段 07C，D93）：AirHitstun 携带「倒地/起身帧数」计划；
         // 落地后倒地帧数转为 StunRemaining，起身帧数继续携带到倒地结束。

@@ -243,14 +243,18 @@ public static class HitDetection
         FighterDefinition definition0,
         FighterDefinition definition1,
         FighterLogicState? previous0 = null,
-        FighterLogicState? previous1 = null)
+        FighterLogicState? previous1 = null,
+        bool protectTarget0 = false,
+        bool protectTarget1 = false)
     {
         ArgumentNullException.ThrowIfNull(definition0);
         ArgumentNullException.ThrowIfNull(definition1);
 
         List<AttackContact>? contacts = null;
-        Collect(fighter0, fighter1, definition0, definition1, previous1, 0, ref contacts);
-        Collect(fighter1, fighter0, definition1, definition0, previous0, 1, ref contacts);
+        if (!protectTarget1)
+            Collect(fighter0, fighter1, definition0, definition1, previous1, 0, ref contacts);
+        if (!protectTarget0)
+            Collect(fighter1, fighter0, definition1, definition0, previous0, 1, ref contacts);
 
         // 只读包装（D34/D61 同一先例）：快照附属数据不得暴露可变 List。
         return contacts is null

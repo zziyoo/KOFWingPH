@@ -36,6 +36,9 @@ public sealed class FighterDocumentDto
     [JsonPropertyName("allowStrikeClash")]
     public bool AllowStrikeClash { get; set; } = true;
 
+    [JsonPropertyName("forwardGuardDistance")]
+    public FractionDto? ForwardGuardDistance { get; set; }
+
     [JsonPropertyName("moves")]
     public List<MoveDto>? Moves { get; set; }
 
@@ -252,6 +255,9 @@ public sealed class MoveDto
 
     [JsonPropertyName("maximumStartBodyDistance")]
     public FractionDto? MaximumStartBodyDistance { get; set; }
+
+    [JsonPropertyName("guardThreatFrames")]
+    public int? GuardThreatFrames { get; set; }
 
     [JsonPropertyName("hurtboxTimeline")]
     public List<MoveHurtboxSpanDto>? HurtboxTimeline { get; set; }
@@ -481,6 +487,9 @@ public sealed class ProjectileTimelineDto
 
     [JsonPropertyName("requestPauseOnHit")]
     public bool RequestPauseOnHit { get; set; }
+
+    [JsonPropertyName("guardThreatFrames")]
+    public int? GuardThreatFrames { get; set; }
 }
 
 public sealed class ProjectileHitSpanDto
@@ -508,4 +517,37 @@ public sealed class ProjectileHitSpanDto
 
     [JsonPropertyName("launchGravity")]
     public FractionDto? LaunchGravity { get; set; }
+
+    [JsonPropertyName("launchReaction")]
+    public LaunchReactionDto? LaunchReaction { get; set; }
+}
+
+public sealed class LaunchReactionDto
+{
+    [JsonPropertyName("impactFrames")]
+    public int? ImpactFrames { get; set; }
+
+    [JsonPropertyName("bounceHorizontalRetention")]
+    public FractionDto? BounceHorizontalRetention { get; set; }
+
+    [JsonPropertyName("bounceVerticalVelocity")]
+    public FractionDto? BounceVerticalVelocity { get; set; }
+
+    [JsonPropertyName("bounceGravity")]
+    public FractionDto? BounceGravity { get; set; }
+
+    [JsonPropertyName("lieDownFrames")]
+    public int? LieDownFrames { get; set; }
+
+    [JsonPropertyName("wakeupFrames")]
+    public int? WakeupFrames { get; set; }
+
+    [JsonPropertyName("riseFrames")]
+    public int? RiseFrames { get; set; }
+
+    [JsonPropertyName("lieImpactFrames")]
+    public int? LieImpactFrames { get; set; }
+
+    [JsonPropertyName("transitionGravitySteps")]
+    public int? TransitionGravitySteps { get; set; }
 }

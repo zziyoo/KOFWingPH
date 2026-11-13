@@ -63,7 +63,8 @@ public MoveDefinition(
     IReadOnlyList<ProjectileDefinition>? projectiles = null,
     FixedPoint minimumStartDistance = default,
     IReadOnlyList<MoveHurtboxSpan>? hurtboxTimeline = null,
-    FixedPoint? maximumStartBodyDistance = null)
+    FixedPoint? maximumStartBodyDistance = null,
+    int? guardThreatFrames = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -86,6 +87,8 @@ public MoveDefinition(
             throw new ArgumentOutOfRangeException(nameof(minimumStartDistance), "最小发动距离不能为负。");
         if (maximumStartBodyDistance is { } maximum && maximum < FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(maximumStartBodyDistance), "最大发动身体距离不能为负。");
+        if (guardThreatFrames is { } threat && (threat < 1 || threat > (long)startupFrames + activeFrames + recoveryFrames))
+            throw new ArgumentOutOfRangeException(nameof(guardThreatFrames));
 
         MoveId = moveId;
         CommandId = commandId;
@@ -95,6 +98,7 @@ public MoveDefinition(
         AllowedFrom = allowedFrom;
         MinimumStartDistance = minimumStartDistance;
         MaximumStartBodyDistance = maximumStartBodyDistance;
+        GuardThreatFrames = guardThreatFrames;
         if (hurtboxTimeline is not null)
         {
             MoveHurtboxSpan[] spans = hurtboxTimeline.ToArray();
@@ -178,6 +182,9 @@ public MoveDefinition(
 
     public FixedPoint MinimumStartDistance { get; }
     public FixedPoint? MaximumStartBodyDistance { get; }
+
+    /// <summary>Optional exclusive end of the action's forward proximity-guard threat.</summary>
+    public int? GuardThreatFrames { get; }
 
     internal bool CanStartAtDistance(FixedPoint centerDistance, FixedPoint bodyDistance) =>
         centerDistance >= MinimumStartDistance &&

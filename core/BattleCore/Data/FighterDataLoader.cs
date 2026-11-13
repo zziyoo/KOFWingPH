@@ -122,7 +122,8 @@ public static class FighterDataLoader
 
         FighterDefinition definition = Guard(
             () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes, groundBodyWidths,
-                airBodyWidths, neutralAirHurtboxes, damageRules, dto.UseCommandPriority, dto.AllowStrikeClash),
+                airBodyWidths, neutralAirHurtboxes, damageRules, dto.UseCommandPriority, dto.AllowStrikeClash,
+                dto.ForwardGuardDistance is { } guard ? Fraction(guard, sourceName, "forwardGuardDistance") : null),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }
@@ -246,7 +247,8 @@ public static class FighterDataLoader
             hurtboxTimeline: dto.HurtboxTimeline is { } timeline
                 ? BuildArray(timeline, source, path + ".hurtboxTimeline", BuildMoveHurtboxSpan) : null,
             maximumStartBodyDistance: dto.MaximumStartBodyDistance is { } bodyDistance
-                ? Fraction(bodyDistance, source, path + ".maximumStartBodyDistance") : null),
+                ? Fraction(bodyDistance, source, path + ".maximumStartBodyDistance") : null,
+            guardThreatFrames: dto.GuardThreatFrames),
         source, path);
 
     private static MoveHurtboxSpan BuildMoveHurtboxSpan(MoveHurtboxSpanDto dto, string source, string path) => Guard(
@@ -362,7 +364,7 @@ public static class FighterDataLoader
             timeline: dto.Timeline is { } timeline ? new ProjectileTimeline(
                 RequiredInt(timeline.MovementFrames, source, path + ".timeline.movementFrames"),
                 BuildArray(timeline.HitSpans, source, path + ".timeline.hitSpans", BuildProjectileHitSpan),
-                timeline.RequestPauseOnHit) : null),
+                timeline.RequestPauseOnHit, timeline.GuardThreatFrames) : null),
         source, path);
 
     private static ProjectileHitSpan BuildProjectileHitSpan(ProjectileHitSpanDto dto, string source, string path) => Guard(
@@ -374,7 +376,21 @@ public static class FighterDataLoader
             BuildAttack(dto.Hit ?? throw Fail(source, path + ".hit", "必填对象缺失或为 null。"),
                 source, path + ".hit"),
             dto.GuardDamage, BuildDynamicDamage(dto.DynamicDamage, source, path + ".dynamicDamage"), dto.ContactOnEdge,
-            dto.LaunchGravity is { } gravity ? Fraction(gravity, source, path + ".launchGravity") : null),
+            dto.LaunchGravity is { } gravity ? Fraction(gravity, source, path + ".launchGravity") : null,
+            dto.LaunchReaction is { } reaction ? BuildLaunchReaction(reaction, source, path + ".launchReaction") : null),
+        source, path);
+
+    private static LaunchReactionProfile BuildLaunchReaction(LaunchReactionDto dto, string source, string path) => Guard(
+        () => new LaunchReactionProfile(
+            RequiredInt(dto.ImpactFrames, source, path + ".impactFrames"),
+            Fraction(dto.BounceHorizontalRetention, source, path + ".bounceHorizontalRetention"),
+            Fraction(dto.BounceVerticalVelocity, source, path + ".bounceVerticalVelocity"),
+            Fraction(dto.BounceGravity, source, path + ".bounceGravity"),
+            RequiredInt(dto.LieDownFrames, source, path + ".lieDownFrames"),
+            RequiredInt(dto.WakeupFrames, source, path + ".wakeupFrames"),
+            RequiredInt(dto.RiseFrames, source, path + ".riseFrames"),
+            RequiredInt(dto.LieImpactFrames, source, path + ".lieImpactFrames"),
+            RequiredInt(dto.TransitionGravitySteps, source, path + ".transitionGravitySteps")),
         source, path);
 
     // ── 字段级校验 ──────────────────────────────────────────────────

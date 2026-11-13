@@ -87,7 +87,8 @@ public sealed class FighterDefinition
         IReadOnlyList<FixedRect>? neutralAirHurtboxes = null,
         DynamicDamageRules? damageRules = null,
         bool useCommandPriority = false,
-        bool allowStrikeClash = true)
+        bool allowStrikeClash = true,
+        FixedPoint? forwardGuardDistance = null)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -97,6 +98,10 @@ public sealed class FighterDefinition
         FighterId = fighterId;
         UseCommandPriority = useCommandPriority;
         AllowStrikeClash = allowStrikeClash;
+        if (forwardGuardDistance is { } guardDistance &&
+            (guardDistance <= FixedPoint.Zero || guardDistance > FixedPoint.FromInt(GroundHurtboxes.MaxLocalCoordinate)))
+            throw new ArgumentOutOfRangeException(nameof(forwardGuardDistance));
+        ForwardGuardDistance = forwardGuardDistance;
 
         // 防御性复制：外部改动源集合不影响配置（B4.6）。
         var commandCopy = commands.ToArray();
@@ -200,6 +205,8 @@ public sealed class FighterDefinition
     public bool UseCommandPriority { get; }
 
     public bool AllowStrikeClash { get; }
+
+    public FixedPoint? ForwardGuardDistance { get; }
 
     /// <summary>该角色的专属招式表（只读）。</summary>
     public IReadOnlyList<MoveDefinition> Moves { get; }

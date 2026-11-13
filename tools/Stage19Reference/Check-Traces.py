@@ -10,16 +10,18 @@ ENGINE_COMMIT = "5dac5caf9a02a9b81bf2264e88a1bbf68e21bba0"
 SPECIAL_SOURCE = "60171bf640c7e8316d34e2b0ab001f663472bfd14dc66d174dcf5a8eebd8dc21"
 WAVE_STATES = (1000, 1050)
 ROOT_PHASES = ("before-command", "after-command", "after-collision", "end")
+RECOVERY_CASES = ("default-special-whiff-9", "default-special-mirror-whiff-9", "default-special-hit-20")
 
 
 def read_rows(path):
     return [json.loads(line) for line in path.read_bytes().splitlines()]
 
 
-def read_cases(directory):
+def read_cases(directory, *, last_frame=75):
     run = json.loads((directory / "run-metadata.json").read_bytes())
     assert (run["engine"], run["commit"], run["capture_profile"]) == ("IKEMEN GO", ENGINE_COMMIT, "Stage19")
     assert run["source_sha256"]["Terry-S.cns"] == SPECIAL_SOURCE
+    assert run.get("last_frame", 75) == last_frame, directory
     for name in run["executed_cases"]:
         case = json.loads((directory / f"{name}-metadata.json").read_bytes())
         trace = directory / f"{name}.jsonl"
@@ -32,7 +34,7 @@ def read_cases(directory):
         data = read_rows(trace)
         assert all(row["case"] == name for row in data), name
         phases = {phase: [row for row in data if row["phase"] == phase] for phase in ROOT_PHASES}
-        assert all([row["frame"] for row in phase] == list(range(76)) for phase in phases.values()), name
+        assert all([row["frame"] for row in phase] == list(range(last_frame + 1)) for phase in phases.values()), name
         assert all(row["roundState"] == 2 for row in phases["end"]), name
         initial = phases["before-command"][0]["chars"]
         mirrored = "-mirror-" in name
@@ -173,6 +175,12 @@ def verify_supplement(cases):
         assert [(row["frame"], row["seat"], row["to"]) for row in changes if row["from"] == 1000] == [
             (25, 1, 5000), (25, 2, 5000)
         ], (scenario, changes)
+        before = phases["after-command"][38]["chars"]
+        ended = phases["end"][38]["chars"]
+        assert all((c["state"], c["time"], c["hitShake"], c["hitPause"]) == (5000, 12, 1, 0) for c in before), scenario
+        assert all((c["state"], c["time"], c["hitShake"], c["hitPause"]) == (5000, 13, 0, 0) for c in ended), scenario
+        assert phases["end"][39]["globalPause"] == 1 and phases["end"][39]["chars"] == ended, scenario
+        assert phases["end"][40]["globalPause"] == 0 and all(c["state"] == 5030 for c in phases["end"][40]["chars"]), scenario
         for frame in (24, 25, 53, 54):
             chars = phases["end"][frame]["chars"]
             assert all(char["projectiles"] == 0 and len(char["helpers"]) == 1 for char in chars), (scenario, frame)
@@ -182,9 +190,44 @@ def verify_supplement(cases):
             assert all(helper["destroyed"] == (frame == 54) for helper in helpers), (scenario, frame)
 
 
+def verify_launch_recovery(directory):
+    cases = {}
+    for name, result in read_cases(directory, last_frame=145):
+        assert name not in cases, f"duplicate launch recovery case: {name}"
+        cases[name] = result
+    assert set(cases) == set(RECOVERY_CASES), cases.keys()
+    for name, (phases, _, _, contacts) in cases.items():
+        target = [row["chars"][1] for row in phases["end"]]
+        offset = 11 if name.endswith("-hit-20") else 0
+        sign = -1 if "-mirror-" in name else 1
+        assert (25 + offset, 2, 76, False) in contacts, name
+        boundaries = [(25, 5000), (39, 5030), (41, 5035), (53, 5050), (77, 5100),
+                      (81, 5101), (93, 5110), (106, 5120), (131, 0)]
+        actual = [(frame, c["state"]) for frame, c in enumerate(target) if frame >= 25 + offset and
+                  c["state"] != target[frame - 1]["state"]]
+        assert actual == [(frame + offset, state) for frame, state in boundaries], (name, actual)
+
+        launch = target[25 + offset]
+        origin_x = launch["pos"][0]
+        motion = [(39, 5030, 4.5, -6.5, -4.5, -6.5), (41, 5035, 9, -12, -4.5, -5.5),
+                  (76, 5050, 117, 6, -4.5, 6.5), (77, 5100, 117, 0, -4.5, 0),
+                  (80, 5100, 117, 0, -4.5, 0), (81, 5160, 117, 0, -3.375, -3),
+                  (82, 5160, 120.375, -2.5, -3.375, -2.5), (92, 5160, 154.125, 0, -3.375, 2.5),
+                  (93, 5170, 154.125, 0, 0, 0), (96, 5110, 154.125, 0, 0, 0),
+                  (106, 5120, 154.125, 0, 0, 0), (131, 0, 154.125, 0, 0, 0)]
+        for frame, anim, x, y, vx, vy in motion:
+            sample = target[frame + offset]
+            assert (sample["anim"], sample["pos"][1], *sample["vel"][:2]) == (anim, y, vx, vy), (name, frame, sample)
+            assert abs((sample["pos"][0] - origin_x) * sign - x) < 0.0001, (name, frame, sample)
+        assert not any(c["ctrl"] for c in target[25 + offset:131 + offset]), name
+        assert target[131 + offset]["ctrl"], name
+    print(f"Verified {len(cases)} extended native Stage 19 launch recovery traces")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directories", type=Path, nargs="+")
+    parser.add_argument("--launch-recovery", type=Path)
     options = parser.parse_args()
     cases = {}
     for directory in options.directories:
@@ -195,6 +238,8 @@ def main():
     if "default-special-dual-9" in cases:
         verify_supplement(cases)
     print(f"Verified {len(cases)} native Stage 19 traces")
+    if options.launch_recovery:
+        verify_launch_recovery(options.launch_recovery)
 
 
 if __name__ == "__main__":
