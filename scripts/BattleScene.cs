@@ -1412,6 +1412,14 @@ public partial class BattleScene
             _visual2?.ObserveFrame(frame, 1);
             if (_moveAudit && !TeamActive && _duelRoster is { } roster)
                 PrintMoveAudit(frame, roster);
+            if (HasArg("--reentry-audit"))
+                for (int seat = 0; seat < 2; seat++)
+                {
+                    FighterState fighter = frame.StateAfter.Fighter(seat);
+                    GD.Print($"[ReentryAudit] logic={frame.LogicFrame} fighter={seat} started={fighter.MoveStartedFrame} " +
+                        $"hitConfirm={fighter.HitConfirmFrame} blockConfirm={fighter.BlockConfirmFrame} " +
+                        $"lastHitStart={fighter.LastHitAttackStartFrame} lastHitGroups={fighter.LastHitContactGroups}");
+                }
             if (HasArg("--damage-audit"))
                 for (int seat = 0; seat < 2; seat++)
                 {

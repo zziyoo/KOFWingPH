@@ -368,6 +368,15 @@ public sealed class CancelDto
 
     [JsonPropertyName("allowWhiff")]
     public bool? AllowWhiff { get; set; }
+
+    [JsonPropertyName("allowSameMove")]
+    public bool AllowSameMove { get; set; }
+
+    [JsonPropertyName("standingInputOnly")]
+    public bool StandingInputOnly { get; set; }
+
+    [JsonPropertyName("maximumInputAge")]
+    public int? MaximumInputAge { get; set; }
 }
 
 public sealed class ThrowDto

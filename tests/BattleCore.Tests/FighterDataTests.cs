@@ -33,6 +33,44 @@ public class FighterDataTests
     private static FrameInput F(int frame, InputBits p1, InputBits p2 = InputBits.None) => new(frame, p1, p2);
 
     [Fact]
+    public void Reentry_ExplicitSelfCancelStartsNewInstanceAndCanHitAgain()
+    {
+        string json = Mutate(Json("Kai"), o =>
+        {
+            JsonNode jab = o["moves"]![0]!;
+            jab["cancels"] = JsonNode.Parse("""
+                [{"targetMoveId":"StandLightPunch","windowFirstFrame":6,"windowLastFrame":10,
+                  "phases":"Recovery","requiresHitConfirm":false,"requiresBlockConfirm":false,
+                  "allowWhiff":true,"allowSameMove":true,"standingInputOnly":true,"maximumInputAge":0}]
+                """);
+        });
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var sim = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = new(0, new[] { FighterState.Create(0, 1000, -30, Facing.Right),
+            FighterState.Create(1, 1000, 30, Facing.Left) }, BattleState.CreateDefault().StateVersion);
+        var events = new List<BattleEvent>();
+        for (int frame = 0; frame <= 17; frame++)
+        {
+            BattleStepResult step = sim.Step(state, F(frame, frame is 0 or 10 ? InputBits.LightPunch : InputBits.None));
+            state = step.State;
+            events.AddRange(step.Events);
+            if (frame == 10)
+            {
+                FighterState attacker = state.Fighter(0);
+                Assert.Equal(FighterLogicState.Startup, attacker.LogicState);
+                Assert.Equal(10, attacker.MoveStartedFrame);
+                Assert.Equal(0, attacker.MoveElapsedFrames);
+                Assert.Equal(-1, attacker.HitConfirmFrame);
+                Assert.Equal(-1, attacker.BlockConfirmFrame);
+                Assert.Empty(FighterBoxes.GetActiveHitboxes(attacker, fighter));
+            }
+        }
+        Assert.Equal(new[] { 0, 10 }, events.Where(evt => evt.Type == BattleEventType.MoveStarted).Select(evt => evt.Frame));
+        Assert.Equal(new[] { 3, 13 }, events.Where(evt => evt.Type == BattleEventType.Hit).Select(evt => evt.Frame));
+        Assert.Equal(10, state.Fighter(1).LastHitAttackStartFrame);
+    }
+
+    [Fact]
     public void DynamicDamage_LoadsOptInRulesAndUsesTheActiveTickRoll()
     {
         string json = Mutate(Json("Kai"), o =>

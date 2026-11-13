@@ -312,7 +312,10 @@ public static class FighterDataLoader
                 path + ".requiresHitConfirm"),
             requiresBlockConfirm: RequiredBool(dto.RequiresBlockConfirm, source,
                 path + ".requiresBlockConfirm"),
-            allowWhiff: RequiredBool(dto.AllowWhiff, source, path + ".allowWhiff")),
+            allowWhiff: RequiredBool(dto.AllowWhiff, source, path + ".allowWhiff"),
+            allowSameMove: dto.AllowSameMove,
+            standingInputOnly: dto.StandingInputOnly,
+            maximumInputAge: dto.MaximumInputAge),
         source, path);
 
     private static ThrowDefinition BuildThrow(ThrowDto dto, string source, string path) => Guard(

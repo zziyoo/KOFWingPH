@@ -541,4 +541,50 @@ public class ComboCancelTests
                 cancels: new[] { new CancelDefinition(Jab, 1, 3, allowWhiff: true) }),
         }));
     }
+
+    [Theory]
+    [InlineData(false, 46, 7, 0, false, "Near")]
+    [InlineData(false, 47, 7, 1, false, "Far")]
+    [InlineData(true, 46, 11, 2, false, "Near")]
+    [InlineData(true, 47, 11, 2, false, "Far")]
+    [InlineData(true, 46, 6, 0, false, null)]
+    [InlineData(true, 46, 7, 3, false, null)]
+    [InlineData(true, 46, 7, 0, true, null)]
+    public void Reentry_UsesCurrentDistanceDirectionAndFreshInput(bool startedNear, int distance, int tick,
+        int inputAge, bool down, string? expected)
+    {
+        var command = new CommandDefinition("5A", Array.Empty<CommandDirection>(), InputBits.LightPunch,
+            bufferLifetimeFrames: 4);
+        CancelDefinition[] Rules(string source) => new[]
+        {
+            new CancelDefinition("Near", 7, 11, allowWhiff: true, allowSameMove: source == "Near",
+                standingInputOnly: true, maximumInputAge: 2),
+            new CancelDefinition("Far", 7, 11, allowWhiff: true, allowSameMove: source == "Far",
+                standingInputOnly: true, maximumInputAge: 2),
+        };
+        var fighter = new FighterDefinition("Probe", new[] { command }, new[]
+        {
+            new MoveDefinition("Near", "5A", 3, 4, 5, cancels: Rules("Near"), maximumStartBodyDistance: 16),
+            new MoveDefinition("Far", "5A", 3, 4, 5, cancels: Rules("Far")),
+        }, groundBodyWidths: new GroundBodyWidths(15, 16));
+
+        RecognitionState input = RecognitionState.Empty;
+        for (int frame = 20 - inputAge; frame <= 20; frame++)
+            input = input.Advance((frame == 20 - inputAge ? InputBits.LightPunch : InputBits.None) |
+                (down ? InputBits.Down : InputBits.None), Facing.Right, frame, 0, fighter.Commands);
+        FighterLogicState before = tick <= 7 ? FighterLogicState.Active : FighterLogicState.Recovery;
+        int remaining = tick <= 7 ? 8 - tick : 13 - tick;
+
+        FighterActionTick result = FighterStateMachine.Tick(before, startedNear ? "Near" : "Far", remaining,
+            DirectionResolver.Resolve(down ? InputBits.Down : InputBits.None, Facing.Right), input, fighter, 20,
+            moveStartedFrame: 20 - tick, moveElapsedFrames: tick, opponentDistance: distance,
+            opponentBodyDistance: distance - 30);
+        Assert.Equal(expected, result.ConsumedMatch is null ? null : result.MoveId);
+        if (expected is not null)
+        {
+            Assert.Equal(20, result.MoveStartedFrame);
+            Assert.Equal(0, result.MoveElapsedFrames);
+            Assert.Contains(result.Recognition.Buffer, result => result.Consumed);
+        }
+    }
 }

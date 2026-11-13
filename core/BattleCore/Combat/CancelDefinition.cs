@@ -32,18 +32,21 @@ public enum MoveCancelPhases
 /// <see cref="AllowWhiff"/> 表示不需要任何确认（空挥取消）。
 /// 三者至少配置一个。</para>
 ///
-/// <para>合法性（目标招式存在、不是自身、窗口/阶段/确认满足、缓冲区有对应未消费指令）
+/// <para>合法性（目标招式存在、自身目标显式允许、窗口/阶段/确认满足、缓冲区有对应未消费指令）
 /// 由 <c>FighterStateMachine</c> 在权威状态上判定，规则本身是纯数据。</para>
 /// </summary>
 public sealed class CancelDefinition
 {
-    /// <param name="targetMoveId">允许取消到的目标招式 ID（必须在同一角色配置中，且不是自身）。</param>
+    /// <param name="targetMoveId">允许取消到的目标招式 ID（必须在同一角色配置中）。</param>
     /// <param name="windowFirstFrame">窗口起始帧（自发动帧起算的经过帧数，≥ 0，含）。</param>
     /// <param name="windowLastFrame">窗口结束帧（≥ 起始帧，含）。</param>
     /// <param name="phases">允许的阶段（默认 Active | Recovery）。</param>
     /// <param name="requiresHitConfirm">是否需要命中确认（本实例、且确认发生在更早的帧）。</param>
     /// <param name="requiresBlockConfirm">是否需要防御确认（同上）。</param>
     /// <param name="allowWhiff">是否允许空挥取消（不需要确认）。</param>
+    /// <param name="allowSameMove">是否允许以新实例重新进入来源招式。</param>
+    /// <param name="standingInputOnly">当前输入不得含有下方向。</param>
+    /// <param name="maximumInputAge">从实际按键边沿计算的最长输入年龄，含当帧。缺省使用既有指令缓冲。</param>
     /// <exception cref="ArgumentException">目标为空 / 窗口倒置 / 阶段为空 / 未配置任何确认条件。</exception>
     public CancelDefinition(
         string targetMoveId,
@@ -52,7 +55,10 @@ public sealed class CancelDefinition
         MoveCancelPhases phases = MoveCancelPhases.Active | MoveCancelPhases.Recovery,
         bool requiresHitConfirm = false,
         bool requiresBlockConfirm = false,
-        bool allowWhiff = false)
+        bool allowWhiff = false,
+        bool allowSameMove = false,
+        bool standingInputOnly = false,
+        int? maximumInputAge = null)
     {
         if (string.IsNullOrWhiteSpace(targetMoveId))
             throw new ArgumentException("取消目标招式 ID 不能为空。", nameof(targetMoveId));
@@ -68,6 +74,8 @@ public sealed class CancelDefinition
             throw new ArgumentException(
                 "取消规则必须至少配置一种确认条件（命中确认 / 防御确认 / 空挥取消），否则永远无法触发。",
                 nameof(allowWhiff));
+        if (maximumInputAge < 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumInputAge), "按键年龄不能为负。");
 
         TargetMoveId = targetMoveId;
         WindowFirstFrame = windowFirstFrame;
@@ -76,9 +84,12 @@ public sealed class CancelDefinition
         RequiresHitConfirm = requiresHitConfirm;
         RequiresBlockConfirm = requiresBlockConfirm;
         AllowWhiff = allowWhiff;
+        AllowSameMove = allowSameMove;
+        StandingInputOnly = standingInputOnly;
+        MaximumInputAge = maximumInputAge;
     }
 
-    /// <summary>目标招式 ID（同角色配置内，且不是来源招式自身）。</summary>
+    /// <summary>目标招式 ID（同角色配置内）。</summary>
     public string TargetMoveId { get; }
 
     /// <summary>窗口起始帧（自发动帧起算的经过帧数，含）。</summary>
@@ -98,6 +109,9 @@ public sealed class CancelDefinition
 
     /// <summary>是否允许空挥取消（无需确认）。</summary>
     public bool AllowWhiff { get; }
+    public bool AllowSameMove { get; }
+    public bool StandingInputOnly { get; }
+    public int? MaximumInputAge { get; }
 
     /// <summary>阶段是否允许（纯函数，供状态机与测试共用）。</summary>
     public bool AllowsPhase(FighterLogicState state) => state switch

@@ -129,7 +129,7 @@ public static class FighterStateMachine
             // 取消窗口用<b>动作有效经过帧数</b>（D96）：Hitstop 冻结帧不推进它，
             // 因此停顿期间窗口不会悄悄过期（无 Hitstop 时它恒等于 frame − moveStartedFrame）。
             FighterActionTick? cancel = TryCancel(
-                state, move, definition, recognition, frame,
+                state, move, definition, recognition, resolvedInput, frame,
                 moveStartedFrame, moveElapsedFrames, hitConfirmFrame, blockConfirmFrame,
                 opponentDistance, opponentBodyDistance);
             if (cancel is FighterActionTick cancelled)
@@ -326,6 +326,7 @@ public static class FighterStateMachine
         MoveDefinition move,
         FighterDefinition definition,
         RecognitionState recognition,
+        RelativeInput input,
         int frame,
         int moveStartedFrame,
         int moveElapsedFrames,
@@ -344,6 +345,8 @@ public static class FighterStateMachine
 
         foreach (CancelDefinition cancel in move.Cancels)
         {
+            if (cancel.StandingInputOnly && input.Down)
+                continue;
             if (!IsWindowOpen(cancel, state, elapsed))
                 continue;
             if (!cancel.ConfirmSatisfied(frame, hitConfirmFrame, blockConfirmFrame, moveStartedFrame))
@@ -358,6 +361,9 @@ public static class FighterStateMachine
                 if (result.Consumed)
                     continue;
                 if (!string.Equals(result.Match.CommandId, target.CommandId, StringComparison.Ordinal))
+                    continue;
+                if (cancel.MaximumInputAge is { } age &&
+                    (result.Match.ButtonFrame < 0 || frame - result.Match.ButtonFrame > age))
                     continue;
 
                 // 取消成功：旧招式被中断，目标招式作为<b>新的独立攻击实例</b>发动
