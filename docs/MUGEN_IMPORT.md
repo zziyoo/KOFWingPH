@@ -209,28 +209,46 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_wave.p
 
 ## 阶段 23 蹲重拳与弱 Power Wave
 
-转换核对六份阶段 22 冻结 JSON 的哈希，以及原始 State 410 的 CNS/CMD、Action 410 和站／蹲受击素材。先按原版参考采集轨迹。如果本地的阶段 22 文件缺失或哈希不符，先按上一节的命令生成冻结预设。若需分开校验本体，将输出指定为独立路径并加 `--body-only`。 [原版参考](STAGE23_REFERENCE.md)
+转换核对六份阶段 22 冻结 JSON 的哈希，以及原始 State 410 的 CNS/CMD、Action 410 和站／蹲受击素材。先按原版参考采集轨迹并提取本体子集。以下命令将阶段 22 冻结数据生成到独立目录，保留现有历史预设。本体转换只读取提取的十条原始轨迹。 [原版参考](STAGE23_REFERENCE.md)
 
 ```powershell
 $env:PYTHONPATH = 'tools/MugenImporter'
-$base = 'data/imported-characters/terry98-stage22-data'
-$profiles = 'data/imported-characters/terry98-stage23-data'
-$body = 'data/imported-characters/terry98-stage23-body'
-$source = @('local-mugen/terry.zip','data/imported-characters/terry98/manifest.json','--base',$base,
+$base = 'local-mugen/stage23-repro-stage22'
+$profiles = 'data/imported-characters/terry98-stage23-reserved'
+$body = 'data/imported-characters/terry98-stage23-body-reserved'
+$assets = @('local-mugen/terry.zip','data/imported-characters/terry98/manifest.json')
+if (-not (Test-Path -LiteralPath $base)) {
+  py -m mugen_importer.state_crouch_wave @assets --base data/imported-characters/terry98-stage21-data `
+    --reference local-mugen/stage22-reference/results --output $base
+  if ($LASTEXITCODE) { throw 'Stage 22 conversion failed' }
+}
+$source = @(
   '--reference','local-mugen/stage23-reference/results',
   '--reference','local-mugen/stage23-reference-supplement/results',
   '--reference','local-mugen/stage23-reference-boundaries/results',
   '--reference','local-mugen/stage23-reference-final-probes/results',
   '--reference','local-mugen/stage23-reference-combined-input/results')
-py -m mugen_importer.state_crouch_heavy_wave @source --output $profiles
-py -m mugen_importer.state_crouch_heavy_wave @source --output $body --body-only
+if (-not (Test-Path -LiteralPath $profiles)) {
+  py -m mugen_importer.state_crouch_heavy_wave @assets --base $base @source --output $profiles
+  if ($LASTEXITCODE) { throw 'Stage 23 conversion failed' }
+}
+if (-not (Test-Path -LiteralPath $body)) {
+  py -m mugen_importer.state_crouch_heavy_wave @assets --base $base `
+    --reference local-mugen/stage23-reference-body/results --output $body --body-only
+  if ($LASTEXITCODE) { throw 'Stage 23 body conversion failed' }
+}
 foreach ($mode in 'default','mode2') {
-  py tools/Stage14Validation/stage_assets.py --binding "$profiles/$mode.binding.json" `
-    --destination "data/imported-characters/terry98-stage23-$mode"
+  $visual = "data/imported-characters/terry98-stage23-$mode"
+  if (-not (Test-Path -LiteralPath $visual)) {
+    py tools/Stage14Validation/stage_assets.py --binding "$profiles/$mode.binding.json" --destination $visual
+    if ($LASTEXITCODE) { throw "Stage 23 $mode visual staging failed" }
+  }
 }
 py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_heavy_wave.py
 ```
 
 站防、蹲防及持后续防分别读取 Action 150／151、130／131 的碰撞框。默认完整预设中，Helper 1020 只有晚段地面 HitDef 绑定 Action 5012／5017；早段击飞沿用原有实体反应链。单独的本体预设保留冻结的 Helper 1020 配置。
+
+以上命令保留已有数据和别名。要复核已有文件，使用新输出目录生成后比对 SHA-256。 [候选哈希与验收](STAGE23_ACCEPTANCE.md)
 
 前下＋重拳占用原版 State 310 的 CMD 候选优先级。`ReservedRisingUpper` 只保留合法地面输入的占用顺序，不分配招式。完整默认预设仍优先选择合规的弱 Power Wave。

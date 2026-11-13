@@ -1643,3 +1643,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 使用冻结阶段 21 配置和实际 IKEMEN GO 轨迹生成 `TerryCrouchWave` 与模式 2 本体对照。默认 400→1000 与 200／205／215 共用取消执行器和 Helper；仅蹲姿目标读取提交时的下方向。两个新地面时钟随快照保存。 [导入](MUGEN_IMPORT.md) · [验收](STAGE22_ACCEPTANCE.md)
 - 正式阶段 21 提交已在远端历史中。原 `project.godot` 差异已由用户提交 `0e9db8e` 保存，SHA-256 与开工一致。阶段 22 的原版和运行时 checkpoint 已推送。下一条路径限于 State 410 的静态研究。
 - 阶段 22 正式 PASS。29 场原版与 Vulkan 对照、取消前后的在场实体、近远回落、双实时采样、同种子回放和阶段 13C–21 冻结回归均通过。阶段 22 图形 checkpoint 为 `ee0313a`，正式门禁与下一候选的静态范围见[验收](STAGE22_ACCEPTANCE.md)。
+
+### 阶段 23 蹲重拳与弱 Power Wave
+
+- 默认 `TerryCrouchHeavyWave` 与模式 2 本体对照从阶段 22 的六份冻结 JSON 生成。使用 `--p1-fighter-file`／`--p2-fighter-file` 和各席 `terry98-stage23-default`／`terry98-stage23-mode2` 视觉别名。State 410、受击和防御按权威时钟推进。前下＋重拳只保留 310 的地面 CMD 优先级，原版 310／1050 的运行时仍独立。 [导入命令](MUGEN_IMPORT.md#阶段-23-蹲重拳与弱-power-wave) · [范围与门禁](STAGE23_ACCEPTANCE.md)
+- 阶段 23 正式 PASS。对照原版用固定 Vulkan，实时用 `FramePostDraw` 稀疏采样。早段 Wave 的击飞和晚段 Wave 的地面反应分别验证。定点舍入与原版画面边缘差保留了具体轨迹及断言。阶段 13C–22 冻结回归逐条对齐，用户提交中的 `project.godot` 保持原哈希。 [Vulkan 复现](../tools/Stage23Validation/README.md) · [证据索引](../tools/Stage23Validation/EVIDENCE.md)
