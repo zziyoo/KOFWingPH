@@ -16,6 +16,12 @@ if (!$workspace.StartsWith($localMugen, [StringComparison]::OrdinalIgnoreCase)) 
 }
 $engine = Join-Path $workspace 'engine'
 $results = Join-Path $workspace 'results'
+if ((Test-Path -LiteralPath (Join-Path $results 'run-metadata.json')) -or
+    @(Get-ChildItem -LiteralPath $results -File -ErrorAction SilentlyContinue | Where-Object {
+        $_.Extension -eq '.jsonl' -or $_.Name -match '-(stdout|stderr)\.txt$'
+    }).Count -gt 0) {
+    throw "Reference evidence already exists at $results. Choose a fresh -RunDirectory."
+}
 $runtime = Join-Path $IkemenRoot 'test-runtime/round2-5dac5caf'
 $tools = Join-Path $IkemenRoot 'test-runtime/tools'
 $archive = Join-Path $root 'local-mugen/terry.zip'

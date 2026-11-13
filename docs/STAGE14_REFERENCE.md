@@ -55,7 +55,9 @@
 python tools/Stage14Reference/Check-Traces.py local-mugen/stage14-reference-new/results
 ```
 
-执行完成后保留 `run-metadata.json`、各 `*-metadata.json`、进程 stdout/stderr 与 JSONL。检查器验证全部九个场景的入口、接触、动画／判定、伤害、停顿、位置和恢复。两个独立采集的这些可观察断言一致。开局前脚本变量和带构建时间的二进制哈希可变，原始 SHA 归档用于校验对应的实测文件。参考矩阵限制为同一原版对手、固定输入和 1v1 地面样本；未测迟到首次接触、空中、反制、AI、MAX、同招重入和跨招取消。
+执行完成后保留 `run-metadata.json`、各 `*-metadata.json`、进程 stdout/stderr 与 JSONL。采集器会拒绝已有元数据或场景日志的输出目录。检查器验证上述九项及同构建补充项的入口、接触、动画／判定、伤害、停顿、位置和恢复。独立采集的这些可观察断言一致。开局前脚本变量和带构建时间的二进制哈希可变，原始 SHA 归档用于校验对应的实测文件。参考矩阵限制为同一原版对手、固定输入和 1v1 地面样本；未测迟到首次接触、空中、反制、AI、MAX、同招重入和跨招取消。
+
+补充运行 `local-mugen/stage14-reference-held/results/` 使用同一引擎源与扩展输入夹具，十项断言全部通过。额外的 `crouch-guard-held.jsonl` 从 F8 持下后防到 F28，F29 放开。F20–28 均保留 .82 摩擦，F28 目标 X 为 57.746014，F29 恢复控制。轨迹共 331 行，SHA-256 为 `a0f36158c716b605f1264dc9fa00f06bc4ca06f140f3d62890de323f263d63c3`，采集器可执行文件 SHA-256 为 `787e900bad8b15e6f477e1c22ff104cc9bb15845a852d15b88c56f0266dbd297`。
 
 ## 第二招静态审查
 

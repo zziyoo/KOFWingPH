@@ -7,10 +7,15 @@ parser = ArgumentParser(description="Verify the isolated IKEMEN GO State 200 tra
 parser.add_argument("directory", type=Path)
 args = parser.parse_args()
 directory = args.directory
+if not __debug__:
+    raise SystemExit("Run the trace checker without Python optimization")
+metadata = json.loads((directory / "run-metadata.json").read_bytes())
 cases = ("whiff", "hit", "guard", "mirror", "crouch-guard", "crouch-guard-late")
 all_results = {}
 if all((directory / f"boundary-{distance}.jsonl").is_file() for distance in (78, 79, 80)):
     cases += ("boundary-78", "boundary-79", "boundary-80")
+if "crouch-guard-held" in metadata["scenario_distance"]:
+    cases += ("crouch-guard-held",)
 
 for case in cases:
     file = directory / f"{case}.jsonl"
