@@ -1637,3 +1637,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - `TerryPowerWaveHeavyRoutes` 由阶段 20 冻结数据、原版 Action 215、State −2 和 38 场 IKEMEN GO 参考生成。取消使用现有窗口和 CMD 优先级，动作实例、双接触组、角色 RNG、暂停和 Helper 生命周期分别核对。 [原版取证](STAGE21_REFERENCE.md) · [验收与复现](STAGE21_ACCEPTANCE.md)
 - 阶段 21 正式 PASS。默认预设修正晚段地面受击框、退出保护、续防与守势进入惯性。固定／实时证据、同种子重放和 13C–20 冻结门禁结果已归档。下一候选只静态审查了蹲轻拳 400→1000。 [验收矩阵](STAGE21_ACCEPTANCE.md) · [复现命令](../tools/Stage21Validation/README.md)
+
+### 阶段 22 蹲轻拳与弱 Power Wave
+
+- 使用冻结阶段 21 配置和实际 IKEMEN GO 轨迹生成 `TerryCrouchWave` 与模式 2 本体对照。默认 400→1000 与 200／205／215 共用取消执行器和 Helper；仅蹲姿目标读取提交时的下方向。两个新地面时钟随快照保存。 [导入](MUGEN_IMPORT.md) · [验收](STAGE22_ACCEPTANCE.md)
+- 正式阶段 21 提交已在远端历史中。原 `project.godot` 差异已由用户提交 `0e9db8e` 保存，SHA-256 与开工一致。阶段 22 的原版和运行时 checkpoint 已推送。下一条路径限于 State 410 的静态研究。

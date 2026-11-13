@@ -147,17 +147,40 @@ def fighter_poses(scene, events, committed, timelines, modes, *, actions=ACTIONS
     return windows
 
 
-def verify_entities(lines, phases, starts, moves, *, fixed, strict_native=True):
+def verify_entities(lines, phases, starts, moves, *, fixed, strict_native=True, allow_interrupted_spawn=False):
     records = defaultdict(list)
     for row in audit_rows(lines, "WaveEntityAudit"):
         records[int(row["id"])].append({**row, "age": 25 - int(row["life"])})
     if not fixed:
         return records
-    assert_equal(sum(event["move"] == MOVE for event in starts), len(records), "spawned Wave identity count")
+    scheduled = [event for event in starts if event["move"] == MOVE]
+    if allow_interrupted_spawn:
+        mirror = phases["before-command"][0]["chars"][0]["facing"] < 0
+        uninterrupted = []
+        for event in scheduled:
+            start, seat = event["frame"], event["source"]
+            if any(int(row["owner"]) == seat and int(row["logic"]) == start + 15
+                   for row in (samples[0] for samples in records.values())):
+                uninterrupted.append(event)
+                continue
+            if all(moves[seat, tick]["move"] == MOVE for tick in range(start, start + 16)):
+                raise ValueError(f"uninterrupted Wave did not spawn at logic {start + 15}")
+            seat ^= mirror
+            source_frame = start - 14
+            source = phases["end"][source_frame]["chars"][seat]
+            assert_equal(1000, source["state"], "native interrupted Wave entered State 1000")
+            assert_equal(False, any(
+                h["anim"] == 1020 and h["time"] == 1 for tick in range(source_frame, source_frame + 18)
+                for h in (phases["end"][tick]["chars"][seat]["helpers"] or [])),
+                "native interrupted Wave did not spawn")
+        scheduled = uninterrupted
+    assert_equal(len(scheduled), len(records), "spawned Wave identity count")
     for entity_id, samples in records.items():
         first, last = samples[0], samples[-1]
         owner, origin = int(first["owner"]), int(first["logic"])
-        start = next(event for event in starts if event["source"] == owner and event["move"] == MOVE)
+        start = next((event for event in scheduled if event["source"] == owner and event["frame"] + 15 == origin), None)
+        if start is None:
+            raise ValueError(f"unmatched Wave {entity_id} at logic {origin} for seat {owner}")
         assert_equal((start["frame"] + 15, 0, 24), (origin, first["age"], last["age"]), f"entity {entity_id} lifetime")
         facing = -1 if first["left"] == "True" else 1
         owner_start = moves[owner, origin]
@@ -380,7 +403,7 @@ def verify_recovery(phases, lines, moves, captures, *, mirrored):
 def run_case(options, name, reference, timelines, profile, *, mode="default", alias=ALIAS,
              prepared_scene=None, fixed_checks=None, contact_check=verify_contacts,
              recovery_check=verify_grounded_wave_recovery, minimum_render_frames=0, partial_capture=False,
-             pose_check=fighter_poses):
+             pose_check=fighter_poses, allow_interrupted_spawn=False):
     scene, phases, changes = prepared_scene or native_case(reference, name, recovery=options.recovery)
     fixed = options.fps == "fixed"
     logs = []
@@ -399,7 +422,8 @@ def run_case(options, name, reference, timelines, profile, *, mode="default", al
         started = verify_move_instances(scene, events, moves, reentry, fixed=fixed,
                                         fighter_id=profile["fighterId"])
         strict_native = True
-        entities = verify_entities(lines, phases, started, moves, fixed=fixed, strict_native=strict_native)
+        entities = verify_entities(lines, phases, started, moves, fixed=fixed, strict_native=strict_native,
+                                   allow_interrupted_spawn=allow_interrupted_spawn)
         pause = []
         divergences = []
         ground_recovery = []

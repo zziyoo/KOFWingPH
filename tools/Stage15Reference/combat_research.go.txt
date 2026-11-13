@@ -395,6 +395,34 @@ func researchCrouchWaveBits(pn int) InputBits {
 	if researchSpecialMirror {
 		forward, back = back, forward
 	}
+	if strings.HasPrefix(scenario, "incoming-wave-") {
+		if pn == 1 {
+			switch researchFrame {
+			case 2:
+				return IB_PD
+			case 3:
+				return IB_PD | back
+			case 4:
+				return back
+			case 5:
+				return back | IB_X
+			}
+			return 0
+		}
+		switch researchFrame {
+		case button - 4:
+			return IB_PD | IB_X
+		case button - 3:
+			return IB_PD
+		case button - 2:
+			return IB_PD | forward
+		case button - 1:
+			return forward
+		case button:
+			return forward | IB_X
+		}
+		return 0
+	}
 	if pn == 1 {
 		switch {
 		case strings.HasPrefix(scenario, "crouch-guard-") && researchFrame >= 7 && researchFrame <= 55:

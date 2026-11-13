@@ -62,7 +62,9 @@ def verify_cases(cases):
             assert rows[frame]['chars'][seat]['anim'] == row['to'], name
             if row['to'] == 1000:
                 entities = rows[frame + 15]['chars'][seat]['helpers'] or []
-                assert any(h['anim'] == 1020 and h['time'] == 1 for h in entities), name
+                interrupted = any(frame < change['frame'] < frame + 15 and change['seat'] == row['seat'] and
+                                  change['from'] == 1000 for change in changes)
+                assert any(h['anim'] == 1020 and h['time'] == 1 for h in entities) == (not interrupted), name
         for frame, seat, amount, _ in contacts:
             life = rows[frame]['chars'][seat - 1]['life']
             assert phases['end'][frame + 1]['chars'][seat - 1]['life'] == life - amount, name
@@ -76,6 +78,27 @@ def verify_cases(cases):
                     for f in range(exit_frame + 1, exit_frame + 6)] == [(12, True)] * 4 + [(0, True)], name
     assert not any(r['to'] == 400 for r in cases[PREFIX + 'stand-0'][1])
     assert cases[PREFIX + 'interrupt-0'][2] == [(6, 1, 30, False)]
+    near_fallback = cases.get(PREFIX + 'near-hit-21')
+    if near_fallback:
+        _, transitions, contacts = near_fallback
+        assert [(r['frame'], r['to'], r['stateTime']) for r in transitions if r['from'] == 400] == [(22, 205, 6)]
+        assert contacts == [(8, 2, 38, False), (25, 2, 29, False)]
+    incoming = cases.get(PREFIX + 'incoming-wave-25')
+    if incoming:
+        phases, transitions, contacts = incoming
+        assert contacts == [(24, 1, 99, False)]
+        assert [(r['frame'], r['to'], r['stateTime']) for r in transitions if r['from'] == 400] == [(24, 5000, 4)]
+        assert not any(r['seat'] == 1 and r['to'] == 1000 for r in transitions)
+        assert any(h['anim'] == 1020 for h in phases['after-collision'][39]['chars'][1]['helpers'])
+    interrupted_wave = cases.get(PREFIX + 'incoming-wave-20')
+    if interrupted_wave:
+        phases, transitions, contacts = interrupted_wave
+        assert contacts == [(29, 1, 107, False)]
+        assert [(r['frame'], r['from'], r['to'], r['stateTime']) for r in transitions
+                if r['seat'] == 1 and r['from'] in (400, 1000)] == [(20, 400, 1000, 4), (29, 1000, 5000, 10)]
+        assert not any(h['anim'] == 1020 for row in phases['after-collision']
+                       for h in row['chars'][0]['helpers'] or [])
+        assert any(h['anim'] == 1020 for h in phases['after-collision'][39]['chars'][1]['helpers'])
     if any(name not in BODY for name in (key.removeprefix(PREFIX) for key in cases)):
         expected = {'hit-20': (20,1000,4), 'hit-held-11': (20,1000,4), 'hit-21': (22,200,6),
                     'hit-29': (29,1000,13), 'guard-20': (20,1000,4), 'crouch-guard-20': (20,1000,4),

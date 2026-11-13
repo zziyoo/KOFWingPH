@@ -10,6 +10,14 @@
 
 26/26 原版轨迹通过校验。原始日志和逐场哈希在 `local-mugen/stage22-reference/results`。空挥使用地面中心距 140，原版与 Godot 可使用相同初始条件和按键。
 
+窗口外命中样本 `hit-21` 中，F22 确实进入 200，F25–28 的第二拳没有接触。F23–26 目标使用 Action 5010 的第二元素，身体最高 Y72，另一矩形前缘 X7，避开了第二拳的 X/Y 重叠。F27 改用 Action 5015。蹲轻拳的 CNS 声明 `animtype=Light` 与 `ground.type=Low`，`common_kof.cns` 的 State 5000／5001 选择对应的初始和滑动姿态。
+
+自然退出的 F18／F29 保留可控 State 11。松下之后连续四帧为可控 State 12，对应 Action 12 的 1／3 tick 及两套 Clsn2，然后进入 State 0。
+
+同输入补测中，P2 在 F5 从可控状态进入 1000，F20 生成 Helper。`incoming-wave-25` 的 P1 在 F21 进入 400，F24 旧 tick 3 被已在场的 Helper 命中，F25 的弱 Wave 物理输入被拒绝。原版目标反应帧扣除 99 HP。`incoming-wave-20` 的 P1 在 F20 从旧 tick 4 合法进入 1000，F29 被在场的 Helper 打断，未生成自己的 Helper，原版扣除 107 HP。P2 的 Helper 在两场的 F39 均仍存在。
+
+`near-hit-21` 使用相同手势和初始中心距 36，F22／旧 tick 6 进入近轻拳 205，F25 第二次接触；标准 `hit-21` 使用中心距 54，回落到 200 并且第二次接触落空。与主矩阵合计验证 29 条原引擎轨迹。
+
 ```powershell
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage22 -Prepare -LastFrame 165 -RunDirectory local-mugen/stage22-reference-new
 py tools/Stage22Reference/Check-Traces.py local-mugen/stage22-reference-new/results

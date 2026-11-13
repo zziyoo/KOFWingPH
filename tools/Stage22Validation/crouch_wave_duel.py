@@ -63,6 +63,19 @@ def verify_body(profile, changes, scene, phases, events, moves, reentry, lines):
         amount = normal_damage(profile, damage, moves, event, attack) if outcome == 'hit' else 0
         assert_equal(amount, event['amount'], '400 dynamic damage')
         assert_equal(amount, int(moves[target, logic - 1]['health']) - int(moves[target, logic]['health']), '400 atomic HP')
+        if outcome == 'hit' and len(starts) == 1 and not scene.differences:
+            # Begin after the reaction phase has committed. At contact the native target still holds its old pose.
+            next_contact = min((e['frame'] for e in events if e['target'] == target and e['frame'] > logic
+                                and e['kind'] in ('Hit', 'Blocked', 'ProjectileHit', 'ProjectileBlocked')),
+                               default=max(frame for _, frame in moves) + 1)
+            tick = logic + 1
+            while tick < next_contact and (target, tick) in moves and moves[target, tick]['state'] == 'Hitstun':
+                original = phases['after-collision'][tick - 14]['chars'][target ^ mirror]
+                if original['anim'] not in (5010, 5015):
+                    break
+                assert_equal(native_boxes(original, 'clsn2'), local_boxes(moves[target, tick], 'hurt'),
+                             f'400 light reaction Clsn2 at {tick}')
+                tick += 1
     for logic, seat in ((r['frame'] + 14, (r['seat'] - 1) ^ mirror)
                         for r in changes if r['from'] == 400 and r['to'] == 11):
         assert_equal('Crouching', moves[seat, logic]['state'], 'State 400 exits through crouch')
@@ -120,6 +133,7 @@ def main():
     parser.add_argument('--repeat-from', type=Path)
     parser.add_argument('--fps', default='fixed', choices=('fixed','30','60'))
     parser.add_argument('--realtime-window', type=int, nargs=2)
+    parser.add_argument('--realtime-input-spacing', type=int, choices=(1, 2), default=1)
     options = parser.parse_args()
     options.output = options.output.resolve()
     options.output.mkdir(parents=True, exist_ok=False)
@@ -129,7 +143,6 @@ def main():
     options.require_no_backlog = options.fps != 'fixed'
     options.realtime_resolution = '320x180'
     options.realtime_warmup_frames = 150
-    options.realtime_input_spacing = 1
     metadata = json.loads((options.reference / 'run-metadata.json').read_bytes())
     last = metadata['last_frame']
     manifest = json.loads((ROOT / 'data/imported-characters/terry98/manifest.json').read_text(encoding='utf-8-sig'))
@@ -154,7 +167,7 @@ def main():
                 capture_sparse_realtime(options, name, scene, alias, realtime_route)
                 continue
             if name == 'mixed-20':
-                scene = replace(scene, captures=(90, 151))
+                scene = replace(scene, captures=(62, 151))
             else:
                 scene = replace(scene, captures=(26, min(100, scene.captures[1])))
             run_case(options, name, reference, timelines, scene_profile, mode=options.mode, alias=alias,
@@ -162,7 +175,8 @@ def main():
                      contact_check=partial(verify_contacts, guard_position_tolerance=0.01),
                      recovery_check=partial(verify_grounded_wave_recovery, position_tolerance=0.01, crouch_recovery=True),
                      pose_check=partial(verify_poses, phases),
-                     minimum_render_frames=last + 25, partial_capture=True)
+                     minimum_render_frames=last + 25, partial_capture=True,
+                     allow_interrupted_spawn=name == 'incoming-wave-20')
             if options.repeat_from:
                 compare_repeat(options.output, name, options.repeat_from)
         except (ValueError, KeyError, IndexError, OSError, TimeoutExpired) as error:

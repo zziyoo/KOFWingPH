@@ -246,6 +246,7 @@ def main():
     parser.add_argument("--reference", required=True, type=Path, action="append")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--profile-dir", default=PROFILE_DIR)
+    parser.add_argument("--alias-prefix", default="terry98-stage21")
     parser.add_argument("--scene", required=True, action="append")
     parser.add_argument("--mode", choices=("default", "mode2"), default="default")
     parser.add_argument("--compare-plain", action="store_true")
@@ -276,7 +277,7 @@ def main():
     manifest = json.loads((ROOT / "data/imported-characters/terry98/manifest.json").read_text(encoding="utf-8-sig"))
     timelines = {action: visual_timeline(manifest, action) for action in (200, 205, 210, 211, 215, 1000, 1020)}
     profile = json.loads((ROOT / options.profile_dir / f"{options.mode}.fighter.json").read_text(encoding="utf-8-sig"))
-    alias = f"terry98-stage21-{options.mode}"
+    alias = f"{options.alias_prefix}-{options.mode}"
     failed = []
     for name in options.scene:
         try:

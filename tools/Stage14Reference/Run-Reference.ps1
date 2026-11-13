@@ -265,6 +265,13 @@ if ($CaptureProfile -eq 'Stage22') {
     }
     $distances['mode2-crouch-wave-hit-20'] = 54
     $distances['mode2-crouch-wave-hit-0'] = 54
+    foreach ($scenario in @('incoming-wave-20','incoming-wave-25')) {
+        $supplement = "default-crouch-wave-$scenario"
+        if ($Cases -contains $supplement) { $distances[$supplement] = 140 }
+    }
+    if ($Cases -contains 'default-crouch-wave-near-hit-21') {
+        $distances['default-crouch-wave-near-hit-21'] = 36
+    }
 }
 if (!$Cases) { $Cases = @($distances.Keys) }
 foreach ($caseName in $Cases) {
