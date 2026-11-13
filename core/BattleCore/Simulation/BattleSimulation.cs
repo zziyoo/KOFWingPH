@@ -113,6 +113,7 @@ public sealed class BattleSimulation
         public FixedPoint PositionX;
         public FixedPoint PositionY;
         public FixedPoint VelocityX;
+        public FixedPoint GuardWalkMomentum;
         public FixedPoint VelocityY;
         public JumpKind JumpKind;
         public Facing Facing;
@@ -131,6 +132,9 @@ public sealed class BattleSimulation
         public FixedPoint? HitLaunchGravity;
         public LaunchReactionState? LaunchReaction;
         public bool ProtectWakeup;
+        public bool ProtectGroundHitstunExit;
+
+        public readonly bool ProtectStrike => ProtectWakeup || ProtectGroundHitstunExit;
 
         /// <summary>是否处于地面可转向状态（站立/蹲下；动作与空中朝向冻结，D72）。</summary>
         public readonly bool CanTurn =>
@@ -217,6 +221,7 @@ public sealed class BattleSimulation
                     PositionX = fighter.PositionX,
                     PositionY = fighter.PositionY,
                     VelocityX = fighter.VelocityX,
+                    GuardWalkMomentum = fighter.GuardWalkMomentum,
                     VelocityY = fighter.VelocityY,
                     JumpKind = fighter.JumpKind,
                     Facing = fighter.Facing,
@@ -303,6 +308,7 @@ public sealed class BattleSimulation
             FixedPoint x = fighter.PositionX;
             FixedPoint y = fighter.PositionY;
             FixedPoint vx = FixedPoint.Zero;
+            FixedPoint guardWalkMomentum = FixedPoint.Zero;
             FixedPoint vy = FixedPoint.Zero;
             FighterLogicState logic = tick.State;
             JumpKind jumpKind = JumpKind.None;
@@ -415,8 +421,20 @@ public sealed class BattleSimulation
             else if (tick.State == FighterLogicState.Standing)
             {
                 // 地面步行（D65）：仅站立待机响应前后输入。
-                if (!resolved.Back || !HasForwardGuardThreat(state, i))
+                bool guardThreat = resolved.Back && HasForwardGuardThreat(state, i);
+                bool enteringGuardRecovery = fighter.LogicState == FighterLogicState.Blockstun &&
+                    definition.ProjectileGuardRecoveryFrames > 0;
+                if (!guardThreat && !enteringGuardRecovery)
                     x = GroundMovement.StepX(tick.State, fighter.PositionX, fighter.Facing, resolved, definition.Movement);
+                if (definition.PreserveGuardEntryMomentum && resolved.Back)
+                {
+                    FixedPoint step = guardThreat ? fighter.GuardWalkMomentum : x - fighter.PositionX;
+                    if (guardThreat)
+                        x += step;
+                    FixedPoint residual = step * definition.Movement.GroundReaction!.VelocityRetention;
+                    if (residual <= -FixedPoint.One || residual >= FixedPoint.One)
+                        guardWalkMomentum = residual;
+                }
             }
             // PreJump / Crouching / 动作三阶段 / 倒地 / 起身：原地（速度归零，坐标不变）。
 
@@ -429,6 +447,7 @@ public sealed class BattleSimulation
                 PositionX = x,
                 PositionY = y,
                 VelocityX = vx,
+                GuardWalkMomentum = guardWalkMomentum,
                 VelocityY = vy,
                 JumpKind = jumpKind,
                 Facing = fighter.Facing,
@@ -448,6 +467,8 @@ public sealed class BattleSimulation
                     ? fighter.ProjectileSpawnMask
                     : 0,
                 HitLaunchGravity = fighter.HitLaunchGravity,
+                ProtectGroundHitstunExit = definition.ProtectGroundHitstunExit &&
+                    fighter.LogicState == FighterLogicState.Hitstun && fighter.StunRemainingFrames == 1,
             };
         }
 
@@ -478,6 +499,7 @@ public sealed class BattleSimulation
                 PositionX = candidates[i].PositionX,
                 PositionY = candidates[i].PositionY,
                 VelocityX = candidates[i].VelocityX,
+                GuardWalkMomentum = candidates[i].GuardWalkMomentum,
                 VelocityY = candidates[i].VelocityY,
                 JumpKind = candidates[i].JumpKind,
                 Facing = candidates[i].Facing,
@@ -494,6 +516,15 @@ public sealed class BattleSimulation
                 HitLaunchGravity = candidates[i].HitLaunchGravity,
                 LaunchReaction = candidates[i].LaunchReaction,
             };
+            if (!frozenThisFrame[i] && nextFighters[i].LogicState is (FighterLogicState.Standing or FighterLogicState.Crouching))
+            {
+                int remaining = fighter.LogicState == FighterLogicState.Blockstun
+                    ? _roster.Fighter(i).ProjectileGuardRecoveryFrames
+                    : fighter.ProjectileGuardRecoveryRemaining > 0 ? fighter.ProjectileGuardRecoveryRemaining - 1 : 0;
+                if (nextFighters[i].PositionX != fighter.PositionX && fighter.LogicState != FighterLogicState.Blockstun)
+                    remaining = 0;
+                nextFighters[i] = nextFighters[i] with { ProjectileGuardRecoveryRemaining = remaining };
+            }
 
             // 命中/防御确认属于「当前攻击实例」：换招、被中断或回到待机后必须清空（D91）。
             nextFighters[i] = NormalizeConfirms(nextFighters[i]);
@@ -508,7 +539,7 @@ public sealed class BattleSimulation
         IReadOnlyList<AttackContact> contacts = state.PendingThrow is not null ? Array.Empty<AttackContact>() : HitDetection.Detect(
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1),
             state.Fighters[0].LogicState, state.Fighters[1].LogicState,
-            candidates[0].ProtectWakeup, candidates[1].ProtectWakeup);
+            candidates[0].ProtectStrike, candidates[1].ProtectStrike);
 
         // ── 第 6a 阶段：攻击相杀（D98）——两个攻击实例的攻击框正面积重叠，
         //    且双方都<b>没有</b>打中对方受击框（攻击在空中对撞）。任一方真正命中的帧
@@ -591,6 +622,9 @@ public sealed class BattleSimulation
                 nextFighters[i], state.Fighters[i].MoveStartedFrame));
             if (fighter.DamageScript.RandomState != 0 && !fighter.IsInMove)
                 fighter = fighter with { DamageScript = ClearDamageMove(fighter.DamageScript) };
+            if (fighter.LogicState is not (FighterLogicState.Standing or FighterLogicState.Crouching) &&
+                (fighter.GuardWalkMomentum != FixedPoint.Zero || fighter.ProjectileGuardRecoveryRemaining != 0))
+                fighter = fighter with { GuardWalkMomentum = FixedPoint.Zero, ProjectileGuardRecoveryRemaining = 0 };
             nextFighters[i] = fighter;
         }
 
@@ -1407,7 +1441,7 @@ public sealed class BattleSimulation
 
             ProjectileState projectile = alive[i];
             int target = 1 - projectile.OwnerFighterId;
-            if (alreadyHit[target] || candidates[target].ProtectWakeup)
+            if (alreadyHit[target] || candidates[target].ProtectStrike)
             {
                 survivors.Add(projectile); // 本帧该目标已被另一枚命中：这枚继续飞（不消失）。
                 continue;
@@ -1584,7 +1618,9 @@ public sealed class BattleSimulation
         bool defenderAirborne = defender.LogicState.IsAirborneLike();
 
         AttackDefinition hit = span?.Hit ?? definition.Hit;
-        bool guarding = CanGuard(defender.LogicState, backHeld, hit.Height);
+        bool guarding = CanGuard(defender.LogicState, backHeld, hit.Height) ||
+            (span is not null && hit.Height == AttackHeight.Mid && _roster.Fighter(target).RetainProjectileGuard &&
+             (defender.LogicState == FighterLogicState.Blockstun || defender.ProjectileGuardRecoveryRemaining > 0));
         HitstopByOutcome? stop = hit.HitstopByOutcome;
 
         // 方向 = 投掷物自己的飞行方向（不是「远离发射者」——弹可能已经飞过发射者）。

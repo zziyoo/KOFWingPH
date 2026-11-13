@@ -107,7 +107,9 @@ public static class FighterDataLoader
             ? Guard(() => new GroundHurtboxes(
                 BuildArray(boxes.Standing, sourceName, "groundHurtboxes.standing", BuildHurtbox),
                 BuildArray(boxes.Crouching, sourceName, "groundHurtboxes.crouching", BuildHurtbox),
-                boxes.StandingOnCrouchEntry),
+                boxes.StandingOnCrouchEntry,
+                boxes.Hitstun is null ? null : BuildArray(boxes.Hitstun, sourceName, "groundHurtboxes.hitstun", BuildHurtbox),
+                boxes.HitstunRecoveryFrames),
                 sourceName, "groundHurtboxes")
             : null;
 
@@ -123,7 +125,9 @@ public static class FighterDataLoader
         FighterDefinition definition = Guard(
             () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes, groundBodyWidths,
                 airBodyWidths, neutralAirHurtboxes, damageRules, dto.UseCommandPriority, dto.AllowStrikeClash,
-                dto.ForwardGuardDistance is { } guard ? Fraction(guard, sourceName, "forwardGuardDistance") : null),
+                dto.ForwardGuardDistance is { } guard ? Fraction(guard, sourceName, "forwardGuardDistance") : null,
+                dto.RetainProjectileGuard, dto.PreserveGuardEntryMomentum, dto.ProjectileGuardRecoveryFrames,
+                dto.ProtectGroundHitstunExit),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }

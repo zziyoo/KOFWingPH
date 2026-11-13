@@ -1,5 +1,7 @@
+using System.Text.Json.Nodes;
 using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Commands;
+using NewKOF.BattleCore.Data;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.Simulation;
@@ -40,6 +42,43 @@ public sealed class ProximityGuardTests
         state = Step(simulation, state, back);
         Assert.Equal(4, state.Fighter(0).MoveElapsedFrames);
         Assert.Equal(guardX + sign * FixedPoint.FromFraction(3, 2), state.Fighter(1).PositionX);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OptInGuardEntryUsesPriorBackwardMomentumUntilBelowOne(bool mirrored)
+    {
+        var (legacy, initial) = Setup(mirrored, moveThreatFrames: 7, targetX: 60);
+        string json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", "fighters", "Kai.json"));
+        JsonNode configuration = JsonNode.Parse(json)!;
+        configuration["preserveGuardEntryMomentum"] = true;
+        configuration["movement"]!["walkBackwardSpeed"] = JsonNode.Parse("""{"numerator":811,"denominator":256}""");
+        configuration["movement"]!["groundReaction"] = JsonNode.Parse("""
+            {"velocityRetention":{"numerator":17,"denominator":20},"lastHitStepScale":{"numerator":3,"denominator":5}}
+            """);
+        FighterDefinition target = FighterDataLoader.Load(configuration.ToJsonString());
+        var simulation = new BattleSimulation(new FightRoster(legacy.Roster.Player1, target));
+        int sign = mirrored ? -1 : 1;
+        InputBits back = mirrored ? InputBits.Left : InputBits.Right;
+        BattleState state = Step(simulation, initial, back, InputBits.LightPunch);
+        FixedPoint expected = initial.Fighter(1).PositionX + sign * target.Movement.WalkBackwardSpeed;
+        Assert.Equal(expected, state.Fighter(1).PositionX);
+
+        FixedPoint retention = FixedPoint.FromFraction(17, 20);
+        FixedPoint residual = target.Movement.WalkBackwardSpeed * retention;
+        for (int tick = 1; tick <= 7; tick++)
+        {
+            if (residual >= FixedPoint.One)
+                expected += sign * residual;
+            state = Step(simulation, state, back);
+            Assert.Equal(expected, state.Fighter(1).PositionX);
+            Assert.Equal(FighterLogicState.Standing, state.Fighter(1).LogicState);
+            residual *= retention;
+        }
+
+        state = Step(simulation, state, back);
+        Assert.Equal(expected + sign * target.Movement.WalkBackwardSpeed, state.Fighter(1).PositionX);
     }
 
     [Theory]

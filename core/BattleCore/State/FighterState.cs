@@ -72,7 +72,9 @@ public readonly record struct FighterState(
     DamageScriptState DamageScript = default,
     FixedPoint? HitLaunchGravity = null,
     int LogicStateTicks = 0,
-    LaunchReactionState? LaunchReaction = null)
+    LaunchReactionState? LaunchReaction = null,
+    FixedPoint GuardWalkMomentum = default,
+    int ProjectileGuardRecoveryRemaining = 0)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -134,6 +136,13 @@ public readonly record struct FighterState(
     {
         if (LogicStateTicks < 0)
             throw new InvalidOperationException($"角色 {Id} 的状态时间不能为负。");
+        if (ProjectileGuardRecoveryRemaining < 0 ||
+            (ProjectileGuardRecoveryRemaining != 0 && LogicState is not (FighterLogicState.Standing or FighterLogicState.Crouching)))
+            throw new InvalidOperationException($"角色 {Id} 的防御恢复快照非法。");
+        FixedPoint walkLimit = FixedPoint.FromInt(MovementDefinition.MaxWalkSpeedPerFrameUnits);
+        if (GuardWalkMomentum != FixedPoint.Zero &&
+            (LogicState != FighterLogicState.Standing || GuardWalkMomentum < -walkLimit || GuardWalkMomentum > walkLimit))
+            throw new InvalidOperationException($"角色 {Id} 的防御起始惯性快照非法。");
         if (Id < 0)
             throw new InvalidOperationException($"角色 Id 不能为负：{Id}。");
         if (MaxHealth <= 0)

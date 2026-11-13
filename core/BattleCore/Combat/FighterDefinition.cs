@@ -25,16 +25,23 @@ public sealed class GroundHurtboxes
     public const int MaxLocalCoordinate = 8192;
 
     public GroundHurtboxes(IReadOnlyList<FixedRect> standing, IReadOnlyList<FixedRect> crouching,
-        bool standingOnCrouchEntry = false)
+        bool standingOnCrouchEntry = false, IReadOnlyList<FixedRect>? hitstun = null, int hitstunRecoveryFrames = 0)
     {
         Standing = Copy(standing, nameof(standing));
         Crouching = Copy(crouching, nameof(crouching));
         StandingOnCrouchEntry = standingOnCrouchEntry;
+        if ((hitstun is null && hitstunRecoveryFrames != 0) ||
+            (hitstun is not null && hitstunRecoveryFrames <= 0))
+            throw new ArgumentException("受击恢复框需要正数持续帧，并与持续帧一起配置。", nameof(hitstunRecoveryFrames));
+        Hitstun = hitstun is null ? null : Copy(hitstun, nameof(hitstun));
+        HitstunRecoveryFrames = hitstunRecoveryFrames;
     }
 
     public IReadOnlyList<FixedRect> Standing { get; }
     public IReadOnlyList<FixedRect> Crouching { get; }
     public bool StandingOnCrouchEntry { get; }
+    public IReadOnlyList<FixedRect>? Hitstun { get; }
+    public int HitstunRecoveryFrames { get; }
 
     private static IReadOnlyList<FixedRect> Copy(IReadOnlyList<FixedRect> boxes, string name)
     {
@@ -88,7 +95,11 @@ public sealed class FighterDefinition
         DynamicDamageRules? damageRules = null,
         bool useCommandPriority = false,
         bool allowStrikeClash = true,
-        FixedPoint? forwardGuardDistance = null)
+        FixedPoint? forwardGuardDistance = null,
+        bool retainProjectileGuard = false,
+        bool preserveGuardEntryMomentum = false,
+        int projectileGuardRecoveryFrames = 0,
+        bool protectGroundHitstunExit = false)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -98,6 +109,14 @@ public sealed class FighterDefinition
         FighterId = fighterId;
         UseCommandPriority = useCommandPriority;
         AllowStrikeClash = allowStrikeClash;
+        RetainProjectileGuard = retainProjectileGuard;
+        if (projectileGuardRecoveryFrames < 0 || (projectileGuardRecoveryFrames > 0 && !retainProjectileGuard))
+            throw new ArgumentOutOfRangeException(nameof(projectileGuardRecoveryFrames));
+        if (preserveGuardEntryMomentum && movement?.GroundReaction is null)
+            throw new ArgumentException("防御起始惯性需要地面反应摩擦配置。", nameof(preserveGuardEntryMomentum));
+        PreserveGuardEntryMomentum = preserveGuardEntryMomentum;
+        ProjectileGuardRecoveryFrames = projectileGuardRecoveryFrames;
+        ProtectGroundHitstunExit = protectGroundHitstunExit;
         if (forwardGuardDistance is { } guardDistance &&
             (guardDistance <= FixedPoint.Zero || guardDistance > FixedPoint.FromInt(GroundHurtboxes.MaxLocalCoordinate)))
             throw new ArgumentOutOfRangeException(nameof(forwardGuardDistance));
@@ -207,6 +226,11 @@ public sealed class FighterDefinition
     public bool AllowStrikeClash { get; }
 
     public FixedPoint? ForwardGuardDistance { get; }
+
+    public bool RetainProjectileGuard { get; }
+    public bool PreserveGuardEntryMomentum { get; }
+    public int ProjectileGuardRecoveryFrames { get; }
+    public bool ProtectGroundHitstunExit { get; }
 
     /// <summary>该角色的专属招式表（只读）。</summary>
     public IReadOnlyList<MoveDefinition> Moves { get; }

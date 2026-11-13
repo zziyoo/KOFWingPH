@@ -873,6 +873,45 @@ public class FighterDataTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GroundHitstunSourceRectanglesRejectPrematureWaveContact(bool mirrored)
+    {
+        const string box = """
+            [{"minX":{"numerator":-20,"denominator":1},"minY":{"numerator":1,"denominator":1},
+              "maxX":{"numerator":19,"denominator":1},"maxY":{"numerator":80,"denominator":1}}]
+            """;
+        FighterDefinition Load(bool configured) => FighterDataLoader.Load(Mutate(Json("Kai"), data =>
+        {
+            var ground = new JsonObject { ["standing"] = JsonNode.Parse(box), ["crouching"] = JsonNode.Parse(box) };
+            if (configured)
+            {
+                ground["hitstun"] = JsonNode.Parse(box);
+                ground["hitstunRecoveryFrames"] = 6;
+            }
+            data["groundHurtboxes"] = ground;
+        }));
+
+        int direction = mirrored ? -1 : 1;
+        var target = FighterState.Create(1, 1000, 0, mirrored ? Facing.Right : Facing.Left) with
+        {
+            LogicState = FighterLogicState.Hitstun,
+            StunRemainingFrames = 3,
+            PositionX = direction * FixedPoint.FromFraction(948852, 10000),
+        };
+        FixedRect wave = mirrored ? new FixedRect(-66, -35, 1, 64) : new FixedRect(35, 66, 1, 64);
+        FighterDefinition legacy = Load(false);
+        Assert.Contains(FighterBoxes.GetHurtboxes(target, legacy), wave.IntersectsOrTouches);
+        FighterDefinition configured = Load(true);
+        FixedRect source = Assert.Single(FighterBoxes.GetHurtboxes(target, configured));
+        Assert.False(wave.IntersectsOrTouches(source));
+        FixedPoint facingEdge = mirrored ? -source.MaxX : source.MinX;
+        Assert.Equal(direction * target.PositionX - 19, facingEdge);
+        Assert.Contains(FighterBoxes.GetHurtboxes(target with { StunRemainingFrames = 7 }, configured), wave.IntersectsOrTouches);
+        Assert.Contains(FighterBoxes.GetHurtboxes(target with { HitstopRemainingFrames = 1 }, configured), wave.IntersectsOrTouches);
+    }
+
+    [Theory]
     [InlineData(0, 128, false)]
     [InlineData(0, 129, true)]
     [InlineData(0, 130, true)]

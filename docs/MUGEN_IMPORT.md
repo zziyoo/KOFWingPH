@@ -168,3 +168,23 @@ python -m unittest discover -s tools/MugenImporter/tests -p test_state_power_wav
 ```
 
 默认预设从 Action 205 的 AIR 持续时间和 CNS 的严格元素比较计算出取消窗口 tick 4–6。窗口接受命中、格挡或空挥。tick 7–11 仍按身体距离优先尝试 205，其次 200。默认预设复用阶段 19 的 State 1000、Helper 1020 和绑定。原版模式 2 走 State 1050，实验对照只保留阶段 18 的普通技与重进。使用 `stage_assets.py` 分别将 `default.binding.json` 和 `mode2.binding.json` 安装到 `terry98-stage20-default` 和 `terry98-stage20-mode2`。
+
+## 阶段 21 近重拳取消弱 Power Wave
+
+先按[阶段 21 原引擎取证](STAGE21_REFERENCE.md)采集并验证轨迹。转换核对阶段 20 的角色、绑定与来源哈希，从 Action 215 与 State −2 的严格元素比较推导取消窗口。默认实验预设仅增加一条 215→1000 规则。模式 2 对照保留该预设原有的普通技与重进。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+python -m mugen_importer.state_power_wave_heavy local-mugen/terry.zip data/imported-characters/terry98/manifest.json --audit-only
+python -m mugen_importer.state_power_wave_heavy local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
+  --stage20-profile-dir data/imported-characters/terry98-stage20-data `
+  --reference local-mugen/stage21-reference-final/results `
+  --reference local-mugen/stage21-reference-mixed/results `
+  --reference local-mugen/stage21-reference-guard-release/results `
+  --output-dir data/imported-characters/terry98-stage21-data
+foreach ($mode in 'default','mode2') {
+  python tools/Stage14Validation/stage_assets.py --binding "data/imported-characters/terry98-stage21-data/$mode.binding.json" `
+    --destination "data/imported-characters/terry98-stage21-$mode"
+}
+python -m unittest discover -s tools/MugenImporter/tests -p test_state_power_wave_heavy.py
+```

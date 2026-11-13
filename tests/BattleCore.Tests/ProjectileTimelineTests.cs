@@ -1,5 +1,7 @@
+using System.Text.Json.Nodes;
 using NewKOF.BattleCore.Combat;
 using NewKOF.BattleCore.Commands;
+using NewKOF.BattleCore.Data;
 using NewKOF.BattleCore.Input;
 using NewKOF.BattleCore.Numerics;
 using NewKOF.BattleCore.Simulation;
@@ -62,6 +64,91 @@ public sealed class ProjectileTimelineTests
         Assert.Equal(result.State.Projectiles.ToArray(), simulation.Step(start, input).State.Projectiles.ToArray());
         Assert.DoesNotContain(simulation.Step(result.State, FrameInput.Empty(result.State.Frame)).Events,
             e => e.Type is BattleEventType.ProjectileHit or BattleEventType.ProjectileBlocked);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void TimelineWaveCanRetainOptInGroundedGuardDuringBlockstun(bool mirrored, bool holdBack)
+    {
+        BattleSimulation shooter = CreateSimulation(varyDamage: true);
+        BattleState cast = Cast(shooter, Duel(60, mirrored), both: false);
+        FighterState target = cast.Fighter(1) with { LogicState = FighterLogicState.Blockstun, StunRemainingFrames = 6 };
+        var blockstun = new BattleState(cast.Frame, [cast.Fighter(0), target], cast.StateVersion, cast.Round,
+            cast.Projectiles, cast.NextProjectileId);
+        InputBits back = mirrored ? InputBits.Left : InputBits.Right;
+        var input = new FrameInput(cast.Frame, InputBits.None, holdBack ? back : InputBits.None);
+
+        BattleSimulation ForDefender(bool retainProjectileGuard)
+        {
+            var defender = new FighterDefinition("GuardProbe", [], [], retainProjectileGuard: retainProjectileGuard);
+            return new BattleSimulation(new FightRoster(shooter.Roster.Player1, defender));
+        }
+        BattleStepResult legacy = ForDefender(false).Step(blockstun, input);
+        Assert.Contains(legacy.Events, e => e.Type == BattleEventType.ProjectileHit);
+
+        BattleStepResult source = ForDefender(true).Step(blockstun, input);
+        Assert.Contains(source.Events, e => e.Type == BattleEventType.ProjectileBlocked);
+        Assert.DoesNotContain(source.Events, e => e.Type == BattleEventType.ProjectileHit);
+        Assert.Equal((991, FighterLogicState.Blockstun, 11), (source.State.Fighter(1).Health,
+            source.State.Fighter(1).LogicState, source.State.Fighter(1).HitstopRemainingFrames));
+        Assert.True(Assert.Single(source.State.Projectiles).HasContact);
+
+        var standing = new BattleState(cast.Frame, [cast.Fighter(0), target with
+            { LogicState = FighterLogicState.Standing, StunRemainingFrames = 0 }], cast.StateVersion, cast.Round,
+            cast.Projectiles, cast.NextProjectileId);
+        BattleStepResult afterGuard = ForDefender(true).Step(standing, FrameInput.Empty(cast.Frame));
+        Assert.Contains(afterGuard.Events, e => e.Type == BattleEventType.ProjectileHit);
+    }
+
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(1, false)]
+    public void ReleasedGuardRecoveryOnlyBlocksWithinItsRemainingFrames(int remaining, bool blocks)
+    {
+        BattleSimulation shooter = CreateSimulation(varyDamage: true);
+        var defender = new FighterDefinition("GuardRecovery", [], [], retainProjectileGuard: true,
+            projectileGuardRecoveryFrames: 4);
+        var simulation = new BattleSimulation(new FightRoster(shooter.Roster.Player1, defender));
+        BattleState cast = Cast(simulation, Duel(60), both: false);
+        FighterState recovery = cast.Fighter(1) with { ProjectileGuardRecoveryRemaining = remaining };
+        var state = new BattleState(cast.Frame, [cast.Fighter(0), recovery], cast.StateVersion, cast.Round,
+            cast.Projectiles, cast.NextProjectileId);
+        BattleStepResult step = simulation.Step(state, FrameInput.Empty(state.Frame));
+
+        BattleEvent contact = Assert.Single(step.Events);
+        Assert.Equal(blocks ? BattleEventType.ProjectileBlocked : BattleEventType.ProjectileHit, contact.Type);
+        Assert.Equal(0, step.State.Fighter(1).ProjectileGuardRecoveryRemaining);
+        Assert.Equal(blocks ? 991 : 997, step.State.Fighter(1).Health);
+    }
+
+    [Fact]
+    public void OptInGroundHitstunExitProtectsOnlyTheExitTickFromAnExistingWave()
+    {
+        BattleSimulation shooter = CreateSimulation(varyDamage: true);
+        BattleState cast = Cast(shooter, Duel(60), both: false);
+        FighterState target = cast.Fighter(1) with { LogicState = FighterLogicState.Hitstun, StunRemainingFrames = 1 };
+        var hitstun = new BattleState(cast.Frame, [cast.Fighter(0), target], cast.StateVersion, cast.Round,
+            cast.Projectiles, cast.NextProjectileId);
+
+        BattleStepResult legacy = shooter.Step(hitstun, FrameInput.Empty(hitstun.Frame));
+        Assert.Contains(legacy.Events, e => e.Type == BattleEventType.ProjectileHit);
+
+        string json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", "fighters", "Kai.json"));
+        JsonNode configuration = JsonNode.Parse(json)!;
+        configuration["protectGroundHitstunExit"] = true;
+        FighterDefinition defender = FighterDataLoader.Load(configuration.ToJsonString());
+        var simulation = new BattleSimulation(new FightRoster(shooter.Roster.Player1, defender));
+
+        BattleStepResult exit = simulation.Step(hitstun, FrameInput.Empty(hitstun.Frame));
+        Assert.Empty(exit.Events);
+        Assert.Equal((FighterLogicState.Standing, 1000), (exit.State.Fighter(1).LogicState, exit.State.Fighter(1).Health));
+        ProjectileState entity = Assert.Single(exit.State.Projectiles);
+        Assert.Equal((1, 24, false), (entity.ProjectileId, entity.RemainingLifetime, entity.HasContact));
+
+        BattleStepResult next = simulation.Step(exit.State, FrameInput.Empty(exit.State.Frame));
+        Assert.Contains(next.Events, e => e.Type == BattleEventType.ProjectileHit);
+        Assert.True(Assert.Single(next.State.Projectiles).HasContact);
     }
 
     [Fact]

@@ -32,13 +32,13 @@ FROZEN_BASE = {
 REQUIRED_REFERENCE_MEMBERS = ('Terry.air', 'Terry.cmd', 'Terry-N.cns', 'Terry-S.cns', 'Terry-2-3.cns', 'Helper.cns')
 
 
-def cancel_window(condition, durations):
-    first, last = number_in(condition, r'stateno=205&&animelemtime\((\d+)\)>0&&animelemtime\((\d+)\)<0',
-                            'State 205 Power Wave permission')
+def cancel_window(condition, durations, *, source_state=205):
+    first, last = number_in(condition, rf'stateno={source_state}&&animelemtime\((\d+)\)>0&&animelemtime\((\d+)\)<0',
+                            f'State {source_state} Power Wave permission')
     require(1 <= first < last <= len(durations) and all(type(tick) is int and tick > 0 for tick in durations),
-            'State 205 AIR element window outside finite action')
+            f'State {source_state} AIR element window outside finite action')
     start, end = sum(durations[:first - 1]) + 1, sum(durations[:last - 1]) - 1
-    require(start <= end, 'State 205 AIR element window is empty')
+    require(start <= end, f'State {source_state} AIR element window is empty')
     return [start, end]
 
 
@@ -122,9 +122,9 @@ def inspect_source(source_zip, manifest):
                             'mode2WaveEntry': mode2_entry.line, 'nearEntry': near['nearEntryLine']}}
 
 
-def load_frozen_base(directory, mode, audit):
+def load_frozen_base(directory, mode, audit, *, frozen_base=FROZEN_BASE):
     docs = {}
-    for kind, sha256 in FROZEN_BASE[mode].items():
+    for kind, sha256 in frozen_base[mode].items():
         path = directory / f'{mode}.{kind}.json'
         raw = path.read_bytes()
         require(state200.digest(raw) == sha256, f'{path.name}: frozen {mode} profile SHA-256 mismatch')
@@ -134,9 +134,9 @@ def load_frozen_base(directory, mode, audit):
     return docs['fighter'], docs['binding']
 
 
-def verify_native_references(directories, audit):
+def verify_native_references(directories, audit, *, reference_stage=20, include_contract=False):
     require(__debug__, 'native reference assertions require Python without optimization')
-    checker_path = Path(__file__).resolve().parents[2] / 'Stage20Reference/Check-Traces.py'
+    checker_path = Path(__file__).resolve().parents[2] / f'Stage{reference_stage}Reference/Check-Traces.py'
     checker = runpy.run_path(str(checker_path))
     source_hashes = {member['name']: member['sha256'] for member in audit['members'].values()}
     references, cases = [], {}
@@ -156,8 +156,8 @@ def verify_native_references(directories, audit):
                 names.append(case)
             require(names == metadata['executed_cases'], 'native metadata and checked case names differ')
             references.append({'metadataSha256': state200.archive_digest(metadata_path), 'cases': names})
-        checker['verify_cases'](cases)
-    return references
+        checked = checker['verify_cases'](cases)
+    return (references, checked) if include_contract else references
 
 
 def main():

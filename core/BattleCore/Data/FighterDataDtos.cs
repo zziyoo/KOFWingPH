@@ -39,6 +39,18 @@ public sealed class FighterDocumentDto
     [JsonPropertyName("forwardGuardDistance")]
     public FractionDto? ForwardGuardDistance { get; set; }
 
+    [JsonPropertyName("retainProjectileGuard")]
+    public bool RetainProjectileGuard { get; set; }
+
+    [JsonPropertyName("preserveGuardEntryMomentum")]
+    public bool PreserveGuardEntryMomentum { get; set; }
+
+    [JsonPropertyName("projectileGuardRecoveryFrames")]
+    public int ProjectileGuardRecoveryFrames { get; set; }
+
+    [JsonPropertyName("protectGroundHitstunExit")]
+    public bool ProtectGroundHitstunExit { get; set; }
+
     [JsonPropertyName("moves")]
     public List<MoveDto>? Moves { get; set; }
 
@@ -110,6 +122,12 @@ public sealed class GroundHurtboxesDto
 
     [JsonPropertyName("crouching")]
     public List<HurtboxDto>? Crouching { get; set; }
+
+    [JsonPropertyName("hitstun")]
+    public List<HurtboxDto>? Hitstun { get; set; }
+
+    [JsonPropertyName("hitstunRecoveryFrames")]
+    public int HitstunRecoveryFrames { get; set; }
 }
 
 public sealed class HurtboxDto
