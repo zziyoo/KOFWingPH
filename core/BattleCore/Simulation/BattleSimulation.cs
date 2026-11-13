@@ -724,24 +724,23 @@ public sealed class BattleSimulation
             }
         }
 
-        // 命中停顿（08A/D96）：攻击方与被击方<b>同值</b>（配置在攻击数据上），
-        // 同帧多个来源取最大值——不因旧攻击框残留反复刷新（D81 去重已保证每实例一次）。
+        // 每人取自己收到的最大停顿；D81 去重保证每个攻击实例只结算一次。
         // 写入发生在全部状态应用之后，避免 with 覆盖。
         for (int defender = 0; defender < fighters.Length; defender++)
         {
-            if (outcomes[defender] is not CombatSettlement settled || settled.HitstopFrames <= 0)
+            if (outcomes[defender] is not CombatSettlement settled || settled.Hitstop == default)
                 continue;
 
             int attacker = 1 - defender;
             fighters[attacker] = fighters[attacker] with
             {
                 HitstopRemainingFrames = Math.Max(
-                    fighters[attacker].HitstopRemainingFrames, settled.HitstopFrames),
+                    fighters[attacker].HitstopRemainingFrames, settled.Hitstop.AttackerFrames),
             };
             fighters[defender] = fighters[defender] with
             {
                 HitstopRemainingFrames = Math.Max(
-                    fighters[defender].HitstopRemainingFrames, settled.HitstopFrames),
+                    fighters[defender].HitstopRemainingFrames, settled.Hitstop.DefenderFrames),
             };
         }
     }
@@ -1538,7 +1537,7 @@ public sealed class BattleSimulation
                 KnockbackX: knockbackX, KnockbackFriction: friction,
                 LaunchVelocityX: FixedPoint.Zero, LaunchVelocityY: FixedPoint.Zero,
                 KnockdownFrames: 0, WakeupFrames: 0,
-                HitstopFrames: attack.HitstopFrames);
+                Hitstop: attack.ResolveMeleeHitstop(blocked: true));
         }
 
         bool launches = attack.Launches;
@@ -1553,7 +1552,7 @@ public sealed class BattleSimulation
             LaunchVelocityY: launches ? attack.LaunchVelocityY : FixedPoint.Zero,
             KnockdownFrames: launches ? attack.KnockdownFrames : 0,
             WakeupFrames: launches ? attack.WakeupFrames : 0,
-            HitstopFrames: attack.HitstopFrames);
+            Hitstop: attack.ResolveMeleeHitstop(blocked: false));
     }
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
@@ -1841,7 +1840,7 @@ public sealed class BattleSimulation
         FixedPoint LaunchVelocityY,
         int KnockdownFrames,
         int WakeupFrames,
-        int HitstopFrames);
+        HitstopPair Hitstop);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。

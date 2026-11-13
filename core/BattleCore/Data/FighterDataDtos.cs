@@ -190,6 +190,27 @@ public sealed class AttackDto
 
     [JsonPropertyName("hitstopFrames")]
     public int? HitstopFrames { get; set; }
+
+    [JsonPropertyName("hitstopByOutcome")]
+    public HitstopByOutcomeDto? HitstopByOutcome { get; set; }
+}
+
+public sealed class HitstopByOutcomeDto
+{
+    [JsonPropertyName("hit")]
+    public HitstopPairDto? Hit { get; set; }
+
+    [JsonPropertyName("block")]
+    public HitstopPairDto? Block { get; set; }
+}
+
+public sealed class HitstopPairDto
+{
+    [JsonPropertyName("attackerFrames")]
+    public int? AttackerFrames { get; set; }
+
+    [JsonPropertyName("defenderFrames")]
+    public int? DefenderFrames { get; set; }
 }
 
 public sealed class CancelDto

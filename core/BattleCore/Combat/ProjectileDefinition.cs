@@ -43,6 +43,8 @@ public sealed class ProjectileDefinition
 
         if (string.IsNullOrWhiteSpace(projectileTypeId))
             throw new ArgumentException("投掷物类型 ID 不能为空。", nameof(projectileTypeId));
+        if (hit.HitstopByOutcome is not null)
+            throw new ArgumentException("投掷物使用 hitstopFrames；hitstopByOutcome 仅用于近身攻击。", nameof(hit));
         if (speedX <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(speedX), speedX,
                 "投掷物水平速度必须为正（方向由发射者朝向决定）。");

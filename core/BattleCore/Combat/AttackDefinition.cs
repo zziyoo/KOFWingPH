@@ -2,6 +2,26 @@ using NewKOF.BattleCore.Numerics;
 
 namespace NewKOF.BattleCore.Combat;
 
+/// <summary>命中或防御结算后，双方各自冻结的后续逻辑帧数。</summary>
+public readonly record struct HitstopPair
+{
+    public HitstopPair(int attackerFrames, int defenderFrames)
+    {
+        if (attackerFrames is < 0 or > AttackDefinition.MaxHitstopFrames)
+            throw new ArgumentOutOfRangeException(nameof(attackerFrames));
+        if (defenderFrames is < 0 or > AttackDefinition.MaxHitstopFrames)
+            throw new ArgumentOutOfRangeException(nameof(defenderFrames));
+        AttackerFrames = attackerFrames;
+        DefenderFrames = defenderFrames;
+    }
+
+    public int AttackerFrames { get; }
+    public int DefenderFrames { get; }
+}
+
+/// <summary>近身攻击在两种结算结果下的独立停顿。相杀和飞行道具沿用各自的规则。</summary>
+public readonly record struct HitstopByOutcome(HitstopPair Hit, HitstopPair Block);
+
 /// <summary>
 /// 一段<b>攻击判定数据</b>（阶段 06A，D76）：招式在 Active 阶段的攻击框几何、
 /// 生效帧范围与攻击高度。纯数据，构造期校验；06B 在此之上接入伤害与硬直结算。
@@ -41,6 +61,7 @@ public sealed class AttackDefinition
     /// <param name="wakeupFrames">倒地后的起身帧数（0 = 直接站起）。</param>
     /// <param name="hitstopFrames">命中停顿帧数（阶段 08A，D96）：命中或成功防御后，
     /// 攻击方与被击方各冻结该数量的<b>后续</b>逻辑帧；0 = 不产生停顿。</param>
+    /// <param name="hitstopByOutcome">可选的近身命中与防御停顿，覆盖上述对称默认值。</param>
     /// <exception cref="ArgumentOutOfRangeException">半宽/半高 ≤ 0、帧号 &lt; 0、
     /// 伤害 &lt; 0 或硬直帧数 &lt; 1，或击退/击飞参数越界。</exception>
     /// <exception cref="ArgumentException">lastActiveFrame &lt; firstActiveFrame，
@@ -63,7 +84,8 @@ public sealed class AttackDefinition
         FixedPoint launchVelocityY = default,
         int knockdownFrames = 0,
         int wakeupFrames = 0,
-        int hitstopFrames = 0)
+        int hitstopFrames = 0,
+        HitstopByOutcome? hitstopByOutcome = null)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -135,6 +157,7 @@ public sealed class AttackDefinition
         KnockdownFrames = knockdownFrames;
         WakeupFrames = wakeupFrames;
         HitstopFrames = hitstopFrames;
+        HitstopByOutcome = hitstopByOutcome;
     }
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
@@ -194,6 +217,12 @@ public sealed class AttackDefinition
     /// 该数量的<b>后续</b>逻辑帧（命中当帧照常完成结算）。0 = 不产生停顿。
     /// </summary>
     public int HitstopFrames { get; }
+
+    public HitstopByOutcome? HitstopByOutcome { get; }
+
+    public HitstopPair ResolveMeleeHitstop(bool blocked) => HitstopByOutcome is { } outcome
+        ? (blocked ? outcome.Block : outcome.Hit)
+        : new HitstopPair(HitstopFrames, HitstopFrames);
 
     /// <summary>这一击是否会击飞（垂直初速 &gt; 0）。</summary>
     public bool Launches => LaunchVelocityY > FixedPoint.Zero;

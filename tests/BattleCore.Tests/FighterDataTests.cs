@@ -376,6 +376,71 @@ public class FighterDataTests
         return ex;
     }
 
+    [Theory]
+    [InlineData(false, false, 2, 5)]
+    [InlineData(true, true, 3, 1)]
+    public void MeleeHitstop_SelectsOutcomeAndFreezesEachSeatIndependently(
+        bool blocked, bool mirrored, int attackerPause, int defenderPause)
+    {
+        string json = Mutate(Json("Kai"), o =>
+        {
+            JsonNode jab = o["moves"]!.AsArray().Single(m => (string?)m!["moveId"] == "StandLightPunch")!;
+            jab["attacks"]![0]!["hitstopByOutcome"] = JsonNode.Parse("""
+                {"hit":{"attackerFrames":2,"defenderFrames":5},
+                 "block":{"attackerFrames":3,"defenderFrames":1}}
+                """);
+        });
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var sim = new BattleSimulation(new FightRoster(fighter, fighter));
+        int attacker = mirrored ? 1 : 0;
+        int defender = 1 - attacker;
+        BattleState state = new(0, new[]
+        {
+            FighterState.Create(0, 1000, -30, Facing.Right),
+            FighterState.Create(1, 1000, 30, Facing.Left),
+        }, BattleState.CreateDefault().StateVersion);
+        InputBits back = !blocked ? InputBits.None : mirrored ? InputBits.Left : InputBits.Right;
+        FrameInput Input(InputBits button) => mirrored ? F(state.Frame, back, button) : F(state.Frame, button, back);
+        state = sim.Step(state, Input(InputBits.LightPunch)).State;
+
+        BattleStepResult contact;
+        do
+        {
+            contact = sim.Step(state, Input(InputBits.None));
+            state = contact.State;
+        } while (state.Frame < 8 && state.Fighter(defender).StunRemainingFrames == 0);
+
+        Assert.Contains(contact.Events, e => e.Type == (blocked ? BattleEventType.Blocked : BattleEventType.Hit));
+        Assert.Equal(attackerPause, state.Fighter(attacker).HitstopRemainingFrames);
+        Assert.Equal(defenderPause, state.Fighter(defender).HitstopRemainingFrames);
+        int elapsed = state.Fighter(attacker).MoveElapsedFrames;
+        int stun = state.Fighter(defender).StunRemainingFrames;
+        int health = state.Fighter(defender).Health;
+        for (int tick = 1; tick <= Math.Max(attackerPause, defenderPause) + 1; tick++)
+        {
+            BattleStepResult next = sim.Step(state, Input(InputBits.None));
+            state = next.State;
+            Assert.Equal(Math.Max(0, attackerPause - tick), state.Fighter(attacker).HitstopRemainingFrames);
+            Assert.Equal(Math.Max(0, defenderPause - tick), state.Fighter(defender).HitstopRemainingFrames);
+            Assert.Equal(elapsed + Math.Max(0, tick - attackerPause), state.Fighter(attacker).MoveElapsedFrames);
+            Assert.Equal(stun - Math.Max(0, tick - defenderPause), state.Fighter(defender).StunRemainingFrames);
+            Assert.Equal(health, state.Fighter(defender).Health);
+            Assert.DoesNotContain(next.Events, e => e.Type is BattleEventType.Hit or BattleEventType.Blocked);
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"hit\":{\"attackerFrames\":0,\"defenderFrames\":0}}", ".block")]
+    [InlineData("{\"hit\":{\"attackerFrames\":0}}", ".hit.defenderFrames")]
+    [InlineData("{\"hit\":{\"attackerFrames\":31,\"defenderFrames\":0}}", ".hit.attackerFrames")]
+    public void MeleeHitstop_RejectsMissingOrOutOfRangeFields(string value, string path)
+    {
+        string json = Mutate(Json("Kai"), o =>
+            o["moves"]![0]!["attacks"]![0]!["hitstopByOutcome"] = JsonNode.Parse(value));
+
+        Assert.EndsWith(".hitstopByOutcome" + path, ExpectFailure(json).FieldPath);
+    }
+
     [Fact]
     public void MalformedJson_AndUnsupportedVersion_AreRejected()
     {

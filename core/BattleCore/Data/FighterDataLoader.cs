@@ -201,8 +201,31 @@ public static class FighterDataLoader
             launchVelocityY: Fraction(dto.LaunchVelocityY, source, path + ".launchVelocityY"),
             knockdownFrames: RequiredInt(dto.KnockdownFrames, source, path + ".knockdownFrames"),
             wakeupFrames: RequiredInt(dto.WakeupFrames, source, path + ".wakeupFrames"),
-            hitstopFrames: RequiredInt(dto.HitstopFrames, source, path + ".hitstopFrames")),
+            hitstopFrames: RequiredInt(dto.HitstopFrames, source, path + ".hitstopFrames"),
+            hitstopByOutcome: dto.HitstopByOutcome is { } outcome
+                ? new HitstopByOutcome(
+                    BuildHitstopPair(outcome.Hit, source, path + ".hitstopByOutcome.hit"),
+                    BuildHitstopPair(outcome.Block, source, path + ".hitstopByOutcome.block"))
+                : null),
         source, path);
+
+    private static HitstopPair BuildHitstopPair(HitstopPairDto? dto, string source, string path)
+    {
+        if (dto is null)
+            throw Fail(source, path, "必填停顿对象缺失或为 null。");
+
+        int Frames(int? value, string field)
+        {
+            int frames = RequiredInt(value, source, field);
+            if (frames is < 0 or > AttackDefinition.MaxHitstopFrames)
+                throw Fail(source, field, $"停顿帧数必须在 0..{AttackDefinition.MaxHitstopFrames} 内。");
+            return frames;
+        }
+
+        return new HitstopPair(
+            Frames(dto.AttackerFrames, path + ".attackerFrames"),
+            Frames(dto.DefenderFrames, path + ".defenderFrames"));
+    }
 
     private static CancelDefinition BuildCancel(CancelDto dto, string source, string path) => Guard(
         () => new CancelDefinition(
