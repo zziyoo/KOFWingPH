@@ -1,9 +1,10 @@
 param(
     [string]$IkemenRoot = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Ikemen-GO'),
     [switch]$Prepare,
+    [ValidateSet('Stage14', 'Stage15')]
+    [string]$CaptureProfile = 'Stage14',
     [string]$RunDirectory = 'local-mugen/stage14-reference',
-    [ValidateSet('whiff', 'hit', 'guard', 'mirror', 'crouch-guard', 'crouch-guard-late', 'crouch-guard-held', 'boundary-78', 'boundary-79', 'boundary-80')]
-    [string[]]$Cases = @('whiff', 'hit', 'guard', 'mirror', 'crouch-guard', 'crouch-guard-late', 'crouch-guard-held', 'boundary-78', 'boundary-79', 'boundary-80')
+    [string[]]$Cases
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,6 +22,29 @@ if ((Test-Path -LiteralPath (Join-Path $results 'run-metadata.json')) -or
         $_.Extension -eq '.jsonl' -or $_.Name -match '-(stdout|stderr)\.txt$'
     }).Count -gt 0) {
     throw "Reference evidence already exists at $results. Choose a fresh -RunDirectory."
+}
+$captureDir = $PSScriptRoot
+$distances = [ordered]@{ whiff = 240; hit = 60; guard = 60; mirror = 60; 'crouch-guard' = 60; 'crouch-guard-late' = 60; 'crouch-guard-held' = 60; 'boundary-78' = 78; 'boundary-79' = 79; 'boundary-80' = 80 }
+if ($CaptureProfile -eq 'Stage15') {
+    $captureDir = Join-Path $root 'tools/Stage15Reference'
+    $distances = [ordered]@{}
+    foreach ($mode in @('default', 'mode2')) {
+        foreach ($case in @('whiff', 'hit', 'guard', 'crouch-guard', 'crouch-guard-late', 'mirror', 'close-60', 'close-64', 'far-65', 'boundary-86', 'boundary-87', 'trade', 'interrupt')) {
+            $distances["$mode-$case"] = switch ($case) {
+                whiff { 240 }
+                'close-60' { 60 }
+                'close-64' { 64 }
+                'far-65' { 65 }
+                'boundary-86' { 86 }
+                'boundary-87' { 87 }
+                default { 72 }
+            }
+        }
+    }
+}
+if (!$Cases) { $Cases = @($distances.Keys) }
+foreach ($caseName in $Cases) {
+    if (!$distances.Contains($caseName)) { throw "Unknown $CaptureProfile case $caseName" }
 }
 $runtime = Join-Path $IkemenRoot 'test-runtime/round2-5dac5caf'
 $tools = Join-Path $IkemenRoot 'test-runtime/tools'
@@ -65,7 +89,7 @@ if ($Prepare) {
     if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the isolated source directory' }
     & git -C $engine apply (Join-Path $IkemenRoot 'docs/combat-research/runtime-round2/instrumentation.patch')
     if ($LASTEXITCODE -ne 0) { throw 'Could not apply the pinned research hooks' }
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'combat_research.go.txt') -Destination (Join-Path $engine 'src/combat_research.go')
+    Copy-Item -LiteralPath (Join-Path $captureDir 'combat_research.go.txt') -Destination (Join-Path $engine 'src/combat_research.go')
     $bytecode = Join-Path $engine 'src/bytecode.go'
     $source = [IO.File]::ReadAllText($bytecode)
     $newline = if ($source.Contains([string][char]13 + [char]10)) { [string][char]13 + [char]10 } else { [string][char]10 }
@@ -91,7 +115,6 @@ foreach ($filename in $expectedSourceHashes.Keys) {
 $exe = Join-Path $engine 'Ikemen_GO.exe'
 New-Item -ItemType Directory -Force -Path $results | Out-Null
 $env:PATH = (Join-Path $tools 'msys64/mingw64/bin') + ';' + $env:PATH
-$distances = @{ whiff = 240; hit = 60; guard = 60; mirror = 60; 'crouch-guard' = 60; 'crouch-guard-late' = 60; 'crouch-guard-held' = 60; 'boundary-78' = 78; 'boundary-79' = 79; 'boundary-80' = 80 }
 $arguments = '-p1 terry/Terry-KOF98.def -p2 terry/Terry-KOF98.def -s stages/kfm.def -time 99 -rounds 1 -windowed -nojoy -nosound'
 $enc = [Text.UTF8Encoding]::new($false)
 $metadata = [ordered]@{
@@ -104,13 +127,20 @@ $metadata = [ordered]@{
     arguments = $arguments
     scenario_distance = $distances
 }
+if ($CaptureProfile -eq 'Stage15') { $metadata.capture_profile = $CaptureProfile }
 [IO.File]::WriteAllText((Join-Path $results 'run-metadata.json'), ($metadata | ConvertTo-Json -Depth 6) + [char]10, $enc)
 foreach ($caseName in $Cases) {
     $env:RESEARCH_CASE = $caseName
     $env:RESEARCH_DISTANCE = [string]$distances[$caseName]
     $env:RESEARCH_TRACE = Join-Path $results "$caseName.jsonl"
     $stderr = Join-Path $results "$caseName-stderr.txt"
-    $process = Start-Process -FilePath $exe -WorkingDirectory $engine -ArgumentList $arguments -WindowStyle Hidden -PassThru `
+    $caseArguments = $arguments
+    if ($CaptureProfile -eq 'Stage15') {
+        $env:RESEARCH_MODE_TRACE = Join-Path $results "$caseName-mode.jsonl"
+        $p1Palette = if ($caseName.StartsWith('mode2-')) { 7 } else { 1 }
+        $caseArguments += " -p1.pal $p1Palette -p2.pal 2"
+    }
+    $process = Start-Process -FilePath $exe -WorkingDirectory $engine -ArgumentList $caseArguments -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $results "$caseName-stdout.txt") -RedirectStandardError $stderr
     if (!$process.WaitForExit(45000)) {
         Stop-Process -Id $process.Id
@@ -128,6 +158,7 @@ foreach ($caseName in $Cases) {
         initial_distance = $distances[$caseName]
         trace_sha256 = $trace.Hash.ToLowerInvariant()
     }
+    if ($CaptureProfile -eq 'Stage15') { $caseMetadata.arguments = $caseArguments }
     [IO.File]::WriteAllText((Join-Path $results "$caseName-metadata.json"), ($caseMetadata | ConvertTo-Json) + [char]10, $enc)
     $trace
 }
