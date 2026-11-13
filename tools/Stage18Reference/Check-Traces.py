@@ -79,6 +79,14 @@ def inspect_trace(name, data, snapshots):
         reentry.append((frame, change["from"], change["to"], change["stateTime"], frame - press, change["bodyDistX"]))
     contacts = [(row["frame"], row["chars"][1]["damage"], row["chars"][1]["guarded"])
                 for row in snapshots["after-collision"] if row["chars"][1]["gethit"]]
+    if name.endswith("-whiff-heavy16-light17"):
+        assert raw[5] == LIGHT and raw[16:18] == [HEAVY, LIGHT] and not contacts and not reentry, name
+        terminal = [row for row in changes if row["frame"] == 17]
+        assert len(terminal) == 1, (name, terminal)
+        event = terminal[0]
+        assert (event["from"], event["to"], event["stateTime"], event["var2"]) == (200, 200, 12, 1), (name, event)
+        assert event["xBuffer"] and not event["yBuffer"] and event["helperY"] == 2, (name, event)
+        print(f"{name:40} terminal F17: 200→200, xBuffer=1 helperY={event['helperY']}")
     return reentry, contacts, changes, raw, snapshots
 
 

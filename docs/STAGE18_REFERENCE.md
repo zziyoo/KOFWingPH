@@ -13,6 +13,7 @@
 - F9 预按后保持到不了 F12。F10、F11 的单次预按均在 F12 生效。F12 的根角色 `xBuffer` 已空，Helper 的 `var(0)` 分别为 1、2。F12 直接按下则由根角色命令接受。F10 或 F11 开始按住第二次输入也只重进一次。
 - Helper 在物理命令帧设置 `var(0)=3` 并同一 Helper tick 减至 2。根角色 State −1 在后续两个帧可读取 2 和 1。始终按住第一次 `x` 不产生第二个命令。
 - F16 直接输入在旧时间 11 重进，`ctrl=false,var(2)=0`。F17 已到旧时间 12、`AnimTime=0`，源 State −2 设置 `var(2)=1`，随后一般站轻拳控制器直接进入新 200。这是原版末端普通启动，属于显式 7–11 收招规则之外。没有第二次输入时 F17 进入 State 0。
+- 末端优先级补测以中心距 100 令 P1 F5 按 `x`、F16 只按 `y`、F17 只按 `x`。F17 根角色轻拳缓冲有效，重拳根缓冲已空但 Helper 的重拳值为 2，两个原版 CMD 入口均可用。原版按控制器顺序选择 200，`var(2)=1`、旧时间 12。NewKOF 末端继续按全局普通启动的缓冲顺序消费，默认预设在对应逻辑帧 31 选择前一 tick 的重拳 210，见 `local-mugen/stage18-validation/terminal-priority-observed.log`。阶段 18 的显式窗口仍是旧时间 7–11。
 - F12 同帧按 `x+y`，两个命令都有效，实际重进 200。只按 `y` 则在显式轻拳窗口内不启动。F11 同按 `x+Down`、F12 松开方向时，F12 经 Helper 重新进入站轻拳。F12 当帧 `x+Down` 在原版进入 State 400 蹲轻拳。Stage 18 的范围限于站轻拳重进。
 
 ## 命中、格挡与停顿
@@ -20,6 +21,7 @@
 中心距 60，P1 F5 出远身轻拳，F8 接触，旧时间推进到 4 后进入 11 tick 攻方 HitPause。F9–19 保持旧时间 4，F20 首次恢复推进，F23 开放旧时间 7 的重进。
 
 - 真实命中样本中，F9、F17、F18、F19 的物理 `x` 能进入原版根角色缓冲，`curbuftime=2` 保持到 F19。F20 衰减为 1，F21 归零。Helper 在根角色冻结时照常衰减，所以这些输入均在 F23 前过期。F20 的新按键也过早。F21、F22 的新按键分别以 Helper 值 1、2 在 F23 重进，F23 直接输入也合法。
+- 中心距 60 的命中后重进，两种预设均为 F8 实扣 46、F23 重进 200、第二招 F26–29 空挥，目标生命保持 954。站远轻拳攻击框最右世界 X 为 29，目标身体框最左依次为 33.251785、35.914017、38.176914、40.100376，击退后四帧均无水平重叠。F26 的受击身体框最高 Y −72 也超出攻击框，F27 改回 Y −88 后仍因水平距离落空。Godot 对应逻辑帧 40 的 P2 位置为 X52.25134，通用受击框向攻方延伸 30，左边缘 X22.25134，因此第二招命中。双方采用各自已有的受击框，重进入口一致。
 - 格挡样本 P2 从 F7 起按后，F8 首次成功格挡，F23 重进。中心距 60 的 200→200 在第二招空挥。中心距 44 的 205→200 在 F26 产生第二次格挡。两次格挡均为 0 削血。显式规则允许首次命中、格挡或空挥后重进。
 - 近身地面对局中心距 36 的 205→205 在 F23 重进，旧第一段 F8 伤害 30，新实例 F26 伤害 22。中心距 44 的 205→200 在 F23 重进，旧第一段 F8 伤害 30，新实例 F27 伤害 37。后者 F26 已生成新 HitDef，但受击者仍用素材 5000,10，朝向攻方的身体框最高到 Y −72，头部框不够靠近。F27 换到 5000,0，身体框最高至 −88，才与站远轻拳的 Y [−88,−73] 重叠。NewKOF 沿用冻结的通用地面受击框，可在 F26 对应的首个生效 tick 接触。两边独立验证分支、重启、去重及合法结算。
 
@@ -48,3 +50,11 @@ python tools/Stage18Reference/Check-Traces.py local-mugen/stage18-reference-cano
 ```
 
 检查通过 76 份轨迹。标准清单 70 项，另有 2 次重复原场景的归一化轨迹一致。方向输入补测有 6 项。两组 `run-metadata.json` SHA-256 分别为 `f16a66f199b9d4dfcce58b4ccfdec016d5384c38d022258bee65fb961bffcde5` 和 `fbc811c46d4a910ac6b58168fcb45aba4f398e286f11a799ca9b3a5e2d537051`。对应执行文件 SHA-256 分别为 `9d58a588b806cff16e8b35dc0b7b0bfc65725e625108d11419250b7d757e5639` 和 `6738943ce583aca1d9f0dec5727e646e5257ec7ff9368ba1300c5f53613334c2`。
+
+末端优先级样本独立保存在 `local-mugen/stage18-reference-terminal-priority/results`，两种预设及镜像共 4 项通过，合计 80 份轨迹。补测 `run-metadata.json` SHA-256 为 `e7ae8ae7aa0fcad4f36aa6391ec0481c2a4592a08facea27bdfdd7fc9671382a`，执行文件 SHA-256 为 `1e4718239d05b29bdedb325546dfebb0dceeedd34335c695758c0e63d2f2fba5`。复现和并入检查使用如下命令。
+
+```powershell
+$terminal = 'default-reentry-whiff-heavy16-light17','default-reentry-mirror-whiff-heavy16-light17','mode2-reentry-whiff-heavy16-light17','mode2-reentry-mirror-whiff-heavy16-light17'
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage18 -Prepare -Cases $terminal -RunDirectory local-mugen/stage18-reference-terminal-priority-new
+python tools/Stage18Reference/Check-Traces.py local-mugen/stage18-reference-canonical/results local-mugen/stage18-reference-down/results local-mugen/stage18-reference-terminal-priority/results
+```

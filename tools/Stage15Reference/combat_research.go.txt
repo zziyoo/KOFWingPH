@@ -154,6 +154,15 @@ func researchReentryBits(pn int) InputBits {
 		if researchFrame == first || (scenario == "held" && researchFrame >= first && researchFrame <= 40) {
 			return IB_X
 		}
+		if scenario == "whiff-heavy16-light17" {
+			switch researchFrame {
+			case 16:
+				return IB_Y
+			case 17:
+				return IB_X
+			}
+			return 0
+		}
 		if second == 0 || researchFrame < second {
 			return 0
 		}

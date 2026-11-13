@@ -142,6 +142,10 @@ if ($CaptureProfile -eq 'Stage18') {
         )) {
             $distances["$mode-reentry-$($fixture.Name)"] = $fixture.Distance
         }
+        foreach ($scenario in @('whiff-heavy16-light17', 'mirror-whiff-heavy16-light17')) {
+            $priorityCase = "$mode-reentry-$scenario"
+            if ($Cases -contains $priorityCase) { $distances[$priorityCase] = 100 }
+        }
     }
 }
 if (!$Cases) { $Cases = @($distances.Keys) }
