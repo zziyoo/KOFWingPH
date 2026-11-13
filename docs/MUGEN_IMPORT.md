@@ -59,3 +59,18 @@ python browser_acceptance.py --manifest ../../data/imported-characters/terry98/m
 ```
 
 验收脚本主动启动独立、有窗口的 Edge，通过确切 file URL 导航，不接管已有浏览器；用控件、Canvas 像素、截图和异常监听验证。需要本机 Edge；其他环境可在脚本浏览器启动处改为已安装的 Chromium。它同时检查真实 Manifest 的编号、全部帧时长、偏移、尺寸/原点及重复生成输出稳定性，前后核对整个原资源目录文件 SHA-256。证据保存于本地 `shots/13c-a/`，第三方图片及内嵌图片的 HTML 不提交。
+
+## 14B：Terry State 200 离线验证与转换
+
+使用 Python 3.11 从仓库根目录运行。先按阶段 14 参考工具生成同一次运行的 `run-metadata.json` 和九份 JSONL 轨迹。
+
+```powershell
+$env:PYTHONPATH='tools/MugenImporter'
+python -m mugen_importer.state200 local-mugen/terry.zip data/imported-characters/terry98/manifest.json --audit-only
+python -m mugen_importer.state200 local-mugen/terry.zip data/imported-characters/terry98/manifest.json --reference local-mugen/stage14-reference-replay/results/run-metadata.json --output-dir data/imported-characters/terry98
+python -m unittest discover -s tools/MugenImporter/tests -p test_state200.py
+```
+
+`--audit-only` 输出静态来源、命令入口、状态、AIR 时序与判定框。`--reference` 读取相邻的原引擎逐帧记录，按 State 200 进入时刻归零，核对判定窗口、双方停顿、生命变化和控制恢复。78 单位命中且 79、80 单位落空的轨迹用于验证边缘接触。命中帧才按住下后的场景可以蹲防，已进入蹲伏的场景会因受击框高度而落空。数据缺失、归档哈希或状态不符、图集异常、必需实测值不一致均导致转换失败。
+
+输出为 `state200.fighter.json`、`state200.binding.json` 和 `state200.source.json`。来源记录包含输入及逐场轨迹的哈希与适用范围。可指定新的输出目录检验重复转换，程序拒绝覆盖同名文件。生成文件和原始资源留在本地忽略目录。实验只覆盖经审查的地面远距离站轻拳，包含原版静止站立和蹲伏的受击框、普通模式首个生效 tick 的结算和动作恢复。完整脚本解释、同招重进和近身优先级留待后续阶段。
