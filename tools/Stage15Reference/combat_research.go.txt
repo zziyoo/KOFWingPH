@@ -18,6 +18,7 @@ var researchModeFile *os.File
 var researchModeEncoder *json.Encoder
 var researchMode2 = strings.HasPrefix(researchCase, "mode2-")
 var researchScenario = strings.TrimPrefix(strings.TrimPrefix(researchCase, "mode2-"), "default-")
+var researchStage16 = strings.HasPrefix(researchScenario, "light-") || strings.HasPrefix(researchScenario, "heavy-")
 var researchTraceFile *os.File
 var researchEncoder *json.Encoder
 
@@ -64,7 +65,7 @@ func researchBegin() {
 		for pn := 0; pn < 2; pn++ {
 			c := sys.chars[pn][0]
 			sign := float32(1 - 2*pn)
-			if researchScenario == "mirror" {
+			if researchScenario == "mirror" || researchStage16 && strings.HasSuffix(researchScenario, "-mirror") {
 				sign = -sign
 			}
 			c.pos, c.facing = [3]float32{-sign * float32(distance) / 2, 0, 0}, sign
@@ -87,6 +88,9 @@ func researchBits(pn int) InputBits {
 			}
 		}
 		return 0
+	}
+	if researchStage16 {
+		return researchCloseNormalBits(pn)
 	}
 	if pn == 0 && researchFrame == 5 {
 		return IB_Y
@@ -113,6 +117,72 @@ func researchBits(pn int) InputBits {
 			if researchFrame >= 10 && researchFrame <= 39 {
 				return IB_PR | IB_PD
 			}
+		}
+	}
+	return 0
+}
+
+func researchCloseNormalBits(pn int) InputBits {
+	light := strings.HasPrefix(researchScenario, "light-")
+	scenario := strings.TrimPrefix(strings.TrimPrefix(researchScenario, "light-"), "heavy-")
+	attackFrame := 5
+	if scenario == "whiff" {
+		attackFrame = 13
+	}
+	if pn == 0 && researchFrame == attackFrame {
+		if strings.HasPrefix(scenario, "both-") {
+			return IB_X | IB_Y
+		}
+		if light {
+			return IB_X
+		}
+		return IB_Y
+	}
+	if pn != 1 {
+		return 0
+	}
+	switch scenario {
+	case "guard":
+		if researchFrame >= 7 && researchFrame <= 55 {
+			return IB_PR
+		}
+	case "crouch-guard":
+		if researchFrame >= 5 && researchFrame <= 55 {
+			return IB_PR | IB_PD
+		}
+	case "crouch-late":
+		if researchFrame >= 8 && researchFrame <= 55 {
+			return IB_PR | IB_PD
+		}
+	case "guard-release":
+		if researchFrame >= 7 && researchFrame <= 8 {
+			return IB_PR
+		}
+	case "crouch-release", "crouch-to-stand":
+		if researchFrame >= 5 && researchFrame <= 8 {
+			return IB_PR | IB_PD
+		}
+		if scenario == "crouch-to-stand" && researchFrame >= 9 && researchFrame <= 55 {
+			return IB_PR
+		}
+	case "whiff":
+		if researchFrame == 0 {
+			return IB_PU
+		}
+	case "second-only":
+		if researchFrame == 5 {
+			return IB_PR
+		}
+	case "second-guard":
+		if researchFrame >= 5 && researchFrame <= 55 {
+			return IB_PR
+		}
+	case "trade":
+		if researchFrame == 5 {
+			if light {
+				return IB_Y
+			}
+			return IB_X
 		}
 	}
 	return 0
@@ -191,7 +261,7 @@ func researchTraceWithOwner(phase string, owner int) {
 				helpers = append(helpers, h.varGet(0).ToI())
 			}
 		}
-		chars = append(chars, map[string]interface{}{
+		char := map[string]interface{}{
 			"pn": pn + 1, "state": c.ss.no, "time": c.ss.time, "anim": c.animNo,
 			"elem": c.anim.curelem, "elemTime": c.anim.curelemtime, "animTime": c.animTime(), "frame": frame,
 			"bodyDistX": c.p2BodyDistX(c).ToF(), "palNo": c.gi().palno,
@@ -218,7 +288,11 @@ func researchTraceWithOwner(phase string, owner int) {
 			},
 			"friction": researchNumbers(c.getStandFriction(), c.getCrouchFriction()),
 			"attackMul": c.attackMul[0], "attackBase": c.gi().attackBase, "finalDefense": c.finalDefense,
-		})
+		}
+		if researchStage16 {
+			char["vars"].(map[string]interface{})["var23"] = c.varGet(23).ToI()
+		}
+		chars = append(chars, char)
 	}
 	if err := researchEncoder.Encode(map[string]interface{}{
 		"case": researchCase, "frame": researchFrame, "phase": phase, "hitDefOwner": owner,
@@ -230,7 +304,7 @@ func researchTraceWithOwner(phase string, owner int) {
 }
 
 func researchHitDef(c *Char) {
-	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215) {
+	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || researchStage16 && c.ss.no == 205) {
 		researchTraceWithOwner("hitdef", c.playerNo+1)
 	}
 }

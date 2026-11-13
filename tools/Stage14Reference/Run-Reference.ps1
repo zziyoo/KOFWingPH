@@ -1,7 +1,7 @@
 param(
     [string]$IkemenRoot = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Ikemen-GO'),
     [switch]$Prepare,
-    [ValidateSet('Stage14', 'Stage15')]
+    [ValidateSet('Stage14', 'Stage15', 'Stage16')]
     [string]$CaptureProfile = 'Stage14',
     [string]$RunDirectory = 'local-mugen/stage14-reference',
     [string[]]$Cases
@@ -42,6 +42,39 @@ if ($CaptureProfile -eq 'Stage15') {
         }
         $fractionalCase = "$mode-far-64p5"
         if ($Cases -contains $fractionalCase) { $distances[$fractionalCase] = 64.5 }
+    }
+}
+if ($CaptureProfile -eq 'Stage16') {
+    $captureDir = Join-Path $root 'tools/Stage15Reference'
+    $distances = [ordered]@{}
+    foreach ($mode in @('default', 'mode2')) {
+        foreach ($normal in @('light', 'heavy')) {
+            $casesForNormal = @('hit', 'guard', 'crouch-guard', 'crouch-late', 'mirror', 'whiff', 'trade')
+            $casesForNormal += if ($normal -eq 'light') { @('boundary-46', 'far-46p5', 'far-47') } else { @('sample-60', 'boundary-64', 'far-64p5', 'far-65', 'second-only', 'second-guard') }
+            foreach ($case in $casesForNormal) {
+                $distances["$mode-$normal-$case"] = switch ($case) {
+                    'boundary-46' { 46 }
+                    'far-46p5' { 46.5 }
+                    'far-47' { 47 }
+                    'sample-60' { 60 }
+                    'boundary-64' { 64 }
+                    'far-64p5' { 64.5 }
+                    'far-65' { 65 }
+                    'second-only' { 64 }
+                    'second-guard' { 64 }
+                    'whiff' { if ($normal -eq 'light') { 36 } else { 54 } }
+                    default { if ($normal -eq 'light') { 44 } else { 62 } }
+                }
+            }
+        }
+        foreach ($scenario in @('guard-release', 'crouch-release', 'crouch-to-stand')) {
+            $releaseCase = "$mode-heavy-$scenario"
+            if ($Cases -contains $releaseCase) { $distances[$releaseCase] = 62 }
+        }
+        foreach ($distance in @(44, 70)) {
+            $simultaneousCase = "$mode-light-both-$distance"
+            if ($Cases -contains $simultaneousCase) { $distances[$simultaneousCase] = $distance }
+        }
     }
 }
 if (!$Cases) { $Cases = @($distances.Keys) }
@@ -129,7 +162,7 @@ $metadata = [ordered]@{
     arguments = $arguments
     scenario_distance = $distances
 }
-if ($CaptureProfile -eq 'Stage15') { $metadata.capture_profile = $CaptureProfile }
+if ($CaptureProfile -ne 'Stage14') { $metadata.capture_profile = $CaptureProfile }
 [IO.File]::WriteAllText((Join-Path $results 'run-metadata.json'), ($metadata | ConvertTo-Json -Depth 6) + [char]10, $enc)
 foreach ($caseName in $Cases) {
     $env:RESEARCH_CASE = $caseName
@@ -137,7 +170,7 @@ foreach ($caseName in $Cases) {
     $env:RESEARCH_TRACE = Join-Path $results "$caseName.jsonl"
     $stderr = Join-Path $results "$caseName-stderr.txt"
     $caseArguments = $arguments
-    if ($CaptureProfile -eq 'Stage15') {
+    if ($CaptureProfile -ne 'Stage14') {
         $env:RESEARCH_MODE_TRACE = Join-Path $results "$caseName-mode.jsonl"
         $p1Palette = if ($caseName.StartsWith('mode2-')) { 7 } else { 1 }
         $caseArguments += " -p1.pal $p1Palette -p2.pal 2"
@@ -160,7 +193,7 @@ foreach ($caseName in $Cases) {
         initial_distance = $distances[$caseName]
         trace_sha256 = $trace.Hash.ToLowerInvariant()
     }
-    if ($CaptureProfile -eq 'Stage15') { $caseMetadata.arguments = $caseArguments }
+    if ($CaptureProfile -ne 'Stage14') { $caseMetadata.arguments = $caseArguments }
     [IO.File]::WriteAllText((Join-Path $results "$caseName-metadata.json"), ($caseMetadata | ConvertTo-Json) + [char]10, $enc)
     $trace
 }
