@@ -170,9 +170,15 @@ def inspect_source(zip_path, manifest):
     air_actions = [unique((action for action in actions if action['action'] == number), f'AIR Action {number}')
                    for number in (41, 49)]
     air_sprites = {action['action']: validate_manifest(manifest, hashes, action) for action in air_actions}
+    reaction_sprites = {
+        number: validate_manifest(manifest, hashes,
+                                  unique((a for a in actions if a['action'] == number), f'AIR Action {number}'))
+        for number in (5000, 5005)
+    }
     return {'format': 1, 'zipSha256': zip_sha, 'manifestSha256': archive_digest(manifest), 'members': members,
             'groundBodyWidths': widths['ground'], 'airBodyWidths': widths['air'], 'moves': result,
-            'neutralAirHurtboxes': neutral_air_hurtboxes(air_actions), 'neutralAirActionSprites': air_sprites}
+            'neutralAirHurtboxes': neutral_air_hurtboxes(air_actions), 'neutralAirActionSprites': air_sprites,
+            'lightReactionActionSprites': reaction_sprites}
 
 
 def attack_cursor(action, contacts):
@@ -377,12 +383,15 @@ def build_profile(audit, reference, base_fighter, base_binding, mode):
     far_heavy = unique((move for move in fighter['moves'] if move['moveId'] == state210.MOVE_ID), 'Stage 15 far heavy move')
     far_heavy.pop('minimumStartDistance')
     fighter['moves'] = near + fighter['moves']
-    heavy_reaction = reference[215][1].get('reaction')
-    if heavy_reaction:
-        binding['clips']['heavy_hurt'] = {'action': heavy_reaction['initialAction'], 'clock': 'phase', 'loop': False}
-        binding['clips']['heavy_hurt_followup'] = {'action': heavy_reaction['followupAction'], 'clock': 'phase', 'loop': False}
-        binding['hitReactions'][MOVE_IDS[215]] = {'initial': 'heavy_hurt', 'followup': 'heavy_hurt_followup',
-                                                 'followupTick': heavy_reaction['followupTick']}
+    for number, strike, initial in ((205, 0, 'light_hurt'), (215, 1, 'heavy_hurt')):
+        reaction = reference[number][strike].get('reaction')
+        if reaction is None:
+            continue
+        followup = initial + '_followup'
+        binding['clips'][initial] = {'action': reaction['initialAction'], 'clock': 'phase', 'loop': False}
+        binding['clips'][followup] = {'action': reaction['followupAction'], 'clock': 'phase', 'loop': False}
+        binding['hitReactions'][MOVE_IDS[number]] = {'initial': initial, 'followup': followup,
+                                                    'followupTick': reaction['followupTick']}
     return fighter, binding
 
 
@@ -431,7 +440,7 @@ def project_mode(cases):
     require(light_counter['vars']['var6'] == heavy_counter['vars']['var6'] == 1,
             'mixed samples did not exercise source counter state')
     return {205: [{'hit': settlement(light_hit), 'guard': settlement(light_guard),
-                   'counterDamage': light_counter['damage']}],
+                   'counterDamage': light_counter['damage'], 'reaction': light_hit['reaction']}],
             215: [{'hit': settlement(first_hit, continuation=both_second),
                    'guard': settlement(first_guard, continuation=both_second_guard),
                    'counterDamage': heavy_counter['damage']},

@@ -65,7 +65,9 @@ type = Null
                'pause': {'attackerFrames': 11, 'defenderFrames': 13}}
         guard = {'damage': 0, 'effectiveStun': 18, 'initialPush': 0,
                  'pause': {'attackerFrames': 11, 'defenderFrames': 11}}
-        reference = {205: [{'hit': {**hit, 'damage': 30, 'initialPush': 6}, 'guard': {**guard, 'initialPush': 6}}],
+        light_reaction = {'initialAction': 5000, 'followupAction': 5005, 'followupTick': 6}
+        reference = {205: [{'hit': {**hit, 'damage': 30, 'initialPush': 6}, 'guard': {**guard, 'initialPush': 6},
+                            'reaction': light_reaction}],
                      215: [{'hit': hit, 'guard': guard}, {'hit': {**hit, 'damage': 61, 'initialPush': 10.5},
                             'guard': {**guard, 'initialPush': 10.5}, 'damageAfterPriorContact': 29}]}
         fighter, visuals = build_profile(audit, reference, base, binding, 'default')
@@ -78,6 +80,12 @@ type = Null
         self.assertNotIn('minimumStartDistance', fighter['moves'][3])
         self.assertIn('minimumStartDistance', base['moves'][1])
         self.assertEqual(215, visuals['clips']['state215']['action'])
+        self.assertEqual({'initial': 'light_hurt', 'followup': 'light_hurt_followup', 'followupTick': 6},
+                         visuals['hitReactions']['TerryStandLightPunch205'])
+        self.assertEqual({'action': 5000, 'clock': 'phase', 'loop': False}, visuals['clips']['light_hurt'])
+        self.assertEqual({'action': 5005, 'clock': 'phase', 'loop': False}, visuals['clips']['light_hurt_followup'])
+        self.assertNotIn('TerryStandLightPunch200', visuals['hitReactions'])
+        self.assertNotIn('TerryStandLightPunch205', binding['hitReactions'])
         self.assertEqual([{'minX': {'numerator': -20, 'denominator': 1}, 'maxX': {'numerator': 19, 'denominator': 1},
                            'minY': {'numerator': 33, 'denominator': 1}, 'maxY': {'numerator': 96, 'denominator': 1}}],
                          fighter['neutralAirHurtboxes'])
