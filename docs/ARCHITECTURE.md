@@ -669,3 +669,7 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - 同一交锋的两席共用 `ThrowVisual`，抓取姿态取 `PendingThrow`，释放姿态只属于 `ThrowHit` 的施投招式实例。拆投、打断、退出招式及交锋重置清除对应姿态。施投、受投和后续倒地均使用权威坐标。
 - 飞行道具按当前交锋 `ProjectileId` 与提交快照同步节点，显示年龄取寿命差，镜像取速度。拥有者换动作、被打断或进入 HitStop 不决定道具的存续。结束交锋清除显示对象。绑定缺失用原创几何图，绑定可给剪影颜色和镜像偏移。
 - 事件特效以 `(scope, EventId)` 去重，坐标取同一提交帧。火花按提交帧计龄，闪白保留 alpha，结束后短时收尾。交锋重置清空所有瞬时表现。详见 `docs/STAGE13C_C_ACCEPTANCE.md`。
+
+### 阶段 14 规则数据入口（计划）
+
+沿用 D7、D115、D125 和 IKEMEN GO 研究 23 的有类型数据路线。原始角色脚本在离线审查和转换时使用，运行时由现有固定步长内核执行校验过的动作数据。首个实验配置选取 Terry State 200，MoveId 与视觉 Action 的关联单独校验。实际范围与验收矩阵见 [阶段 14 计划](superpowers/plans/2026-11-13-stage14-state200.md)。

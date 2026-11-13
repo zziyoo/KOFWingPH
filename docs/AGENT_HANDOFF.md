@@ -1584,3 +1584,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - C1 `c23b2b4`，C2 `d6ef764`，C3 为 C 阶段最终验收提交。复现参数、图像与日志位置见 `docs/STAGE13C_C_ACCEPTANCE.md`。
 - 应用新的 Terry 本地视觉配置时，从 `tools/MugenImporter/profiles/terry98.binding.json` 更新本地绑定。旧绑定没有可选投技/飞行道具条目时使用兼容回退。导入的第三方素材继续留在忽略目录。
 - `--entity-audit` 与 `--visual-audit` 一起启用时记录权威抓取和投射实体信息。`--sprite-frame-audit` 记录实体绘制和反馈事件，均只供验收。
+
+### 13C 冻结与阶段 14 交接
+
+- 13C 封版复现与工程设置记录见 [STAGE13C_FREEZE.md](STAGE13C_FREEZE.md)，原基线由 `stage-13c` 指向。
+- 先按 [阶段 14 计划](superpowers/plans/2026-11-13-stage14-state200.md) 执行 14B 的参考轨迹核对。State 200 的动画与攻击框有静态证据，原版非对称停顿、伤害表达式和同招重进不可直接套用现有 Kai/Rei 数据。
