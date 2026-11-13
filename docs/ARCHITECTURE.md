@@ -705,3 +705,11 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - D91 的取消规则可用 `allowSameMove` 显式允许同招目标。`standingInputOnly` 在消费时读取当前下方向。如果站立规则的其他条件已满足、当前持下且无其他取消胜出，则使该输入失效，避免松下后触发另一招。`maximumInputAge` 用物理按键边沿计算年龄。招式选择按规则顺序和帧开始的身体距离进行，一帧最多发动一次取消。旧配置缺省继续拒绝同招目标。
 - 新实例仍通过已有 `MoveStartedFrame` 区分。重进从 Startup tick 0 开始，清除旧命中和格挡确认。接触去重和招式局部伤害状态按新实例初始化。视觉通过已有招式时钟从新实例首帧播放。快照结构保持。
 - `TerryReentry` 与 `TerryReentryMode2` 以阶段 17 配置为基线，仅为 200／205 添加收招 tick 7–11 的显式重进。两 tick 的站轻拳缓冲来自原引擎根指令和 Helper 的实际窗口。详见[原引擎取证](STAGE18_REFERENCE.md)和[验收](STAGE18_ACCEPTANCE.md)。
+
+### 阶段 19 Power Wave
+
+- `TerryPowerWave` 是独立 1v1 实验预设。`useCommandPriority` 按有效命令的优先级尝试符合状态条件的候选。同一物理边沿共用消费记录。可选 `bufferPolicy` 将根命令的 HitPause 保留与 Helper 99999 的按住／松开衰减分开。未启用的配置继续使用原有 FIFO。
+- State 1000 的 52 个本地 tick 驱动 Action 1000，tick 15 创建带独立 ID 和出生朝向的权威实体。可选 `ProjectileTimeline` 定义首帧位移、停止移动、年龄判定段、一次接触资格及独立存续。Helper 1020 命中或格挡只冻结目标。伤害读取接触前的发射者补正和目标反应状态。旧飞行道具继续使用原有行为。
+- 可选击飞反应把震停、上升、回落、触地、反弹、倒地和起身存入 `FighterState` 快照。物理位移和可见反应片段读取同一反应阶段。起身的打击保护延续到恢复控制的提交 tick。地面快照在穿越地平面的 tick 保持 Y=0，由独立标志延迟到下一 tick 进入触地阶段。
+- 可选 `forwardGuardDistance` 使用上一提交帧的招式和实体年龄，判断前方的接近防御威胁。持后角色停步，防御结算仍按实际输入及既有姿态处理。根角色和 Helper 的威胁区间分别来自各自的 `MoveType` 控制器。
+- `ScriptedPauseState` 保存双席计数和下一个全局暂停 tick。该 tick 继续提交帧号和输入历史，角色动作、局部 HitPause、实体年龄、计时器和伤害 RNG 保持快照。视觉节点只投影已提交状态。取证与已知兼容边界见[阶段 19 验收](STAGE19_ACCEPTANCE.md)。

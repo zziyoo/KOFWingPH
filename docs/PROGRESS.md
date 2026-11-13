@@ -2646,3 +2646,8 @@ HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本�
 ### 阶段 19 准备
 
 - 原引擎 30 场取证通过，选择默认模式远站轻拳 State 200→弱 Power Wave State 1000。旧动作 tick 4–6 可取消，合法空挥也可启动。旧 tick 7 的特殊技失效时，同边沿回落到站轻拳。新招的 Helper 1020 与通用投射物规则存在明确差异。运行时未改，见[阶段 19 计划](superpowers/plans/2026-11-13-stage19-terry-special-cancel.md)。
+
+### 阶段 19 实施与取证
+
+- `TerryPowerWave` 实验预设已接入 State 200 的显式取消、跨年龄 CMD 优先级、同一边沿回落和 HitPause 保留。State 1000／Helper 1020 使用各自的时钟和真实素材。实体接触、削血、全局 Pause、击飞恢复和预防御停步都有权威轨迹及图形取证。
+- 阶段 19 正式 PASS。原引擎常规 30 场及延长 3 场通过，C# 1339 项、Python 72 项和 Vulkan 固定／实时取证通过。复现命令、阶段 13C–18 历史门禁和已知差异见[阶段 19 验收](STAGE19_ACCEPTANCE.md)。

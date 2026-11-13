@@ -1622,3 +1622,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 ### 阶段 19 准备
 
 - 首单元为默认模式 State 200→1000 弱 Power Wave。先核对生效段的状态入口和同边沿普通技回落，再接入原版 Helper 1020 的权威实体。见[源码审查](STAGE19_SOURCE_AUDIT.md)、[原引擎取证](STAGE19_REFERENCE.md)与[实施计划](superpowers/plans/2026-11-13-stage19-terry-special-cancel.md)。阶段 19 运行时待实施。
+
+### 阶段 19 运行时与取证
+
+- 阶段 19 PASS。`TerryPowerWave` 由原始归档、Manifest 和冻结的阶段 18 数据生成。使用 `tools/Stage19Validation` 生成配置、别名和复跑固定帧及实时样本。验证结果及范围见[阶段 19 验收](STAGE19_ACCEPTANCE.md)。
+- 查验击飞边界时，优先用 `--scripted-pause-audit` 的实体、全局 Pause 与反应记录，按 `state=logic+1` 关联同次 `FramePostDraw` 图像。视觉覆盖开关对照仍比较权威行。已冻结的 13C–18 黄金数据与用户的 `project.godot` 修改分别保留。

@@ -35,7 +35,7 @@ class StatePowerWaveTests(unittest.TestCase):
                        'movementFrames': 11, 'guardDamage': 9, 'hitSpans': [
                            {'firstFrame': 1, 'lastFrame': 2, 'localBox': (16, 79, 1, 48), 'reaction': 'early'}],
                        'normalBase': 12, 'counterBase': 14,
-                       'hitPause': [0, 13], 'guardPause': [0, 11], 'hitStun': 18, 'guardStun': 17,
+                       'hitPause': [0, 13], 'guardPause': [0, 11], 'hitStun': 19, 'guardStun': 18,
                        'earlyLaunch': [4.5, 6.5], 'launchGravity': {'numerator': 1, 'denominator': 2},
                        'launchReaction': {'impactFrames': 4, 'lieDownFrames': 13},
                        'latePush': 10.5, 'guardPush': 10.5,
@@ -64,6 +64,8 @@ class StatePowerWaveTests(unittest.TestCase):
         self.assertEqual(11, projectile['timeline']['movementFrames'])
         self.assertEqual(13, projectile['timeline']['guardThreatFrames'])
         self.assertEqual(17, converted['moves'][-1]['guardThreatFrames'])
+        self.assertEqual(19, projectile['timeline']['hitSpans'][0]['hit']['hitstunFrames'])
+        self.assertEqual(18, projectile['timeline']['hitSpans'][0]['hit']['blockstunFrames'])
         self.assertEqual(fixture['entity']['launchReaction'], projectile['timeline']['hitSpans'][0]['launchReaction'])
         self.assertEqual(1000, visual['clips']['state1000']['action'])
         self.assertEqual(1020, visual['clips'][f'projectile_{ENTITY_ID}']['action'])

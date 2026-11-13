@@ -226,6 +226,8 @@ def inspect_source(source_zip, manifest):
                                  early_element=first, late_element=split, exit_element=finish)
     damage_rules = state200.load_json(manifest)  # Manifest hash also covers the source atlas identity.
     require(damage_rules['localcoord'] == 320 and chip == 1, 'unsupported Helper chip scale or coordinate system')
+    # The native recovery states keep control disabled on the last tick where hitTime has become -1.
+    ground_hit_time = int(early.one('ground.hittime'))
     return {'zipSha256': zip_sha, 'members': members, 'manifestSha256': state200.archive_digest(manifest),
             'command': cmd, 'cancelWindow': window, 'visuals': sprites,
             'forwardGuardDistance': fraction(size.one('attack.dist')), 'guardThreatFrames': threats,
@@ -234,7 +236,7 @@ def inspect_source(source_zip, manifest):
             'entity': {'speed': fraction(start_speed.one('x')), 'lifetime': sum(entity_durations),
                        'movementFrames': sum(entity_durations[:stop_element - 1]), 'guardDamage': 9, 'hitSpans': spans,
                        'normalBase': normal, 'counterBase': counter, 'hitPause': hit_pause, 'guardPause': guard_pause,
-                       'hitStun': int(early.one('ground.hittime')) + 1, 'guardStun': int(early.one('ground.hittime')),
+                       'hitStun': ground_hit_time + 2, 'guardStun': ground_hit_time + 1,
                        'earlyLaunch': velocity('ground.velocity', early, 2), 'launchGravity': fraction(early.one('yaccel')),
                        'launchReaction': launch_reaction(contents['stcommon'], selected, early),
                        'latePush': velocity('ground.velocity', late)[0],
