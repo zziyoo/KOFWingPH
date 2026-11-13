@@ -17,7 +17,7 @@ CASES = {
 }
 
 
-def run(exe, output, case, mode):
+def run(exe, output, case, mode, profile_dir, alias_prefix):
     name = f"{mode}-reentry-{case}"
     folder, transitions = CASES[case]
     source = ROOT / "local-mugen/stage18-validation" / folder / name
@@ -32,9 +32,9 @@ def run(exe, output, case, mode):
             file_flag = f"--{seat}-fighter-file="
             index, = (index for index, arg in enumerate(args) if arg.startswith(file_flag))
             preset = Path(args[index]).name.split(".")[0]
-            args[index] = f"{file_flag}res://data/imported-characters/terry98-stage20-data/{preset}.fighter.json"
+            args[index] = f"{file_flag}res://{profile_dir}/{preset}.fighter.json"
             alias = f"--{seat}-visual=terry98-stage18-"
-            args = [arg.replace(alias, f"--{seat}-visual=terry98-stage20-") for arg in args]
+            args = [arg.replace(alias, f"--{seat}-visual={alias_prefix}-") for arg in args]
         if variant == "sprite":
             args += [f"--capture-dir={path.as_posix()}/frames", "--capture-start=28", "--capture-end=48"]
         log = run_godot(exe, args, path / "duel.log", shot)
@@ -54,13 +54,15 @@ def main():
     parser.add_argument("--godot", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--case", choices=CASES, action="append")
+    parser.add_argument("--profile-dir", default="data/imported-characters/terry98-stage20-data")
+    parser.add_argument("--alias-prefix", default="terry98-stage20")
     args = parser.parse_args()
     try:
         output = args.output.resolve()
         output.mkdir(parents=True, exist_ok=False)
         for mode in ("default", "mode2"):
             for case in args.case or CASES:
-                run(args.godot, output, case, mode)
+                run(args.godot, output, case, mode, args.profile_dir, args.alias_prefix)
     except (OSError, ValueError, TimeoutExpired) as error:
         parser.exit(1, f"Stage 20 re-entry control failed: {error}\n")
 

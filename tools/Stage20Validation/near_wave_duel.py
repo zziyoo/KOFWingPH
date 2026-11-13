@@ -153,9 +153,21 @@ def verify_realtime_route(path):
 
 
 def verify_sparse_realtime(options, name, scene):
+    def check_route(starts, events):
+        first_hit, = [event for event in events if event["kind"] == "Hit" and event["move"] == NATIVE_MOVES[205]]
+        wave_hit, = [event for event in events if event["kind"] == "ProjectileHit"]
+        assert_equal(3, first_hit["frame"] - starts[0]["frame"], "205 first active contact")
+        assert_equal(12, starts[1]["frame"] - first_hit["frame"], "cancel after 11 frozen logic ticks")
+        assert_equal(16, wave_hit["frame"] - starts[1]["frame"], "Wave contact after Action 1000 entry")
+        return wave_hit
+
+    capture_sparse_realtime(options, name, scene, "terry98-stage20-default", check_route)
+
+
+def capture_sparse_realtime(options, name, scene, alias, check_route):
     output = options.output / name / "sprite"
     output.mkdir(parents=True)
-    args, (first, last) = runtime_capture(options, scene, output, True, alias="terry98-stage20-default")
+    args, (first, last) = runtime_capture(options, scene, output, True, alias=alias)
     args.remove("--sprite-frame-audit")
     args.append("--entity-audit")
     lines = run_godot(options.godot, args, output / "duel.log", output / "end.png").decode("utf-8").splitlines()
@@ -163,11 +175,7 @@ def verify_sparse_realtime(options, name, scene):
         raise ValueError("sparse realtime run exceeded the battle time budget")
     events = battle_events(lines)
     starts = verify_move_instances(scene, events, {}, {}, fixed=False)
-    first_hit, = [event for event in events if event["kind"] == "Hit" and event["move"] == NATIVE_MOVES[205]]
-    wave_hit, = [event for event in events if event["kind"] == "ProjectileHit"]
-    assert_equal(3, first_hit["frame"] - starts[0]["frame"], "205 first active contact")
-    assert_equal(12, starts[1]["frame"] - first_hit["frame"], "cancel after 11 frozen logic ticks")
-    assert_equal(16, wave_hit["frame"] - starts[1]["frame"], "Wave contact after Action 1000 entry")
+    wave_hit = check_route(starts, events)
 
     entities = {}
     captures = []

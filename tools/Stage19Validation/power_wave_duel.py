@@ -195,7 +195,8 @@ def verify_entities(lines, phases, starts, moves, *, fixed, strict_native=True):
     return records
 
 
-def verify_contacts(scene, events, moves, damage, profile, *, known_second_light=None, strict_native):
+def verify_contacts(scene, events, moves, damage, profile, *, known_second_light=None, strict_native,
+                    guard_position_tolerance=0.002):
     event_kinds = ("Hit", "Blocked", "ProjectileHit", "ProjectileBlocked")
     contacts = sorted((event for event in events if event["kind"] in event_kinds), key=lambda row: (row["frame"], row["target"]))
     native_contacts = sorted(scene.contacts, key=lambda row: (row["frame"], row["target"]))
@@ -226,7 +227,7 @@ def verify_contacts(scene, events, moves, damage, profile, *, known_second_light
         if actual["kind"] == "ProjectileBlocked":
             assert_equal(native["damage"], before - after, "native chip damage")
             actual_x = int(moves[target, logic]["x"]) / Q16
-            if abs(native["targetX"] - actual_x) > 0.002:
+            if abs(native["targetX"] - actual_x) > guard_position_tolerance:
                 raise ValueError(f"native Wave guard position: expected {native['targetX']}, got {actual_x}")
             continue
         operands = damage[owner, logic]
@@ -240,7 +241,7 @@ def verify_contacts(scene, events, moves, damage, profile, *, known_second_light
     return divergences
 
 
-def verify_grounded_wave_recovery(scene, phases, moves):
+def verify_grounded_wave_recovery(scene, phases, moves, *, position_tolerance=0.005, crouch_recovery=False):
     samples = []
     mirror = phases["before-command"][0]["chars"][0]["facing"] < 0
     for contact in scene.contacts:
@@ -256,9 +257,10 @@ def verify_grounded_wave_recovery(scene, phases, moves):
                 continue
             source = world["chars"][target ^ mirror]
             host = moves[target, frame + 14]
-            assert_equal("Standing" if source["ctrl"] else expected_state, host["state"],
+            recovered_state = "Crouching" if crouch_recovery and source.get("stateType") == 2 else "Standing"
+            assert_equal(recovered_state if source["ctrl"] else expected_state, host["state"],
                          f"grounded Wave recovery at native F{frame}")
-            if abs(source["pos"][0] - int(host["x"]) / Q16) > 0.005:
+            if abs(source["pos"][0] - int(host["x"]) / Q16) > position_tolerance:
                 raise ValueError(f"grounded Wave recovery X differs at native F{frame}")
             samples.append({"frame": frame, "state": host["state"], "sourceState": source["state"],
                             "x": int(host["x"]) / Q16})
@@ -377,7 +379,7 @@ def verify_recovery(phases, lines, moves, captures, *, mirrored):
 
 def run_case(options, name, reference, timelines, profile, *, mode="default", alias=ALIAS,
              prepared_scene=None, fixed_checks=None, contact_check=verify_contacts,
-             minimum_render_frames=0, partial_capture=False):
+             recovery_check=verify_grounded_wave_recovery, minimum_render_frames=0, partial_capture=False):
     scene, phases, changes = prepared_scene or native_case(reference, name, recovery=options.recovery)
     fixed = options.fps == "fixed"
     logs = []
@@ -405,7 +407,7 @@ def run_case(options, name, reference, timelines, profile, *, mode="default", al
             known_second_light = {"hit-23": "Hitstun", "guard-23": "Blockstun"}.get(name)
             divergences = contact_check(scene, events, moves, damage, profile,
                                          known_second_light=known_second_light, strict_native=strict_native)
-            ground_recovery = verify_grounded_wave_recovery(scene, phases, moves)
+            ground_recovery = recovery_check(scene, phases, moves)
             pause = verify_pause(phases, lines, moves, damage, entities, strict_native=strict_native, allow_inactive=mode == "mode2")
             additional = fixed_checks(scene, phases, events, moves, reentry, lines) if fixed_checks else {}
         warning_states = []
