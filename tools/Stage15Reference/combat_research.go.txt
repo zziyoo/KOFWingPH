@@ -26,7 +26,10 @@ var researchReentryScenario = strings.TrimPrefix(researchScenario, "reentry-")
 var researchReentryMirror = researchStage18 && strings.HasPrefix(researchReentryScenario, "mirror-")
 var researchStage19 = strings.HasPrefix(researchScenario, "special-")
 var researchSpecialScenario = strings.TrimPrefix(researchScenario, "special-")
-var researchSpecialMirror = researchStage19 && strings.HasPrefix(researchSpecialScenario, "mirror-")
+var researchStage20 = strings.HasPrefix(researchScenario, "near-wave-")
+var researchWaveTrace = researchStage19 || researchStage20
+var researchSpecialMirror = researchStage19 && strings.HasPrefix(researchSpecialScenario, "mirror-") ||
+	researchStage20 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "near-wave-"), "mirror-")
 const researchPowerWaveCommand = "\x8e\xe3\x83\x70\x83\x8f\x81\x5b\x83\x45\x83\x46\x83\x43\x83\x75"
 var researchStage16 = strings.HasPrefix(researchScenario, "light-") || strings.HasPrefix(researchScenario, "heavy-")
 var researchTraceFile *os.File
@@ -71,7 +74,7 @@ func researchBegin() {
 		}
 		researchEncoder = json.NewEncoder(researchTraceFile)
 		sys.randseed = 1337
-		if researchStage17 || researchStage18 || researchStage19 {
+		if researchStage17 || researchStage18 || researchWaveTrace {
 			seed, err := strconv.ParseInt(os.Getenv("RESEARCH_SEED"), 10, 32)
 			if err != nil || seed <= 0 || seed >= int64(IMax) {
 				panic("RESEARCH_SEED must be between 1 and 2147483646")
@@ -117,6 +120,9 @@ func researchBits(pn int) InputBits {
 	}
 	if researchStage19 {
 		return researchSpecialBits(pn)
+	}
+	if researchStage20 {
+		return researchNearWaveBits(pn)
 	}
 	if pn == 0 && researchFrame == 5 {
 		return IB_Y
@@ -203,6 +209,73 @@ func researchSpecialBits(pn int) InputBits {
 		return forward
 	}
 	if strings.HasPrefix(scenario, "near-whiff-") && researchFrame == 0 {
+		return IB_PU
+	}
+	return 0
+}
+
+func researchNearWaveBits(pn int) InputBits {
+	scenario := strings.TrimPrefix(strings.TrimPrefix(researchScenario, "near-wave-"), "mirror-")
+	parts := strings.Split(scenario, "-")
+	button, _ := strconv.Atoi(parts[len(parts)-1])
+	jump := strings.HasPrefix(scenario, "whiff-")
+	dual := strings.HasPrefix(scenario, "dual-")
+	mixed := scenario == "mixed-sequential"
+	forward := IB_PR
+	if researchSpecialMirror != (pn == 1 && (dual || mixed)) {
+		forward = IB_PL
+	}
+	first := 5
+	if jump {
+		first = 13
+	}
+	if mixed {
+		button = 20
+		if pn == 1 {
+			if researchFrame >= 7 && researchFrame <= 62 {
+				if forward == IB_PR {
+					return IB_PL
+				}
+				return IB_PR
+			}
+			first, button = 90, 94
+		}
+	}
+	if pn == 0 || dual || mixed {
+		if researchFrame == first {
+			return IB_X
+		}
+		if strings.Contains(scenario, "no-motion") || strings.HasPrefix(scenario, "reentry-") {
+			if researchFrame == button {
+				return IB_X
+			}
+			return 0
+		}
+		if button-3 == first && researchFrame == first-1 {
+			return IB_PD
+		}
+		switch researchFrame {
+		case button - 3:
+			return IB_PD
+		case button - 2:
+			return IB_PD | forward
+		case button - 1:
+			return forward
+		case button:
+			return forward | IB_X
+		}
+		if strings.Contains(scenario, "-held-") && researchFrame > button && researchFrame <= button+12 {
+			return IB_X
+		}
+		return 0
+	}
+	if strings.Contains(scenario, "guard-") && researchFrame >= 7 && researchFrame <= 62 {
+		if strings.HasPrefix(scenario, "crouch-guard-") {
+			return forward | IB_PD
+		}
+		return forward
+	}
+	if jump && researchFrame == 0 {
 		return IB_PU
 	}
 	return 0
@@ -397,7 +470,7 @@ func researchCloseNormalBits(pn int) InputBits {
 
 func researchInput(c *Char, original [14]bool) [14]bool {
 	if researchCase == "" || c == nil ||
-		(c.helperIndex != 0 && c.helperId != 7600 && !((researchStage18 || researchStage19) && c.helperId == 99999)) {
+		(c.helperIndex != 0 && c.helperId != 7600 && !((researchStage18 || researchWaveTrace) && c.helperId == 99999)) {
 		return original
 	}
 	return researchBits(c.playerNo).BitsToKeys()
@@ -505,7 +578,7 @@ func researchTraceWithOwner(phase string, owner int) {
 			char["helperX"], char["helperY"] = helperX, helperY
 			char["vars"].(map[string]interface{})["var2"] = c.varGet(2).ToI()
 		}
-		if researchStage19 {
+		if researchWaveTrace {
 			char["powerWaveCommand"] = c.commandByName(researchPowerWaveCommand)
 			char["helperWave"] = researchPowerWaveHelper(c)
 			char["vars"].(map[string]interface{})["var1"] = c.varGet(1).ToI()
@@ -515,6 +588,10 @@ func researchTraceWithOwner(phase string, owner int) {
 			char["projectiles"] = len(sys.projs[pn])
 			char["hitFall"] = c.ghv.fallflag
 		}
+		if researchStage20 {
+			char["vars"].(map[string]interface{})["var23"] = c.varGet(23).ToI()
+			char["vars"].(map[string]interface{})["var31"] = c.varGet(31).ToI()
+		}
 		chars = append(chars, char)
 	}
 	row := map[string]interface{}{
@@ -522,10 +599,10 @@ func researchTraceWithOwner(phase string, owner int) {
 		"tick": sys.tickCount, "matchTime": sys.matchTime, "roundState": sys.roundState(),
 		"chars": chars,
 	}
-	if researchStage17 {
+	if researchStage17 || researchStage20 {
 		row["rng"] = sys.randseed
 	}
-	if researchStage19 {
+	if researchWaveTrace {
 		row["turbo"], row["slowTime"], row["globalPause"] = sys.turbo, sys.slowtime, sys.pausetime
 	}
 	if err := researchEncoder.Encode(row); err != nil {
@@ -543,11 +620,11 @@ func researchCommandHelper(c *Char) (int32, int32) {
 }
 
 func researchStateChange(c *Char, next int32) {
-	if !(researchStage18 || researchStage19) || researchEncoder == nil || c.helperIndex != 0 {
+	if !(researchStage18 || researchWaveTrace) || researchEncoder == nil || c.helperIndex != 0 {
 		return
 	}
 	relevant := c.ss.no == 200 || c.ss.no == 205 || next == 200 || next == 205 || next == 210 || next == 215
-	if researchStage19 {
+	if researchWaveTrace {
 		relevant = relevant || c.ss.no == 1000 || c.ss.no == 1050 || next == 1000 || next == 1050 || next == 300
 	}
 	if !relevant {
@@ -564,7 +641,7 @@ func researchStateChange(c *Char, next int32) {
 		"minus": c.minus, "ctrl": c.scf(SCF_ctrl), "var2": c.varGet(2).ToI(),
 		"moveContact": c.moveContact(), "moveHit": c.moveHit(), "moveGuarded": c.moveGuarded(),
 	}
-	if researchStage19 {
+	if researchWaveTrace {
 		row["var1"] = c.varGet(1).ToI()
 		row["powerWaveCommand"] = c.commandByName(researchPowerWaveCommand)
 		row["helperWave"] = researchPowerWaveHelper(c)
@@ -653,7 +730,7 @@ func researchDamageVariable(c *Char, operation string, index, before, after int3
 }
 
 func researchHitDef(c *Char) {
-	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || (researchStage16 || researchStage17 || researchStage18 || researchStage19) && c.ss.no == 205) {
+	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || (researchStage16 || researchStage17 || researchStage18 || researchWaveTrace) && c.ss.no == 205) {
 		researchTraceWithOwner("hitdef", c.playerNo+1)
 	}
 }
@@ -664,7 +741,7 @@ func researchEnd() {
 	}
 	researchTrace("end")
 	lastFrame := 75
-	if researchStage19 {
+	if researchWaveTrace {
 		if configured, err := strconv.Atoi(os.Getenv("RESEARCH_LAST_FRAME")); err == nil && configured >= 75 {
 			lastFrame = configured
 		}
