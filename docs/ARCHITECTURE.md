@@ -723,3 +723,9 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 
 - `TerryPowerWaveHeavyRoutes` 在阶段 20 冻结预设的 215 上添加一条 `CancelDefinition`。215 的两个接触组依旧由攻击实例起始帧去重。取消在检测前提交，已有权威事件保留，待发生的第二段随旧实例结束。默认、200／205 取消和模式 2 分支的职责见[阶段 21 验收](STAGE21_ACCEPTANCE.md)。
 - 原版受击退出保护、末段受击框、防御续接和进入守势前的残余位移通过可选数据配置。冻结快照保存残余位移和防御恢复时钟，碰撞只读取权威状态。既有历史预设未启用这些选项。
+
+### 阶段 22 蹲姿普通技
+
+- 同一物理边沿可映射到不同姿态的招式。距离回落顺序按各允许姿态独立校验。状态提交前，取消执行器按当前下方向许可蹲姿目标，并沿用优先级、命令缓冲和单次消费。State 400 以自己的 `CancelDefinition` 配置旧 tick 4，复用 State 1000、Helper 1020 和暂停执行器。
+- `returnsToCrouch` 描述自然退出后的 State 11。`groundHurtboxes.crouchRise` 描述松下后 Action 12 的可控地面过渡。权威快照保存起身进度，Godot 读取该进度绘制。出招、受击或 KO 清除过渡。
+- `lightGroundReaction` 和接收方 `groundHurtboxes.lightHitstun` 启用源素材的轻击反应框。时钟随快照保存，HitPause 冻结，后续反应替换它。原子结算、暂停和伤害公式沿用既有实现。

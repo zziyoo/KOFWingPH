@@ -92,7 +92,8 @@ public sealed class AttackDefinition
         int? counterDamage = null,
         int contactGroup = 0,
         int? damageAfterPriorContact = null,
-        DynamicAttackDamage? dynamicDamage = null)
+        DynamicAttackDamage? dynamicDamage = null,
+        bool lightGroundReaction = false)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -155,6 +156,7 @@ public sealed class AttackDefinition
             throw new ArgumentOutOfRangeException(nameof(hitstopFrames), hitstopFrames,
                 $"命中停顿帧数超过上限 {MaxHitstopFrames}（防止配置错误导致长时间冻结）。");
 
+        LightGroundReaction = lightGroundReaction;
         OffsetForward = offsetForward;
         OffsetUp = offsetUp;
         HalfWidth = halfWidth;
@@ -183,6 +185,7 @@ public sealed class AttackDefinition
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
     public FixedPoint OffsetForward { get; }
+    public bool LightGroundReaction { get; }
 
     /// <summary>攻击框中心相对脚底锚点的向上偏移（世界单位）。</summary>
     public FixedPoint OffsetUp { get; }

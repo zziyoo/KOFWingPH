@@ -128,6 +128,12 @@ public sealed class GroundHurtboxesDto
 
     [JsonPropertyName("hitstunRecoveryFrames")]
     public int HitstunRecoveryFrames { get; set; }
+
+    [JsonPropertyName("crouchRise")]
+    public List<MoveHurtboxSpanDto>? CrouchRise { get; set; }
+
+    [JsonPropertyName("lightHitstun")]
+    public List<MoveHurtboxSpanDto>? LightHitstun { get; set; }
 }
 
 public sealed class HurtboxDto
@@ -280,6 +286,9 @@ public sealed class MoveDto
     [JsonPropertyName("hurtboxTimeline")]
     public List<MoveHurtboxSpanDto>? HurtboxTimeline { get; set; }
 
+    [JsonPropertyName("returnsToCrouch")]
+    public bool ReturnsToCrouch { get; set; }
+
     [JsonPropertyName("attacks")]
     public List<AttackDto>? Attacks { get; set; }
 
@@ -304,6 +313,9 @@ public sealed class MoveHurtboxSpanDto
 
 public sealed class AttackDto
 {
+    [JsonPropertyName("lightGroundReaction")]
+    public bool LightGroundReaction { get; set; }
+
     [JsonPropertyName("offsetForward")]
     public FractionDto? OffsetForward { get; set; }
 

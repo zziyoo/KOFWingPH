@@ -64,7 +64,8 @@ public MoveDefinition(
     FixedPoint minimumStartDistance = default,
     IReadOnlyList<MoveHurtboxSpan>? hurtboxTimeline = null,
     FixedPoint? maximumStartBodyDistance = null,
-    int? guardThreatFrames = null)
+    int? guardThreatFrames = null,
+    bool returnsToCrouch = false)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -96,6 +97,7 @@ public MoveDefinition(
         ActiveFrames = activeFrames;
         RecoveryFrames = recoveryFrames;
         AllowedFrom = allowedFrom;
+        ReturnsToCrouch = returnsToCrouch;
         MinimumStartDistance = minimumStartDistance;
         MaximumStartBodyDistance = maximumStartBodyDistance;
         GuardThreatFrames = guardThreatFrames;
@@ -179,6 +181,7 @@ public MoveDefinition(
 
     /// <summary>允许发动的待机状态集合。</summary>
     public MoveAllowedStates AllowedFrom { get; }
+    public bool ReturnsToCrouch { get; }
 
     public FixedPoint MinimumStartDistance { get; }
     public FixedPoint? MaximumStartBodyDistance { get; }

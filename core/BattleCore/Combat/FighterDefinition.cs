@@ -25,7 +25,8 @@ public sealed class GroundHurtboxes
     public const int MaxLocalCoordinate = 8192;
 
     public GroundHurtboxes(IReadOnlyList<FixedRect> standing, IReadOnlyList<FixedRect> crouching,
-        bool standingOnCrouchEntry = false, IReadOnlyList<FixedRect>? hitstun = null, int hitstunRecoveryFrames = 0)
+        bool standingOnCrouchEntry = false, IReadOnlyList<FixedRect>? hitstun = null, int hitstunRecoveryFrames = 0,
+        IReadOnlyList<MoveHurtboxSpan>? crouchRise = null, IReadOnlyList<MoveHurtboxSpan>? lightHitstun = null)
     {
         Standing = Copy(standing, nameof(standing));
         Crouching = Copy(crouching, nameof(crouching));
@@ -35,6 +36,9 @@ public sealed class GroundHurtboxes
             throw new ArgumentException("受击恢复框需要正数持续帧，并与持续帧一起配置。", nameof(hitstunRecoveryFrames));
         Hitstun = hitstun is null ? null : Copy(hitstun, nameof(hitstun));
         HitstunRecoveryFrames = hitstunRecoveryFrames;
+        CrouchRise = CopyTimeline(crouchRise, nameof(crouchRise));
+        LightHitstun = CopyTimeline(lightHitstun, nameof(lightHitstun));
+        CrouchRiseFrames = CrouchRise?.Sum(span => span.Frames) ?? 0;
     }
 
     public IReadOnlyList<FixedRect> Standing { get; }
@@ -42,6 +46,31 @@ public sealed class GroundHurtboxes
     public bool StandingOnCrouchEntry { get; }
     public IReadOnlyList<FixedRect>? Hitstun { get; }
     public int HitstunRecoveryFrames { get; }
+    public IReadOnlyList<MoveHurtboxSpan>? CrouchRise { get; }
+    public IReadOnlyList<MoveHurtboxSpan>? LightHitstun { get; }
+    public int CrouchRiseFrames { get; }
+
+    private static IReadOnlyList<MoveHurtboxSpan>? CopyTimeline(IReadOnlyList<MoveHurtboxSpan>? spans, string name)
+    {
+        if (spans is null)
+            return null;
+        if (spans.Count == 0 || spans.Any(span => span is null) || spans.Sum(span => (long)span.Frames) > 600)
+            throw new ArgumentException("地面姿态受击框时间线必须包含 1–600 帧。", name);
+        return Array.AsReadOnly(spans.ToArray());
+    }
+
+    internal static IReadOnlyList<FixedRect>? BoxesAt(IReadOnlyList<MoveHurtboxSpan>? spans, int tick)
+    {
+        if (spans is null || tick < 0)
+            return null;
+        foreach (MoveHurtboxSpan span in spans)
+        {
+            if (tick < span.Frames)
+                return span.Boxes;
+            tick -= span.Frames;
+        }
+        return null;
+    }
 
     private static IReadOnlyList<FixedRect> Copy(IReadOnlyList<FixedRect> boxes, string name)
     {
@@ -204,11 +233,13 @@ public sealed class FighterDefinition
             MoveDefinition[] variants = group.ToArray();
             if (variants.Any(move => move.MaximumStartBodyDistance.HasValue) && groundBodyWidths is null)
                 throw new ArgumentException($"指令 {group.Key} 的身体距离条件需要 groundBodyWidths。", nameof(moves));
-            for (int i = 0; i < variants.Length - 1; i++)
+            foreach (MoveAllowedStates stance in new[] { MoveAllowedStates.Standing, MoveAllowedStates.Crouching })
             {
-                if (variants[i].MaximumStartBodyDistance is not { } threshold ||
-                    variants[i + 1].MaximumStartBodyDistance is { } next && threshold >= next)
-                    throw new ArgumentException($"指令 {group.Key} 的距离变体必须按递增阈值排列。", nameof(moves));
+                MoveDefinition[] eligible = variants.Where(move => (move.AllowedFrom & stance) != 0).ToArray();
+                for (int i = 0; i < eligible.Length - 1; i++)
+                    if (eligible[i].MaximumStartBodyDistance is not { } threshold ||
+                        eligible[i + 1].MaximumStartBodyDistance is { } next && threshold >= next)
+                        throw new ArgumentException($"指令 {group.Key} 的距离变体必须按递增阈值排列。", nameof(moves));
             }
             _movesByCommandId.Add(group.Key, Array.AsReadOnly(variants));
         }

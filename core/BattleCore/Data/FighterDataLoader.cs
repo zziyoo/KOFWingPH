@@ -109,7 +109,9 @@ public static class FighterDataLoader
                 BuildArray(boxes.Crouching, sourceName, "groundHurtboxes.crouching", BuildHurtbox),
                 boxes.StandingOnCrouchEntry,
                 boxes.Hitstun is null ? null : BuildArray(boxes.Hitstun, sourceName, "groundHurtboxes.hitstun", BuildHurtbox),
-                boxes.HitstunRecoveryFrames),
+                boxes.HitstunRecoveryFrames,
+                boxes.CrouchRise is null ? null : BuildArray(boxes.CrouchRise, sourceName, "groundHurtboxes.crouchRise", BuildMoveHurtboxSpan),
+                boxes.LightHitstun is null ? null : BuildArray(boxes.LightHitstun, sourceName, "groundHurtboxes.lightHitstun", BuildMoveHurtboxSpan)),
                 sourceName, "groundHurtboxes")
             : null;
 
@@ -252,7 +254,7 @@ public static class FighterDataLoader
                 ? BuildArray(timeline, source, path + ".hurtboxTimeline", BuildMoveHurtboxSpan) : null,
             maximumStartBodyDistance: dto.MaximumStartBodyDistance is { } bodyDistance
                 ? Fraction(bodyDistance, source, path + ".maximumStartBodyDistance") : null,
-            guardThreatFrames: dto.GuardThreatFrames),
+            guardThreatFrames: dto.GuardThreatFrames, returnsToCrouch: dto.ReturnsToCrouch),
         source, path);
 
     private static MoveHurtboxSpan BuildMoveHurtboxSpan(MoveHurtboxSpanDto dto, string source, string path) => Guard(
@@ -290,7 +292,8 @@ public static class FighterDataLoader
             counterDamage: dto.CounterDamage,
             contactGroup: dto.ContactGroup,
             damageAfterPriorContact: dto.DamageAfterPriorContact,
-            dynamicDamage: BuildDynamicDamage(dto.DynamicDamage, source, path + ".dynamicDamage")),
+            dynamicDamage: BuildDynamicDamage(dto.DynamicDamage, source, path + ".dynamicDamage"),
+            lightGroundReaction: dto.LightGroundReaction),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>

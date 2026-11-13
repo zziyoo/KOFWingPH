@@ -74,7 +74,9 @@ public readonly record struct FighterState(
     int LogicStateTicks = 0,
     LaunchReactionState? LaunchReaction = null,
     FixedPoint GuardWalkMomentum = default,
-    int ProjectileGuardRecoveryRemaining = 0)
+    int ProjectileGuardRecoveryRemaining = 0,
+    int CrouchReturnTicks = 0,
+    int LightGroundReactionTick = 0)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
@@ -136,6 +138,11 @@ public readonly record struct FighterState(
     {
         if (LogicStateTicks < 0)
             throw new InvalidOperationException($"角色 {Id} 的状态时间不能为负。");
+        if (CrouchReturnTicks < -1 ||
+            (CrouchReturnTicks < 0 && LogicState != FighterLogicState.Crouching) ||
+            (CrouchReturnTicks > 0 && LogicState != FighterLogicState.Standing) ||
+            LightGroundReactionTick < 0 || (LightGroundReactionTick > 0 && LogicState != FighterLogicState.Hitstun))
+            throw new InvalidOperationException($"角色 {Id} 的地面过渡时钟非法。");
         if (ProjectileGuardRecoveryRemaining < 0 ||
             (ProjectileGuardRecoveryRemaining != 0 && LogicState is not (FighterLogicState.Standing or FighterLogicState.Crouching)))
             throw new InvalidOperationException($"角色 {Id} 的防御恢复快照非法。");

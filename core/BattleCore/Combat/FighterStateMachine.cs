@@ -24,7 +24,8 @@ public readonly record struct FighterActionTick(
     JumpLaunch? Launch = null,
     int StunRemainingFrames = 0,
     int MoveStartedFrame = -1,
-    int MoveElapsedFrames = 0);
+    int MoveElapsedFrames = 0,
+    int CrouchReturnTicks = 0);
 
 /// <summary>
 /// 角色<b>动作状态机</b>（阶段 04/05B）：集中、显式、纯函数的状态转换。
@@ -100,7 +101,8 @@ public static class FighterStateMachine
         int landingWakeupFrames = 0,
         int moveElapsedFrames = 0,
         FixedPoint opponentDistance = default,
-        FixedPoint opponentBodyDistance = default)
+        FixedPoint opponentBodyDistance = default,
+        int crouchReturnTicks = 0)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -114,6 +116,7 @@ public static class FighterStateMachine
                 $"帧 {frame}：未定义的角色逻辑状态 {state}（{(int)state}）不能推进。");
         }
 
+        bool returnToCrouch = false;
         // 1) 动作阶段推进。
         if (IsInMove(state))
         {
@@ -152,6 +155,7 @@ public static class FighterStateMachine
                         MoveStartedFrame: moveStartedFrame, MoveElapsedFrames: moveElapsedFrames);
                 case FighterLogicState.Recovery:
                     // 收招完成 → 回到待机；同帧继续走待机更新、起跳与消费（B5）。
+                    returnToCrouch = move.ReturnsToCrouch;
                     break;
             }
         }
@@ -285,7 +289,16 @@ public static class FighterStateMachine
         if (failedDistanceInputs is not null)
             ConsumeRejected(ref recognition, failedDistanceInputs);
 
-        return new FighterActionTick(idle, MoveId: null, 0, recognition, ConsumedMatch: null);
+        int riseFrames = definition.GroundHurtboxes?.CrouchRiseFrames ?? 0;
+        // -1 remembers State 11 while Down is held. Positive values are the one-based rise clock.
+        int rise = returnToCrouch ? (riseFrames > 0 ? -1 : 0)
+            : crouchReturnTicks == -1 ? (resolvedInput.Down ? -1 : 1)
+            : !resolvedInput.Down && !resolvedInput.Back && !resolvedInput.Forward &&
+              crouchReturnTicks > 0 && crouchReturnTicks < riseFrames ? crouchReturnTicks + 1 : 0;
+        if (!returnToCrouch && (resolvedInput.Back || resolvedInput.Forward) && !resolvedInput.Down)
+            rise = 0;
+        return new FighterActionTick(returnToCrouch ? FighterLogicState.Crouching : idle,
+            MoveId: null, 0, recognition, ConsumedMatch: null, CrouchReturnTicks: rise);
     }
 
     /// <summary>
@@ -369,6 +382,8 @@ public static class FighterStateMachine
             MoveDefinition? target = definition.FindMoveById(cancel.TargetMoveId);
             if (target is null || !target.CanStartAtDistance(opponentDistance, opponentBodyDistance))
                 continue;
+            if (target.AllowedFrom == MoveAllowedStates.Crouching && !input.Down)
+                continue;
 
             foreach (BufferedResult result in recognition.Buffer)
             {
@@ -433,6 +448,8 @@ public static class FighterStateMachine
                 MoveDefinition? target = definition.FindMoveById(cancel.TargetMoveId);
                 if (target is null || !string.Equals(match.CommandId, target.CommandId, StringComparison.Ordinal) ||
                     !target.CanStartAtDistance(opponentDistance, opponentBodyDistance))
+                    continue;
+                if (target.AllowedFrom == MoveAllowedStates.Crouching && !input.Down)
                     continue;
                 if (cancel.MaximumInputAge is { } age && (match.ButtonFrame < 0 || frame - match.ButtonFrame > age))
                     continue;

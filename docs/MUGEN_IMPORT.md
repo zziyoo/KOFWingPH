@@ -188,3 +188,21 @@ foreach ($mode in 'default','mode2') {
 }
 python -m unittest discover -s tools/MugenImporter/tests -p test_state_power_wave_heavy.py
 ```
+
+## 阶段 22 蹲轻拳与弱 Power Wave
+
+按[原引擎取证](STAGE22_REFERENCE.md)准备 26 条轨迹。转换器核对阶段 21 的预设哈希、原始 CNS/CMD/AIR 和 Manifest。默认实验预设增加 State 400、其原版轻拳回落与显式弱 Wave 取消。模式 2 只增加 State 400 本体。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+$profiles = 'data/imported-characters/terry98-stage22-data'
+py -m mugen_importer.state_crouch_wave local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
+  --base data/imported-characters/terry98-stage21-data --reference local-mugen/stage22-reference/results --output $profiles
+foreach ($mode in 'default','mode2') {
+  py tools/Stage14Validation/stage_assets.py --binding "$profiles/$mode.binding.json" `
+    --destination "data/imported-characters/terry98-stage22-$mode"
+}
+py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_wave.py
+```
+
+将转换输出改到新目录并加 `--body-only` 可单独验证本体。配置包含 Action 12 起身受击框和 Action 5010／5015 的地面轻击受击框。受击规则仅在攻击定义声明 `lightGroundReaction` 且目标配置了 `lightHitstun` 时生效。

@@ -71,6 +71,9 @@ def verify_cases(cases):
         phases, transitions, _ = cases[PREFIX + name]
         assert [(r['frame'], r['to'], r['stateTime']) for r in transitions if r['from'] == 400] == [(exit_frame, 11, 13)], name
         assert phases['end'][exit_frame + 1]['chars'][0]['state'] == (11 if name == 'held-down-0' else 12), name
+        if name != 'held-down-0':
+            assert [(phases['end'][f]['chars'][0]['state'], phases['end'][f]['chars'][0]['ctrl'])
+                    for f in range(exit_frame + 1, exit_frame + 6)] == [(12, True)] * 4 + [(0, True)], name
     assert not any(r['to'] == 400 for r in cases[PREFIX + 'stand-0'][1])
     assert cases[PREFIX + 'interrupt-0'][2] == [(6, 1, 30, False)]
     if any(name not in BODY for name in (key.removeprefix(PREFIX) for key in cases)):
@@ -87,6 +90,10 @@ def verify_cases(cases):
         wave = next(r for r in transitions if r['to'] == 1000)
         assert wave['frame'] == 9 and not wave['powerWaveCommand'] and wave['helperWave'] > 0
         assert phases['after-collision'][8]['chars'][0]['vars']['var1'] == 0
+        phases, _, contacts = cases[PREFIX + 'hit-21']
+        assert contacts == [(8, 2, 38, False)]
+        assert [phases['after-collision'][f]['chars'][1]['frame']['sprite']
+                for f in range(22, 28)] == [[5010, 0], *([[5010, 10]] * 4), [5010, 0]]
         assert [(r['frame'],r['to']) for r in cases[PREFIX + 'stand-chain-23'][1] if r['from'] == 200] == [(23,400)]
         assert not any(r['to'] == 1000 for r in cases[MODE2 + 'hit-20'][1])
         assert any(r['to'] == 1050 for r in cases[MODE2 + 'hit-20'][1])

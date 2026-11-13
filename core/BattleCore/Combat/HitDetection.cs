@@ -61,10 +61,13 @@ public static class FighterBoxes
             : null;
         local ??= fighter.LogicState switch
         {
-            FighterLogicState.Standing => definition.GroundHurtboxes?.Standing,
+            FighterLogicState.Standing => GroundHurtboxes.BoxesAt(definition.GroundHurtboxes?.CrouchRise,
+                fighter.CrouchReturnTicks - 1) ?? definition.GroundHurtboxes?.Standing,
             FighterLogicState.Crouching when previousState == FighterLogicState.Standing
                 && definition.GroundHurtboxes?.StandingOnCrouchEntry == true => definition.GroundHurtboxes.Standing,
             FighterLogicState.Crouching => definition.GroundHurtboxes?.Crouching,
+            FighterLogicState.Hitstun when fighter.LightGroundReactionTick > 0 =>
+                GroundHurtboxes.BoxesAt(definition.GroundHurtboxes?.LightHitstun, fighter.LightGroundReactionTick - 1),
             FighterLogicState.Hitstun when fighter.HitstopRemainingFrames == 0 &&
                 definition.GroundHurtboxes is { } ground && fighter.StunRemainingFrames > 0 &&
                 fighter.StunRemainingFrames <= ground.HitstunRecoveryFrames => ground.Hitstun,

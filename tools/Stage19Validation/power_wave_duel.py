@@ -28,7 +28,7 @@ Q16 = 65536
 VISUAL_FRAME = re.compile(r"^\[VisualAudit\] scope=1 frame=(\d+)\b")
 
 
-def native_case(reference, name, *, recovery=False, last_frame=None):
+def native_case(reference, name, *, recovery=False, last_frame=None, native_moves=NATIVE_MOVES):
     phases = defaultdict(dict)
     changes = []
     for row in map(json.loads, reference.read_text(encoding="utf-8").splitlines()):
@@ -63,8 +63,8 @@ def native_case(reference, name, *, recovery=False, last_frame=None):
                              "kind": prefix + ("Blocked" if fighter["guarded"] else "Hit"),
                              "damage": fighter["damage"], "targetShake": fighter["hitShake"],
                              "targetLife": fighter["life"], "targetX": fighter["pos"][0], "fall": fighter.get("hitFall")})
-    moves = [{**row, "hostSeat": (row["seat"] - 1) ^ mirror, "move": NATIVE_MOVES[row["to"]]}
-             for row in changes if row["to"] in NATIVE_MOVES]
+    moves = [{**row, "hostSeat": (row["seat"] - 1) ^ mirror, "move": native_moves[row["to"]]}
+             for row in changes if row["to"] in native_moves]
     distance = abs(before[0]["chars"][0]["pos"][0] - before[0]["chars"][1]["pos"][0])
     has_guard = any(contact["kind"].endswith("Blocked") for contact in contacts)
     guard = (151 if "crouch-guard" in name else 150) if has_guard else None
@@ -116,18 +116,18 @@ def verify_move_instances(scene, events, moves, reentry, *, fixed, fighter_id="T
                      f"fresh instance at logic {logic}")
         assert_equal((event["move"], "0", "Startup"), tuple(moves[seat, logic][key] for key in ("move", "elapsed", "state")),
                      f"fresh move clock at logic {logic}")
-        if native["from"] in (200, 205):
+        if native["from"] in (200, 205, 400):
             previous = moves[seat, logic - 1]
             assert_equal(native["stateTime"], int(previous["elapsed"]) + 1, f"old action elapsed at logic {logic}")
     return started
 
 
-def fighter_poses(scene, events, committed, timelines, modes):
+def fighter_poses(scene, events, committed, timelines, modes, *, actions=ACTIONS):
     starts = [event for event in events if event["kind"] == "MoveStarted"]
     windows = []
     for index, event in enumerate(starts):
         move, seat = event["move"], event["source"]
-        action = ACTIONS.get(move, 1000 if move == MOVE else (211 if modes[seat] == "mode2" else 210))
+        action = actions.get(move, 1000 if move == MOVE else (211 if modes[seat] == "mode2" else 210))
         begin = finish = event["frame"] + 1
         next_start = next((row["frame"] + 1 for row in starts[index + 1:] if row["source"] == seat), None)
         clock = []
@@ -379,7 +379,8 @@ def verify_recovery(phases, lines, moves, captures, *, mirrored):
 
 def run_case(options, name, reference, timelines, profile, *, mode="default", alias=ALIAS,
              prepared_scene=None, fixed_checks=None, contact_check=verify_contacts,
-             recovery_check=verify_grounded_wave_recovery, minimum_render_frames=0, partial_capture=False):
+             recovery_check=verify_grounded_wave_recovery, minimum_render_frames=0, partial_capture=False,
+             pose_check=fighter_poses):
     scene, phases, changes = prepared_scene or native_case(reference, name, recovery=options.recovery)
     fixed = options.fps == "fixed"
     logs = []
@@ -423,7 +424,7 @@ def run_case(options, name, reference, timelines, profile, *, mode="default", al
             captures_require_full_moves = fixed and not (options.recovery or partial_capture)
             capture_scene = replace(scene, guard_action=None) if options.recovery or partial_capture else scene
             windows, images = validate_captures(capture_scene, events, lines, output, capture, timelines, (mode, mode), captures_require_full_moves,
-                                                move_validator=fighter_poses, check_reactions=False)
+                                                move_validator=pose_check, check_reactions=False)
             verify_rendered_entities(lines, images, entities, timelines[1020])
             if not fixed and not any(image["entities"] for image in images):
                 raise ValueError("no realtime Wave image in the capture window")

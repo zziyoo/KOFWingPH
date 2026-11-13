@@ -87,6 +87,8 @@ public sealed class FighterVisual
         if (fighter.LogicState == FighterLogicState.Blockstun && _guardPose.Crouching &&
             _sprite?.HasClip("guard_crouch") == true)
             return ("guard_crouch", null);
+        if (fighter.CrouchReturnTicks > 0 && _sprite?.HasClip("crouch_rise") == true)
+            return ("crouch_rise", fighter.CrouchReturnTicks - 1);
         string state = fighter.LogicState == FighterLogicState.Standing && _walkDirection is not null
             ? "Walking" : fighter.LogicState.ToString();
         clip = _sprite?.StateClip(clip, state) ?? clip;
