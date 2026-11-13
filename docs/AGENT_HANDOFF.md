@@ -1606,4 +1606,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 两套 `terry98-stage16-data/{default,mode2}.fighter.json` 通过显式席位覆盖载入，对应 `terry98-stage16-default` 与 `terry98-stage16-mode2` 视觉别名。实验范围为普通地面选招，包含中立跳避让验证。历史 TerryS200、阶段 15 配置与默认阵容保持。
 - [阶段 16 正式验收](STAGE16_ACCEPTANCE.md) 记录 58 个 Vulkan 固定帧场景、实时 30/60 FPS、165 个 C# 专项及 1261 个全量测试。阶段 14/15 和 13C 冻结门禁通过。原引擎 46 个标准场景、6 个防御释放场景、4 个同席双键场景均有本地轨迹与校验哈希，复现见 [原引擎基准](STAGE16_REFERENCE.md)。
 - 原版完整模式选择、脚本取消、同招重进、原脚本随机伤害与守势移动仍为后续范围。保留原工作区 `project.godot` 差异和第三方资源诊断。
+
+### 阶段 17 交接
+
+- 阶段 17 动态实验配置使用显式角色文件 `terry98-stage17-data/{default,mode2}.fighter.json` 和各席视觉别名 `terry98-stage17-default`／`terry98-stage17-mode2`。`--damage-seed` 设定 1v1 实验初态，`--damage-audit` 只读提交状态。旧角色与固定样本仍走原规则。
+- 原版取证 81 份，运行、快照、图像和已知差异见 [阶段 17 验收](STAGE17_ACCEPTANCE.md) 和 [原引擎基准](STAGE17_REFERENCE.md)。完整 Terry MAX、共享全局 RNG 逐样本匹配和取消控制器不在本轮动态配置范围内。
 - 近身 205/215、原版模式交互、动态反击变量及 RNG、取消、守势惯性和空中规则仍在后续范围。继续保留原 `project.godot` 差异及素材诊断。

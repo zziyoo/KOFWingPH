@@ -62,3 +62,12 @@ python tools/Stage17Reference/Check-Traces.py local-mugen/stage17-reference/resu
 ```
 
 正式格挡补测保存在 `stage17-reference-guard-v2`，执行文件 SHA-256 `100b3a747b75125f105a0d9d942848e6dc33a84be323be2eaae59fb6e5a7bc9f`。初次 F4 按后补测保留在 `stage17-reference-guard`，当时场景名称沿用了近身假设，实测走远身分支，后续命名已区分两种输入。
+
+以上验证命令通过 81 份轨迹。标准、种子 1、种子 2026、反击边界、格挡和同种子复跑的 `run-metadata.json` SHA-256 依次为
+
+- `26e35db71a375a1c4bb1293228b813c28869495ddcab74660f232d9f45697dd8`
+- `b6ba667311b9fee130b02c258193598a49e736ce3ee2aa3ca8ca4ffb3883751a`
+- `fbbbad20c62ecffd4c93e9ff2b7d1bc80147e2a081c33ed2cded1628b6f7a5a4`
+- `15e5c732f111f5782615b40beb08ab01f2f08cb1ceb8c84a59a22be811009e2a`
+- `801ed22aea6bd12cb63fe005ccf341d341c08eb0d0e0b5b74ac8459e1aa076b9`
+- `74cddad418477b6406196e306d21a2042a40a30c8150bc0630da7e5be8f95f32`
