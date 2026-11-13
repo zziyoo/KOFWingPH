@@ -45,7 +45,7 @@ public sealed class CancelDefinition
     /// <param name="requiresBlockConfirm">是否需要防御确认（同上）。</param>
     /// <param name="allowWhiff">是否允许空挥取消（不需要确认）。</param>
     /// <param name="allowSameMove">是否允许以新实例重新进入来源招式。</param>
-    /// <param name="standingInputOnly">当前输入不得含有下方向。</param>
+    /// <param name="standingInputOnly">可取消的输入在持下时不启动站立招式。若没有其他取消胜出，该输入失效。</param>
     /// <param name="maximumInputAge">从实际按键边沿计算的最长输入年龄，含当帧。缺省使用既有指令缓冲。</param>
     /// <exception cref="ArgumentException">目标为空 / 窗口倒置 / 阶段为空 / 未配置任何确认条件。</exception>
     public CancelDefinition(

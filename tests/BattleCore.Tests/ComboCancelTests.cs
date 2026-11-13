@@ -586,5 +586,16 @@ public class ComboCancelTests
             Assert.Equal(0, result.MoveElapsedFrames);
             Assert.Contains(result.Recognition.Buffer, result => result.Consumed);
         }
+        else if (down)
+        {
+            Assert.Contains(result.Recognition.Buffer, entry => entry.Consumed);
+            FighterActionTick afterRelease = FighterStateMachine.Tick(result.State, result.MoveId,
+                result.PhaseRemainingFrames, DirectionResolver.Resolve(InputBits.None, Facing.Right),
+                result.Recognition.Advance(InputBits.None, Facing.Right, 21, 0, fighter.Commands), fighter, 21,
+                moveStartedFrame: result.MoveStartedFrame, moveElapsedFrames: tick + 1,
+                opponentDistance: distance, opponentBodyDistance: distance - 30);
+            Assert.Null(afterRelease.ConsumedMatch);
+            Assert.Equal(result.MoveStartedFrame, afterRelease.MoveStartedFrame);
+        }
     }
 }
