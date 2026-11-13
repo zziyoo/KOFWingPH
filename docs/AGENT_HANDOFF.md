@@ -1589,3 +1589,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - 13C 封版复现与工程设置记录见 [STAGE13C_FREEZE.md](STAGE13C_FREEZE.md)，原基线由 `stage-13c` 指向。
 - 先按 [阶段 14 计划](superpowers/plans/2026-11-13-stage14-state200.md) 执行 14B 的参考轨迹核对。State 200 的动画与攻击框有静态证据，原版非对称停顿、伤害表达式和同招重进不可直接套用现有 Kai/Rei 数据。
+
+### 阶段 14 验收与交接
+
+- `TerryS200` 为显式 1v1 实验规则。用 `--p1-fighter-file` / `--p2-fighter-file` 指定生成数据。各席位的 `--p1-visual` / `--p2-visual` 独立选择视觉。默认目录和 3v3 阵容保持封版行为。
+- 原引擎证据在 `local-mugen/stage14-reference-replay/results/`，补充持续蹲防在 `local-mugen/stage14-reference-held/results/`。Godot 图像、权威日志和逐帧对照在 `local-mugen/stage14-validation/`。按 [验收矩阵](STAGE14_ACCEPTANCE.md) 和 [命令](../tools/Stage14Validation/README.md) 复现，使用新证据目录。
+- 后续可先取 State 210/211 的真实参考行为，覆盖近身 State 215 优先、模式分支和更长的有效窗口。静态审查在 [原引擎基准](STAGE14_REFERENCE.md)。守势惯性、完整受击框、脚本控制器和取消的范围见验收矩阵。保留原有 `project.godot` 工作区差异。
