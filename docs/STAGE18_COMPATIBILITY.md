@@ -19,7 +19,9 @@
 
 - **中心距 100。** P1 F5 `x`，F16 `y`，F17 `x`，P2 无输入。Godot 为 `J` R28–29、`K` R39–40、`J` R40–41。原版 F17 的旧时间 12、`AnimTime=0`、`var(2)=1`，根轻拳命令有效，Helper 的重拳值仍为 2。普通 CMD 顺序先检查 205／200，再检查 215／210，所以进入 200。原版两个预设和镜像共四场同样成立。Godot 默认预设 L30 仍为旧 200 的 Recovery tick 11，L31 启动 210。冻结证据有一场默认 Godot 差异复现，其他 Godot 预设和镜像未单独复现该差异。 [原版轨迹](../local-mugen/stage18-reference-terminal-priority/results/default-reentry-whiff-heavy16-light17.jsonl) · [Godot 日志](../local-mugen/stage18-validation/terminal-priority-observed/default-reentry-whiff-heavy16-light17/sprite/duel.log) · [Godot Action 210 首帧](../local-mugen/stage18-validation/terminal-priority-observed/default-reentry-whiff-heavy16-light17/sprite/frames/render-00041-state-00032.png)
 - `RecognitionState` 只对当前帧同时可识别的候选用命令优先级，随后将胜者追加到缓冲。`FighterStateMachine.Tick` 进入普通启动时按缓冲先后遍历，前一帧的 5B 仍有效，先于本帧的 5A。这条分支发生在显式重进窗口 7–11 之后。F12 同帧 `x+y` 优先轻拳、F17 单独 `x` 正常启动，均已有独立通过证据。 [识别胜者与缓冲](../core/BattleCore/Commands/RecognitionState.cs#L209) · [普通启动消费](../core/BattleCore/Combat/FighterStateMachine.cs#L244)
-- 原版弱 Power Wave 的 CMD 控制器先于站轻拳。阶段 19 若仅接入显式取消，先用 236A 与轻拳竞争的实测锁定局部选择。若自然结束也存在实际竞争，最小改动是给实验预设限定候选顺序，且只在有原版证据的入口启用。全局改 FIFO 会影响普通启动、未过期旧指令、同帧识别和其他角色的重放。 [弱 Power Wave 源审查](STAGE19_SOURCE_AUDIT.md)
+- 原版弱 Power Wave 的 CMD 控制器先于站轻拳。阶段 19 实测 F16 重拳、F17 完成 236+x 时，仍在旧 tick 12 优先进入 1000。因此，自然结束入口需要先解决跨年龄优先级。显式取消可先按 tick 4–6 与同边沿回落单独验证。最小改动是给实验预设限定候选顺序。全局改 FIFO 会影响普通启动、未过期旧指令、同帧识别和其他角色的重放。 [弱 Power Wave 源审查](STAGE19_SOURCE_AUDIT.md)
+
+处理优先级为收招末端命令优先级、实体接触时的反应框、独立实例连续格挡。第一项是阶段 19 普通启动入口的前置条件，后两项由新实体的实测需求决定是否独立立项。本轮保留原战斗实现和冻结预设。
 
 ## 冻结证据与直接打断补测
 

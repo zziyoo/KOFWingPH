@@ -1617,3 +1617,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - 新配置 `terry98-stage18-data/{default,mode2}.fighter.json` 通过 1v1 的显式角色文件参数载入，分别用视觉别名 `terry98-stage18-default`／`terry98-stage18-mode2`。命令 `--reentry-audit` 只读记录已提交的招式实例、命中与格挡确认及最近受击实例。生成、绑定安装与 Vulkan 复跑见[阶段 18 验收](STAGE18_ACCEPTANCE.md)。
 - 本阶段范围为两种人类站轻拳的显式重进。原版连续防御、动态受击框、方向跳跃及其他取消属于已记录的独立兼容范围。保持 13C 封版标签、阶段 14–17 的预设和既有 `project.godot` 差异。
+- 交付提交和原始证据见[阶段 18 封存](STAGE18_FREEZE.md)。打断补测单独归档，三个差异的风险和后续边界见[兼容性审查](STAGE18_COMPATIBILITY.md)。
+
+### 阶段 19 准备
+
+- 首单元为默认模式 State 200→1000 弱 Power Wave。先核对生效段的状态入口和同边沿普通技回落，再接入原版 Helper 1020 的权威实体。见[源码审查](STAGE19_SOURCE_AUDIT.md)、[原引擎取证](STAGE19_REFERENCE.md)与[实施计划](superpowers/plans/2026-11-13-stage19-terry-special-cancel.md)。阶段 19 运行时待实施。

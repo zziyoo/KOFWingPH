@@ -10,6 +10,8 @@
 - 受击打断在阶段 17 的冻结对局两套预设均已有直接证据。阶段 18 另补实际 Vulkan 对局，P1 在逻辑 26 重进 State 200，逻辑 27 在起手中被 P2 State 210 打断，未触发新实例的生效或接触，旧确认和局部伤害状态清除。覆盖开启、关闭和种子 1337 重跑的 672 条权威记录逐条一致。命令、画面及日志在 `local-mugen/stage18-closeout/interruption-final/`，独立于冻结 52 场。
 - 跨引擎差异有独立复现，保留原始结果与归一化边界。见[兼容性审查](STAGE18_COMPATIBILITY.md)。
 
+直接打断可重放 `interruption-final/{sprite,plain,seed-repeat}/duel.args.txt` 的实参。将各次 `--shot` 与 `--capture-dir` 的路径指向新目录，保持输入、`--fixed-fps 60`、`--damage-seed=1337` 和审计开关。`interruption-repro.py` 包含实际断言，在副本中把 `base` 改为新的空目录后执行。原始截图的状态版本 26／27／28 对应旧招收招、新招首帧与受击。
+
 ## 工程和远端
 
 `project.godot` 的原有编辑器差异继续保留，文件 SHA-256 为 `2f4d1c2c5c1b088ce2607698690f176e10e34e50101c95633fee26cf4e95859b`，Git 内容哈希为 `8fa21348031c553ccd4184beb3019a65e88228ec`。历史 `stage-13c` 仍指向 `dbf000e58971d30bf4f9cf32d71f1a0c2168786a`。第三方资源、生成预设和真实图形证据留在本地忽略目录。

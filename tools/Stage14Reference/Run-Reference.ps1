@@ -1,7 +1,7 @@
 param(
     [string]$IkemenRoot = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Ikemen-GO'),
     [switch]$Prepare,
-    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17', 'Stage18')]
+    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17', 'Stage18', 'Stage19')]
     [string]$CaptureProfile = 'Stage14',
     [string]$RunDirectory = 'local-mugen/stage14-reference',
     [ValidateRange(1, 2147483646)]
@@ -148,6 +148,49 @@ if ($CaptureProfile -eq 'Stage18') {
         }
     }
 }
+if ($CaptureProfile -eq 'Stage19') {
+    $captureDir = Join-Path $root 'tools/Stage15Reference'
+    $distances = [ordered]@{}
+    foreach ($fixture in @(
+        @{Name = 'whiff-9'; Distance = 100},
+        @{Name = 'whiff-8'; Distance = 100},
+        @{Name = 'whiff-10'; Distance = 100},
+        @{Name = 'whiff-11'; Distance = 100},
+        @{Name = 'whiff-12'; Distance = 100},
+        @{Name = 'whiff-17'; Distance = 100},
+        @{Name = 'hit-20'; Distance = 60},
+        @{Name = 'guard-20'; Distance = 60},
+        @{Name = 'hit-17'; Distance = 60},
+        @{Name = 'hit-18'; Distance = 60},
+        @{Name = 'hit-19'; Distance = 60},
+        @{Name = 'hit-21'; Distance = 60},
+        @{Name = 'hit-22'; Distance = 60},
+        @{Name = 'hit-23'; Distance = 60},
+        @{Name = 'hit-held-11'; Distance = 60},
+        @{Name = 'hit-11'; Distance = 60},
+        @{Name = 'hit-no-motion-20'; Distance = 60},
+        @{Name = 'guard-22'; Distance = 60},
+        @{Name = 'guard-23'; Distance = 60},
+        @{Name = 'mirror-hit-20'; Distance = 60},
+        @{Name = 'mirror-whiff-9'; Distance = 100},
+        @{Name = 'near-whiff-17'; Distance = 36},
+        @{Name = 'neutral-9'; Distance = 100}
+    )) {
+        $distances["default-special-$($fixture.Name)"] = $fixture.Distance
+    }
+    $distances['mode2-special-hit-20'] = 60
+    $distances['mode2-special-whiff-9'] = 100
+    foreach ($case in @(
+        @{Name = 'far-whiff-9'; Distance = 142},
+        @{Name = 'outside-whiff-9'; Distance = 180},
+        @{Name = 'dual-9'; Distance = 100},
+        @{Name = 'mirror-dual-9'; Distance = 100},
+        @{Name = 'terminal-heavy16-17'; Distance = 100}
+    )) {
+        $supplement = "default-special-$($case.Name)"
+        if ($Cases -contains $supplement) { $distances[$supplement] = $case.Distance }
+    }
+}
 if (!$Cases) { $Cases = @($distances.Keys) }
 foreach ($caseName in $Cases) {
     if (!$distances.Contains($caseName)) { throw "Unknown $CaptureProfile case $caseName" }
@@ -161,11 +204,14 @@ $expectedSourceHashes = @{
     'Terry.cmd' = 'ee57ffe1d6d4a2770b47590ab69177de79b24ccfc0153702dd3602f633507b59'
     'Terry.air' = '252646cc2940f776e94df0b7b7fd3772e098d75fda6e9b781135eaa36e0fd851'
 }
-if ($CaptureProfile -in @('Stage17', 'Stage18')) {
+if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19')) {
     $expectedSourceHashes['Terry-2-3.cns'] = '90b83cdacd33a3800a825ee42bdbd6502b7989f4dec358126587edeb4495fdc4'
 }
-if ($CaptureProfile -eq 'Stage18') {
+if ($CaptureProfile -in @('Stage18', 'Stage19')) {
     $expectedSourceHashes['Helper.cns'] = 'b2d683f70a3c6dd76587edee1a54f0638f9c6e006d5c70af598ff9b0163dd62a'
+}
+if ($CaptureProfile -eq 'Stage19') {
+    $expectedSourceHashes['Terry-S.cns'] = '60171bf640c7e8316d34e2b0ab001f663472bfd14dc66d174dcf5a8eebd8dc21'
 }
 
 if ((Get-FileHash -LiteralPath $archive).Hash -ne $terryHash) {
@@ -213,7 +259,7 @@ if ($Prepare) {
     if ($CaptureProfile -eq 'Stage17') {
         & (Join-Path $root 'tools/Stage17Reference/Install-TraceHooks.ps1') -Engine $engine
     }
-    if ($CaptureProfile -eq 'Stage18') {
+    if ($CaptureProfile -in @('Stage18', 'Stage19')) {
         & (Join-Path $root 'tools/Stage18Reference/Install-TraceHooks.ps1') -Engine $engine
     }
     $env:MSYSTEM = 'MINGW64'
@@ -246,7 +292,7 @@ $metadata = [ordered]@{
     scenario_distance = $distances
 }
 if ($CaptureProfile -ne 'Stage14') { $metadata.capture_profile = $CaptureProfile }
-if ($CaptureProfile -in @('Stage17', 'Stage18')) {
+if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19')) {
     $metadata.rng_seed = $Seed
     $metadata.executed_cases = @($Cases)
 }
@@ -254,7 +300,7 @@ if ($CaptureProfile -in @('Stage17', 'Stage18')) {
 foreach ($caseName in $Cases) {
     $env:RESEARCH_CASE = $caseName
     $env:RESEARCH_DISTANCE = $distances[$caseName].ToString([Globalization.CultureInfo]::InvariantCulture)
-    if ($CaptureProfile -in @('Stage17', 'Stage18')) {
+    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19')) {
         $env:RESEARCH_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
     }
     $env:RESEARCH_TRACE = Join-Path $results "$caseName.jsonl"
@@ -267,7 +313,7 @@ foreach ($caseName in $Cases) {
     }
     $process = Start-Process -FilePath $exe -WorkingDirectory $engine -ArgumentList $caseArguments -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $results "$caseName-stdout.txt") -RedirectStandardError $stderr
-    $timeout = if ($CaptureProfile -eq 'Stage18') { 90000 } else { 45000 }
+    $timeout = if ($CaptureProfile -in @('Stage18', 'Stage19')) { 90000 } else { 45000 }
     if (!$process.WaitForExit($timeout)) {
         Stop-Process -Id $process.Id
         throw "Reference case $caseName timed out. Inspect $stderr"
@@ -285,7 +331,7 @@ foreach ($caseName in $Cases) {
         trace_sha256 = $trace.Hash.ToLowerInvariant()
     }
     if ($CaptureProfile -ne 'Stage14') { $caseMetadata.arguments = $caseArguments }
-    if ($CaptureProfile -in @('Stage17', 'Stage18')) { $caseMetadata.rng_seed = $Seed }
+    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19')) { $caseMetadata.rng_seed = $Seed }
     [IO.File]::WriteAllText((Join-Path $results "$caseName-metadata.json"), ($caseMetadata | ConvertTo-Json) + [char]10, $enc)
     $trace
 }
