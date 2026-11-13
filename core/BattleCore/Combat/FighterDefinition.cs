@@ -22,9 +22,16 @@ public sealed class GroundHurtboxes
 
     private static IReadOnlyList<FixedRect> Copy(IReadOnlyList<FixedRect> boxes, string name)
     {
-        ArgumentNullException.ThrowIfNull(boxes, name);
-        if (boxes.Count == 0 || boxes.Any(box => box.MinX >= box.MaxX || box.MinY >= box.MaxY))
+        if (boxes is { Count: 0 })
             throw new ArgumentException("需要至少一个具有正面积的受击矩形。", name);
+        return CopyLocalBoxes(boxes, name);
+    }
+
+    internal static IReadOnlyList<FixedRect> CopyLocalBoxes(IReadOnlyList<FixedRect> boxes, string name)
+    {
+        ArgumentNullException.ThrowIfNull(boxes, name);
+        if (boxes.Any(box => box.MinX >= box.MaxX || box.MinY >= box.MaxY))
+            throw new ArgumentException("受击矩形必须具有正面积。", name);
         FixedPoint limit = FixedPoint.FromInt(MaxLocalCoordinate);
         if (boxes.Any(box => box.MinX < -limit || box.MaxX > limit || box.MinY < -limit || box.MaxY > limit))
             throw new ArgumentOutOfRangeException(name, $"受击框局部坐标必须在 ±{MaxLocalCoordinate} 内。");

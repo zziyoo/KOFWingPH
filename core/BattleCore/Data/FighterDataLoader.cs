@@ -198,8 +198,16 @@ public static class FighterDataLoader
             attacks: BuildArray(dto.Attacks, source, path + ".attacks", BuildAttack),
             cancels: BuildArray(dto.Cancels, source, path + ".cancels", BuildCancel),
             throws: BuildArray(dto.Throws, source, path + ".throws", BuildThrow),
-            projectiles: BuildArray(dto.Projectiles, source, path + ".projectiles", BuildProjectile)),
+            projectiles: BuildArray(dto.Projectiles, source, path + ".projectiles", BuildProjectile),
+            minimumStartDistance: dto.MinimumStartDistance is { } distance
+                ? Fraction(distance, source, path + ".minimumStartDistance") : FixedPoint.Zero,
+            hurtboxTimeline: dto.HurtboxTimeline is { } timeline
+                ? BuildArray(timeline, source, path + ".hurtboxTimeline", BuildMoveHurtboxSpan) : null),
         source, path);
+
+    private static MoveHurtboxSpan BuildMoveHurtboxSpan(MoveHurtboxSpanDto dto, string source, string path) => Guard(
+        () => new MoveHurtboxSpan(RequiredInt(dto.Frames, source, path + ".frames"),
+            BuildArray(dto.Boxes, source, path + ".boxes", BuildHurtbox)), source, path);
 
     private static AttackDefinition BuildAttack(AttackDto dto, string source, string path) => Guard(
         () => new AttackDefinition(
@@ -228,7 +236,8 @@ public static class FighterDataLoader
                     BuildHitstopPair(outcome.Hit, source, path + ".hitstopByOutcome.hit"),
                     BuildHitstopPair(outcome.Block, source, path + ".hitstopByOutcome.block"))
                 : null,
-            contactOnEdge: dto.ContactOnEdge),
+            contactOnEdge: dto.ContactOnEdge,
+            counterDamage: dto.CounterDamage),
         source, path);
 
     private static HitstopPair BuildHitstopPair(HitstopPairDto? dto, string source, string path)

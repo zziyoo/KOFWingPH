@@ -52,6 +52,20 @@ python tools/Stage15Reference/Check-Traces.py local-mugen/stage15-reference-new/
 
 标准产物在 `local-mugen/stage15-reference/results/`，共 26 个场景和 13 份模式入口证据。每场包含 F0–75 五个采样点及 HitDef 执行行。中立命中、站防、预蹲防、同帧蹲防、镜像、对攻及打断的分离均为 72，空挥为 240，其他由场景名标明。原始 stderr 保留旧脚本和 Terry 素材诊断。以下为检查器通过的 JSONL 哈希，每场的可执行文件、配置和启动参数也记录在 `*-metadata.json`。
 
+### 64.5 分离补测
+
+同一引擎在独立目录 `local-mugen/stage15-reference-fractional/results/` 复查位置 ±32.25。两模式的原生 `P2BodyDist X` 均为 34.5，F5 进入 State 210，分别选 Action 210 和 211，F10 命中，F11 目标生命 885。MUGEN 1.0 的浮点距离判断保留了小数，远身条件为角色中心分离严格大于 64。
+
+```powershell
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage15 -Prepare -RunDirectory local-mugen/stage15-reference-fractional-new -Cases default-far-64p5,mode2-far-64p5
+python tools/Stage15Reference/Check-Traces.py local-mugen/stage15-reference-fractional-new/results --fractional
+```
+
+- `default-far-64p5.jsonl` SHA-256 `b4cb1b5072e4fad309fe05ede4cd5227bdb68d05759d29630f518c48daa79ee3`
+- `mode2-far-64p5.jsonl` SHA-256 `e909b39a815ec02830e182cc31ce38bf9422d827bd112957cffaf870db145fd4`
+
+### 标准轨迹哈希
+
 | 场景 | 行数 | SHA-256 |
 | --- | ---: | --- |
 | `default-whiff` | 388 | `751a3d74f907471f78d0b7aa27b3f6c0ca5a88ff7116a6fd5b56cace715977d1` |

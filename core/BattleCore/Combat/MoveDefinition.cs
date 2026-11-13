@@ -1,6 +1,22 @@
 using NewKOF.BattleCore.Commands;
+using NewKOF.BattleCore.Numerics;
 
 namespace NewKOF.BattleCore.Combat;
+
+/// <summary>从动作时钟采样的连续本地受击框。空框列表表示该时段无可接触矩形。</summary>
+public sealed class MoveHurtboxSpan
+{
+    public MoveHurtboxSpan(int frames, IReadOnlyList<FixedRect> boxes)
+    {
+        if (frames < 1)
+            throw new ArgumentOutOfRangeException(nameof(frames), "受击框时段必须至少持续一帧。");
+        Frames = frames;
+        Boxes = GroundHurtboxes.CopyLocalBoxes(boxes, nameof(boxes));
+    }
+
+    public int Frames { get; }
+    public IReadOnlyList<FixedRect> Boxes { get; }
+}
 
 /// <summary>
 /// 一条<b>招式定义</b>（阶段 04，纯数据）：说明「哪个指令触发哪个动作、
@@ -30,6 +46,8 @@ public sealed class MoveDefinition
 /// 生效帧窗口必须落在 Active 阶段内，且同一招式内 ThrowId 不得重复。</param>
 /// <param name="projectiles">飞行道具定义（阶段 08D，D99）；null/空 = 本招式不发射道具。
 /// 出生帧必须在 Active 阶段内，且同一招式内 ProjectileTypeId 不得重复。</param>
+/// <param name="minimumStartDistance">发动或取消到此招时，帧开始的最小水平中心距。缺省无距离限制。</param>
+/// <param name="hurtboxTimeline">可选的局部受击框时间线，持续时间必须覆盖完整招式。</param>
 /// <exception cref="ArgumentException">ID 为空 / 阶段帧数 &lt; 1 / 允许状态为空。</exception>
 /// <exception cref="ArgumentException">攻击数据的生效帧范围超出 ActiveFrames。</exception>
 public MoveDefinition(
@@ -42,7 +60,9 @@ public MoveDefinition(
     IReadOnlyList<AttackDefinition>? attacks = null,
     IReadOnlyList<CancelDefinition>? cancels = null,
     IReadOnlyList<ThrowDefinition>? throws = null,
-    IReadOnlyList<ProjectileDefinition>? projectiles = null)
+    IReadOnlyList<ProjectileDefinition>? projectiles = null,
+    FixedPoint minimumStartDistance = default,
+    IReadOnlyList<MoveHurtboxSpan>? hurtboxTimeline = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -61,12 +81,24 @@ public MoveDefinition(
             throw new ArgumentException(
                 $"允许发动状态只能是 Standing/Crouching 的组合，收到 {allowedFrom}。", nameof(allowedFrom));
 
+        if (minimumStartDistance < FixedPoint.Zero)
+            throw new ArgumentOutOfRangeException(nameof(minimumStartDistance), "最小发动距离不能为负。");
+
         MoveId = moveId;
         CommandId = commandId;
         StartupFrames = startupFrames;
         ActiveFrames = activeFrames;
         RecoveryFrames = recoveryFrames;
         AllowedFrom = allowedFrom;
+        MinimumStartDistance = minimumStartDistance;
+        if (hurtboxTimeline is not null)
+        {
+            MoveHurtboxSpan[] spans = hurtboxTimeline.ToArray();
+            if (spans.Any(span => span is null) ||
+                spans.Sum(span => (long)span.Frames) != (long)startupFrames + activeFrames + recoveryFrames)
+                throw new ArgumentException("受击框时段必须覆盖整个招式。", nameof(hurtboxTimeline));
+            HurtboxTimeline = Array.AsReadOnly(spans);
+        }
 
         // 攻击判定数据（D76）：防御复制 + 生效帧范围必须在 Active 阶段内
         // （0 起始含两端）。LastActiveFrame == int.MaxValue 是「直到 Active 末帧」的
@@ -137,6 +169,23 @@ public MoveDefinition(
 
     /// <summary>允许发动的待机状态集合。</summary>
     public MoveAllowedStates AllowedFrom { get; }
+
+    public FixedPoint MinimumStartDistance { get; }
+
+    public IReadOnlyList<MoveHurtboxSpan>? HurtboxTimeline { get; }
+
+    internal IReadOnlyList<FixedRect>? HurtboxesAt(int elapsed)
+    {
+        if (HurtboxTimeline is null)
+            return null;
+        foreach (MoveHurtboxSpan span in HurtboxTimeline)
+        {
+            if (elapsed < span.Frames)
+                return span.Boxes;
+            elapsed -= span.Frames;
+        }
+        return HurtboxTimeline[^1].Boxes;
+    }
 
     /// <summary>攻击判定数据（阶段 06A，D76；只读，可为空列表 = 无攻击框的招式）。</summary>
     public IReadOnlyList<AttackDefinition> Attacks { get; }

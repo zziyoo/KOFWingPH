@@ -74,3 +74,19 @@ python -m unittest discover -s tools/MugenImporter/tests -p test_state200.py
 `--audit-only` 输出静态来源、命令入口、状态、AIR 时序与判定框。`--reference` 读取相邻的原引擎逐帧记录，按 State 200 进入时刻归零，核对判定窗口、双方停顿、生命变化和控制恢复。78 单位命中且 79、80 单位落空的轨迹用于验证边缘接触。命中帧才按住下后的场景可以蹲防，已进入蹲伏的场景会因受击框高度而落空。数据缺失、归档哈希或状态不符、图集异常、必需实测值不一致均导致转换失败。
 
 输出为 `state200.fighter.json`、`state200.binding.json` 和 `state200.source.json`。来源记录包含输入及逐场轨迹的哈希与适用范围。可指定新的输出目录检验重复转换，程序拒绝覆盖同名文件。生成文件和原始资源留在本地忽略目录。实验只覆盖经审查的地面远距离站轻拳，包含原版静止站立和蹲伏的受击框、普通模式首个生效 tick 的结算和动作恢复。完整脚本解释、同招重进和近身优先级留待后续阶段。
+
+## 阶段 15 多招式实验配置
+
+在仓库根目录运行。转换使用原始 Terry ZIP、已导入的 Manifest，以及阶段 14 和阶段 15 的规范参考轨迹。生成目录必须独立，已有同名配置会被拒绝。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+py -m mugen_importer.state210 local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
+  --state200-reference local-mugen/stage14-reference-replay/results/run-metadata.json `
+  --reference local-mugen/stage15-reference/results/run-metadata.json `
+  --fractional-reference local-mugen/stage15-reference-fractional/results/run-metadata.json `
+  --output-dir data/imported-characters/terry98-stage15-data
+py -m unittest discover -s tools/MugenImporter/tests
+```
+
+每套预设输出角色、绑定和来源三个 JSON。两套预设都包含 `5A` 对应的 State 200 和 `5B` 对应的 State 210。用 `default` 或 `mode2` 预设把同一重拳绑定到 Action 210 或 211。`--audit-only` 单独输出静态来源审查，无需运行轨迹。模式来源、距离边界、反击样本及限制见 [阶段 15 原引擎基准](STAGE15_REFERENCE.md)。图形启动方法见 [取证命令](../tools/Stage15Validation/README.md)。

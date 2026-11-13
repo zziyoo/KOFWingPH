@@ -40,6 +40,8 @@ if ($CaptureProfile -eq 'Stage15') {
                 default { 72 }
             }
         }
+        $fractionalCase = "$mode-far-64p5"
+        if ($Cases -contains $fractionalCase) { $distances[$fractionalCase] = 64.5 }
     }
 }
 if (!$Cases) { $Cases = @($distances.Keys) }
@@ -131,7 +133,7 @@ if ($CaptureProfile -eq 'Stage15') { $metadata.capture_profile = $CaptureProfile
 [IO.File]::WriteAllText((Join-Path $results 'run-metadata.json'), ($metadata | ConvertTo-Json -Depth 6) + [char]10, $enc)
 foreach ($caseName in $Cases) {
     $env:RESEARCH_CASE = $caseName
-    $env:RESEARCH_DISTANCE = [string]$distances[$caseName]
+    $env:RESEARCH_DISTANCE = $distances[$caseName].ToString([Globalization.CultureInfo]::InvariantCulture)
     $env:RESEARCH_TRACE = Join-Path $results "$caseName.jsonl"
     $stderr = Join-Path $results "$caseName-stderr.txt"
     $caseArguments = $arguments

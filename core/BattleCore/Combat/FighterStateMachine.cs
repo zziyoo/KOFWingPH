@@ -83,6 +83,7 @@ public static class FighterStateMachine
     /// <param name="moveElapsedFrames">当前攻击实例的<b>动作有效经过帧数</b>（阶段 08A，D96）：
     /// 由调用方按「上一帧值 + 1」给出（发动/取消当帧为 0）。取消窗口用它而不是
     /// <c>frame − moveStartedFrame</c>，这样 Hitstop 不会让窗口提前过期。</param>
+    /// <param name="opponentDistance">本逻辑帧开始时双方的水平中心距。</param>
     public static FighterActionTick Tick(
         FighterLogicState state,
         string? moveId,
@@ -97,7 +98,8 @@ public static class FighterStateMachine
         int hitConfirmFrame = -1,
         int blockConfirmFrame = -1,
         int landingWakeupFrames = 0,
-        int moveElapsedFrames = 0)
+        int moveElapsedFrames = 0,
+        FixedPoint opponentDistance = default)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -127,7 +129,7 @@ public static class FighterStateMachine
             // 因此停顿期间窗口不会悄悄过期（无 Hitstop 时它恒等于 frame − moveStartedFrame）。
             FighterActionTick? cancel = TryCancel(
                 state, move, definition, recognition, frame,
-                moveStartedFrame, moveElapsedFrames, hitConfirmFrame, blockConfirmFrame);
+                moveStartedFrame, moveElapsedFrames, hitConfirmFrame, blockConfirmFrame, opponentDistance);
             if (cancel is FighterActionTick cancelled)
                 return cancelled;
 
@@ -252,6 +254,12 @@ public static class FighterStateMachine
                 : MoveAllowedStates.Standing;
             if ((move.AllowedFrom & required) == 0)
                 continue; // 当前待机状态不允许发动 → 保留，恢复可行动后再消费（B5）。
+            if (opponentDistance < move.MinimumStartDistance)
+            {
+                // 近身输入不能留在缓冲中，等双方分开时再发动远身招式。
+                recognition = recognition.WithResultConsumed(match.RecognizedFrame);
+                continue;
+            }
 
             // 消费一次（不可变替换），进入 Startup；攻击实例身份 = 当帧发动帧（D81）。
             return new FighterActionTick(
@@ -320,7 +328,8 @@ public static class FighterStateMachine
         int moveStartedFrame,
         int moveElapsedFrames,
         int hitConfirmFrame,
-        int blockConfirmFrame)
+        int blockConfirmFrame,
+        FixedPoint opponentDistance)
     {
         if (move.Cancels.Count == 0 || moveStartedFrame < 0)
             return null;
@@ -338,8 +347,8 @@ public static class FighterStateMachine
                 continue;
 
             MoveDefinition? target = definition.FindMoveById(cancel.TargetMoveId);
-            if (target is null)
-                continue; // 目标存在性已在 FighterDefinition 构造期校验，正常不可达。
+            if (target is null || opponentDistance < target.MinimumStartDistance)
+                continue;
 
             foreach (BufferedResult result in recognition.Buffer)
             {

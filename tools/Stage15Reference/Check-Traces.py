@@ -109,6 +109,7 @@ def check_case(directory, metadata, name, distance):
 def main():
     parser = argparse.ArgumentParser(description="Check Stage 15 original-engine traces")
     parser.add_argument("directory", type=Path)
+    parser.add_argument("--fractional", action="store_true", help="verify the two supplemental distance 64.5 cases")
     args = parser.parse_args()
     if not __debug__:
         raise SystemExit("Run the trace checker without Python optimization")
@@ -116,9 +117,16 @@ def main():
     assert metadata["engine"] == "IKEMEN GO"
     assert metadata["commit"] == "5dac5caf9a02a9b81bf2264e88a1bbf68e21bba0"
     assert metadata["capture_profile"] == "Stage15"
-    assert len(metadata["scenario_distance"]) == 26
-    for name, distance in metadata["scenario_distance"].items():
-        check_case(args.directory, metadata, name, distance)
+    distances = metadata["scenario_distance"]
+    fractional = ("default-far-64p5", "mode2-far-64p5")
+    if args.fractional:
+        assert all(distances.get(name) == 64.5 for name in fractional)
+        cases = fractional
+    else:
+        cases = tuple(name for name in distances if name not in fractional)
+        assert len(cases) == 26
+    for name in cases:
+        check_case(args.directory, metadata, name, distances[name])
 
 
 if __name__ == "__main__":

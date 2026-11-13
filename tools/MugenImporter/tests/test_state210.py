@@ -4,10 +4,39 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mugen_importer.state210 import action_branch, attack_fields, build_profile, hurtbox_timeline, verify_mode_intro
+from mugen_importer.state200 import read_sections
+from mugen_importer.state210 import action_branch, attack_fields, build_profile, command_rules, hurtbox_timeline, verify_mode_intro
 
 
 class State210Tests(unittest.TestCase):
+    def test_mugen_1_distance_accepts_first_fixed_point_after_near_threshold(self):
+        sections = read_sections('''
+[Defaults]
+command.time = 15
+command.buffer.time = 1
+[Command]
+name = "y"
+command = y
+time = 1
+[State -1, near]
+type = ChangeState
+value = 215
+triggerall = command = "y" || foo
+triggerall = p2bodydist X <= 20
+[State -1, far]
+type = ChangeState
+value = 210
+triggerall = command = "y" || foo
+triggerall = roundstate = 2
+triggerall = command != "holddown"
+triggerall = statetype != A
+trigger1 = ctrl || foo
+''')
+        constants = read_sections('[Size]\nground.front = 15\n')
+        result = command_rules(sections, constants)
+        self.assertEqual(50, result['maximumNearCenterDistance'])
+        self.assertEqual({'numerator': 3276801, 'denominator': 65536}, result['minimumStartDistance'])
+
     def test_source_box_can_reverse_endpoints_and_span_adjacent_elements(self):
         action = {
             'action': 211, 'loop_start': None,
@@ -49,7 +78,8 @@ class State210Tests(unittest.TestCase):
             'moves': [{'moveId': 'TerryStandLightPunch200', 'activeFrames': 4, 'attacks': [{'damage': 21}]}]}
         base_binding = {'visualId': 'terry98-stage14', 'clips': {'state200': {'action': 200}, 'idle': {'action': 0}},
                         'moves': {'TerryStandLightPunch200': {'Active': 'state200'}}}
-        audit = {'command': {'time': 1, 'bufferTime': 1, 'minimumStartDistance': 65}, 'actions': {
+        distance = {'numerator': 4194305, 'denominator': 65536}
+        audit = {'command': {'time': 1, 'bufferTime': 1, 'minimumStartDistance': distance}, 'actions': {
             'default': {'id': 210, 'strike': [12, -84, 67, -61], 'startup': 5, 'active': 8, 'recovery': 17,
                         'durations': [5, 8, 17], 'clsn2': [[], [], []]},
             'mode2': {'id': 211, 'strike': [12, -84, 67, -61], 'startup': 5, 'active': 7, 'recovery': 18,
@@ -75,7 +105,7 @@ class State210Tests(unittest.TestCase):
             self.assertEqual(['HeavyPunch'], fighter['commands'][1]['buttons'])
             self.assertEqual(active, fighter['moves'][1]['activeFrames'])
             self.assertEqual(159, fighter['moves'][1]['attacks'][0]['counterDamage'])
-            self.assertEqual({'numerator': 65, 'denominator': 1}, fighter['moves'][1]['minimumStartDistance'])
+            self.assertEqual(distance, fighter['moves'][1]['minimumStartDistance'])
             self.assertEqual(30, sum(span['frames'] for span in fighter['moves'][1]['hurtboxTimeline']))
             self.assertEqual(action, binding['clips']['state210']['action'])
             self.assertEqual(0 if mode == 'default' else 1, binding['clips']['idle']['action'])

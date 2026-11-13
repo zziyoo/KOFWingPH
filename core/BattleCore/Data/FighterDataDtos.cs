@@ -166,6 +166,12 @@ public sealed class MoveDto
     [JsonPropertyName("allowedFrom")]
     public string? AllowedFrom { get; set; }
 
+    [JsonPropertyName("minimumStartDistance")]
+    public FractionDto? MinimumStartDistance { get; set; }
+
+    [JsonPropertyName("hurtboxTimeline")]
+    public List<MoveHurtboxSpanDto>? HurtboxTimeline { get; set; }
+
     [JsonPropertyName("attacks")]
     public List<AttackDto>? Attacks { get; set; }
 
@@ -177,6 +183,15 @@ public sealed class MoveDto
 
     [JsonPropertyName("projectiles")]
     public List<ProjectileDto>? Projectiles { get; set; }
+}
+
+public sealed class MoveHurtboxSpanDto
+{
+    [JsonPropertyName("frames")]
+    public int? Frames { get; set; }
+
+    [JsonPropertyName("boxes")]
+    public List<HurtboxDto>? Boxes { get; set; }
 }
 
 public sealed class AttackDto
@@ -241,6 +256,9 @@ public sealed class AttackDto
 
     [JsonPropertyName("contactOnEdge")]
     public bool ContactOnEdge { get; set; }
+
+    [JsonPropertyName("counterDamage")]
+    public int? CounterDamage { get; set; }
 }
 
 public sealed class HitstopByOutcomeDto

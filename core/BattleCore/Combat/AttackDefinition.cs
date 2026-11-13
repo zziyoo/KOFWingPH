@@ -63,6 +63,7 @@ public sealed class AttackDefinition
     /// 攻击方与被击方各冻结该数量的<b>后续</b>逻辑帧；0 = 不产生停顿。</param>
     /// <param name="hitstopByOutcome">可选的近身命中与防御停顿，覆盖上述对称默认值。</param>
     /// <param name="contactOnEdge">近身攻击是否把边缘相接计为接触；默认要求正面积重叠。</param>
+    /// <param name="counterDamage">可选的近身反击伤害，目标处于起手或生效阶段时使用。</param>
     /// <exception cref="ArgumentOutOfRangeException">半宽/半高 ≤ 0、帧号 &lt; 0、
     /// 伤害 &lt; 0 或硬直帧数 &lt; 1，或击退/击飞参数越界。</exception>
     /// <exception cref="ArgumentException">lastActiveFrame &lt; firstActiveFrame，
@@ -87,7 +88,8 @@ public sealed class AttackDefinition
         int wakeupFrames = 0,
         int hitstopFrames = 0,
         HitstopByOutcome? hitstopByOutcome = null,
-        bool contactOnEdge = false)
+        bool contactOnEdge = false,
+        int? counterDamage = null)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -101,6 +103,8 @@ public sealed class AttackDefinition
                 $"攻击生效帧范围非法（first={firstActiveFrame} > last={lastActiveFrame}）。", nameof(lastActiveFrame));
         if (damage < 0)
             throw new ArgumentOutOfRangeException(nameof(damage), damage, "伤害不能为负。");
+        if (counterDamage < 0)
+            throw new ArgumentOutOfRangeException(nameof(counterDamage), counterDamage, "反击伤害不能为负。");
         if (hitstunFrames < 1)
             throw new ArgumentOutOfRangeException(nameof(hitstunFrames), hitstunFrames,
                 "命中硬直帧数必须 ≥ 1（命中必进入 Hitstun）。");
@@ -161,6 +165,7 @@ public sealed class AttackDefinition
         HitstopFrames = hitstopFrames;
         HitstopByOutcome = hitstopByOutcome;
         ContactOnEdge = contactOnEdge;
+        CounterDamage = counterDamage;
     }
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
@@ -224,6 +229,8 @@ public sealed class AttackDefinition
     public HitstopByOutcome? HitstopByOutcome { get; }
 
     public bool ContactOnEdge { get; }
+
+    public int? CounterDamage { get; }
 
     public HitstopPair ResolveMeleeHitstop(bool blocked) => HitstopByOutcome is { } outcome
         ? (blocked ? outcome.Block : outcome.Hit)

@@ -16,6 +16,7 @@ from .state200 import (archive_digest, collision_boxes, fraction, normalized, nu
 
 
 MOVE_ID = 'TerryStandHeavyPunch210'
+Q16_SCALE = 1 << 16
 PRESETS = {'default': ('TerryS210', 'terry98-stage15-default'),
            'mode2': ('TerryS210Mode2', 'terry98-stage15-mode2')}
 CONTROLLERS = ['changeanim', 'playsnd', 'playsnd', 'hitdef', 'hitdef',
@@ -23,8 +24,9 @@ CONTROLLERS = ['changeanim', 'playsnd', 'playsnd', 'hitdef', 'hitdef',
 DISTANCES = {'whiff': 240, 'hit': 72, 'guard': 72, 'crouch-guard': 72, 'crouch-guard-late': 72, 'mirror': 72,
              'close-60': 60, 'close-64': 64, 'far-65': 65, 'boundary-86': 86, 'boundary-87': 87,
              'trade': 72, 'interrupt': 72}
+FRACTIONAL_CASE = 'far-64p5'
 GUARDS = {'guard', 'crouch-guard', 'crouch-guard-late'}
-HITS = {'hit', 'mirror', 'far-65', 'boundary-86'}
+HITS = {'hit', 'mirror', 'far-65', 'boundary-86', FRACTIONAL_CASE}
 
 
 def source_move(sections):
@@ -80,11 +82,13 @@ def command_rules(sections, constants):
     (max_body_distance,) = number_in(condition, r'p2bodydistx<=(\d+)', 'State 215 distance condition')
     size = unique((section for section in constants if section.title == 'size'), 'Size constants')
     front = int(size.one('ground.front'))
+    max_near = max_body_distance + 2 * front
     return {'keyLine': key.line, 'farEntryLine': far.line, 'nearEntryLine': near.line,
             'time': int(key.one('time', defaults.one('command.time'))),
             'bufferTime': int(key.one('buffer.time', defaults.one('command.buffer.time'))),
             'nearBodyDistance': max_body_distance, 'groundFront': front,
-            'minimumStartDistance': max_body_distance + 2 * front + 1}
+            'maximumNearCenterDistance': max_near,
+            'minimumStartDistance': fraction(Fraction(max_near * Q16_SCALE + 1, Q16_SCALE))}
 
 
 def action_branch(action, first, following):
@@ -140,7 +144,7 @@ def reference_case(audit, directory, metadata, mode, scenario):
     name = f'{mode}-{scenario}'
     path = directory / f'{name}.jsonl'
     detail = state200.load_json(directory / f'{name}-metadata.json')
-    distance = DISTANCES[scenario]
+    distance = 64.5 if scenario == FRACTIONAL_CASE else DISTANCES[scenario]
     trace_sha = archive_digest(path)
     require(detail['case'] == name and detail['initial_distance'] == metadata['scenario_distance'][name] == distance
             and detail['executable_sha256'] == metadata['executable_sha256']
@@ -302,6 +306,22 @@ def same_settlement(first, second):
         and math.isclose(first['targetTravel'], second['targetTravel'], abs_tol=0.0001)
 
 
+def inspect_fractional_reference(audit, main_reference, path):
+    metadata = state200.load_json(path)
+    identity = ('engine', 'commit', 'executable_sha256', 'terry_archive_sha256',
+                'source_sha256', 'config_sha256', 'arguments', 'capture_profile')
+    require(all(metadata[key] == main_reference['metadata'][key] for key in identity),
+            'fractional reference metadata differs from the canonical engine, source or configuration')
+    cases = {}
+    for mode in PRESETS:
+        candidate = reference_case(audit, path.parent, metadata, mode, FRACTIONAL_CASE)
+        standard = main_reference['cases'][mode]['hit']['outcome']
+        require(candidate['state'] == 210 and same_settlement(candidate['outcome'], standard),
+                f'{mode}: fractional far hit differs from direct hit')
+        cases[mode] = candidate
+    return {'metadataSha256': archive_digest(path), 'cases': cases}
+
+
 def hurtbox_timeline(action):
     return [
         {'frames': duration, 'boxes': [
@@ -350,7 +370,7 @@ def build_profile(audit, reference, base_fighter, base_binding, mode, base_actio
         fighter['moves'][0]['hurtboxTimeline'] = hurtbox_timeline(base_action)
     fighter['moves'].append({
         'moveId': MOVE_ID, 'commandId': '5B', 'allowedFrom': 'Standing',
-        'minimumStartDistance': fraction(command['minimumStartDistance']),
+        'minimumStartDistance': command['minimumStartDistance'],
         'startupFrames': branch['startup'], 'activeFrames': branch['active'], 'recoveryFrames': branch['recovery'],
         'attacks': [attack],
         'cancels': [], 'throws': [], 'projectiles': [], 'hurtboxTimeline': hurtbox_timeline(branch),
@@ -375,10 +395,11 @@ def main():
     parser.add_argument('--audit-only', action='store_true', help='print static provenance without converting')
     parser.add_argument('--state200-reference', type=Path, help='canonical Stage 14 reference run metadata')
     parser.add_argument('--reference', type=Path, help='canonical Stage 15 reference run metadata')
+    parser.add_argument('--fractional-reference', type=Path, help='same-engine supplemental 64.5 distance metadata')
     parser.add_argument('--output-dir', type=Path, help='directory for both generated fighter and binding presets')
     args = parser.parse_args()
     inputs = (args.state200_reference, args.reference, args.output_dir)
-    if args.audit_only and any(inputs) or not args.audit_only and not all(inputs):
+    if args.audit_only and (any(inputs) or args.fractional_reference) or not args.audit_only and not all(inputs):
         parser.error('use either --audit-only, or all of --state200-reference, --reference and --output-dir')
     try:
         audit = inspect_source(args.source_zip, args.manifest)
@@ -387,6 +408,7 @@ def main():
             return
         base = state200.inspect_source(args.source_zip, args.manifest)
         reference = inspect_reference(audit, args.reference, base)
+        fractional = inspect_fractional_reference(audit, reference, args.fractional_reference) if args.fractional_reference else None
         base_reference = state200.inspect_reference(base, args.state200_reference)
         base_docs = state200.build_documents(base, base_reference)
         documents = {}
@@ -397,9 +419,11 @@ def main():
             documents[f'{mode}.binding.json'] = binding
             documents[f'{mode}.source.json'] = {
                 **audit, 'preset': mode, 'reference': {**reference, 'cases': reference['cases'][mode]},
+                **({'fractionalReference': {'metadataSha256': fractional['metadataSha256'],
+                                            'case': fractional['cases'][mode]}} if fractional else {}),
                 'state200ReferenceSha256': base_reference['metadataSha256'],
                 'projection': {'mode': 'Select the original action as a fixed preset before the duel.',
-                               'distance': 'Center separation 65 is the first integer sample beyond original near priority.',
+                               'distance': 'MUGEN 1.0 compares P2BodyDist X without integer truncation. Terry-versus-Terry near priority includes center separation 64. The far preset accepts the next representable Q16 distance.',
                                'damage': 'Use the measured life reduction on normal first-active ground contact.',
                                'counterDamage': 'Use the sampled life reduction against opposing Startup/Active. Original script var(21) is 1 for the light sample and 0 for the heavy sample.',
                                'limits': ['Native mode selection and close State 215 are not playable in these presets.',

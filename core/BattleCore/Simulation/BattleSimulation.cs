@@ -141,7 +141,9 @@ public sealed class BattleSimulation
             return new BattleStepResult(state.Frame, frameAfter, input, frozen);
         }
 
-        // ── 第 1-2 阶段：逐角色「识别 → 状态机 → 运动」（双方独立，互不读取对方）──
+        // ── 第 1-2 阶段：逐角色「识别 → 状态机 → 运动」（只读取帧开始快照）──
+        Int128 separation = (Int128)state.Fighters[0].PositionX.RawValue - state.Fighters[1].PositionX.RawValue;
+        FixedPoint opponentDistance = FixedPoint.FromRaw((long)Int128.Min(Int128.Abs(separation), long.MaxValue));
         var candidates = new FighterCandidate[state.Fighters.Count];
         var frozenThisFrame = new bool[candidates.Length];
         for (int i = 0; i < candidates.Length; i++)
@@ -213,7 +215,8 @@ public sealed class BattleSimulation
                 fighter.HitConfirmFrame,
                 fighter.BlockConfirmFrame,
                 fighter.LandingWakeupFrames,
-                moveElapsed);
+                moveElapsed,
+                opponentDistance);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -1552,8 +1555,10 @@ public sealed class BattleSimulation
         }
 
         bool launches = attack.Launches;
+        int damage = defenderState.LogicState is FighterLogicState.Startup or FighterLogicState.Active
+            ? attack.CounterDamage ?? attack.Damage : attack.Damage;
         return new CombatSettlement(
-            Blocked: false, Damage: attack.Damage, StunFrames: attack.HitstunFrames,
+            Blocked: false, Damage: damage, StunFrames: attack.HitstunFrames,
             MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame,
             AirHit: defenderAirborne, Launch: launches,
             KnockbackX: launches ? FixedPoint.Zero : knockbackX,

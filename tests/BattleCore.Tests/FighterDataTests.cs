@@ -602,6 +602,188 @@ public class FighterDataTests
         Assert.Contains("groundHurtboxes", ExpectFailure(json).FieldPath);
     }
 
+    [Theory]
+    [InlineData(0, 128, false)]
+    [InlineData(0, 129, true)]
+    [InlineData(0, 130, true)]
+    [InlineData(1, 128, false)]
+    [InlineData(1, 129, true)]
+    [InlineData(1, 130, true)]
+    public void MoveMinimumStartDistance_GatesTheCommandFromEitherSeat(int seat, int twiceDistance, bool starts)
+    {
+        string json = Mutate(Json("Kai"), o => o["moves"]!.AsArray()
+            .Single(m => (string?)m!["moveId"] == "StandLightPunch")!["minimumStartDistance"] =
+                JsonNode.Parse("""{"numerator":4194305,"denominator":65536}"""));
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState initial = new(0, new[]
+        {
+            FighterState.Create(0, 1000, -30, Facing.Right),
+            FighterState.Create(1, 1000, 0, Facing.Left) with { PositionX = FixedPoint.FromFraction(twiceDistance, 2) - 30 },
+        }, BattleState.CreateDefault().StateVersion);
+
+        BattleStepResult result = simulation.Step(initial, F(0,
+            seat == 0 ? InputBits.LightPunch : InputBits.None,
+            seat == 1 ? InputBits.LightPunch : InputBits.None));
+
+        Assert.Equal(starts ? "StandLightPunch" : null, result.State.Fighter(seat).MoveId);
+        Assert.Equal(starts, result.Events.Any(e => e.Type == BattleEventType.MoveStarted));
+    }
+
+    [Fact]
+    public void MoveMinimumStartDistance_DoesNotOverflowBeforeStageClampsPositions()
+    {
+        var simulation = new BattleSimulation();
+        BattleState initial = new(0, new[]
+        {
+            FighterState.Create(0, 1000, 0, Facing.Right) with { PositionX = FixedPoint.MinValue },
+            FighterState.Create(1, 1000, 0, Facing.Left) with { PositionX = FixedPoint.MaxValue },
+        }, BattleState.CreateDefault().StateVersion);
+
+        BattleState next = simulation.Step(initial, F(0, InputBits.None)).State;
+
+        Assert.Equal(simulation.Stage.MinX, next.Fighter(0).PositionX);
+        Assert.Equal(simulation.Stage.MaxX, next.Fighter(1).PositionX);
+    }
+
+    [Fact]
+    public void MoveHurtboxTimeline_UsesAuthoritativeElapsedAndMirrors()
+    {
+        string json = Mutate(Json("Kai"), o => o["moves"]!.AsArray()
+            .Single(m => (string?)m!["moveId"] == "StandLightPunch")!["hurtboxTimeline"] =
+                JsonNode.Parse("""
+                [{"frames":3,"boxes":[{"minX":{"numerator":-4,"denominator":1},"minY":{"numerator":60,"denominator":1},
+                                       "maxX":{"numerator":11,"denominator":1},"maxY":{"numerator":90,"denominator":1}}]},
+                 {"frames":8,"boxes":[{"minX":{"numerator":-4,"denominator":1},"minY":{"numerator":60,"denominator":1},
+                                       "maxX":{"numerator":40,"denominator":1},"maxY":{"numerator":90,"denominator":1}}]}]
+                """));
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = BattleState.CreateDefault();
+        for (int tick = 0; tick <= 11; tick++)
+        {
+            InputBits input = tick == 0 ? InputBits.LightPunch : InputBits.None;
+            state = simulation.Step(state, F(tick, input, input)).State;
+            for (int seat = 0; seat < 2; seat++)
+            {
+                FighterState current = state.Fighter(seat);
+                FixedRect box = Assert.Single(FighterBoxes.GetHurtboxes(current, fighter));
+                if (tick == 11)
+                {
+                    Assert.Null(current.MoveId);
+                    Assert.Equal(FighterBoxes.GetHurtbox(current), box);
+                    continue;
+                }
+                int forward = tick < 3 ? 11 : 40;
+                Assert.Equal(seat == 0 ? new FixedRect(-124, -120 + forward, 60, 90)
+                    : new FixedRect(120 - forward, 124, 60, 90), box);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("[{\"frames\":0,\"boxes\":[]}]")]
+    [InlineData("[{\"frames\":1,\"boxes\":[]}]")]
+    public void MoveHurtboxTimeline_RejectsInvalidCoverage(string value)
+    {
+        string json = Mutate(Json("Kai"), o =>
+            o["moves"]![0]!["hurtboxTimeline"] = JsonNode.Parse(value));
+
+        Assert.Contains("moves[0]", ExpectFailure(json).FieldPath);
+    }
+
+    [Theory]
+    [InlineData(FighterLogicState.Standing, 30)]
+    [InlineData(FighterLogicState.Startup, 54)]
+    [InlineData(FighterLogicState.Active, 54)]
+    [InlineData(FighterLogicState.Recovery, 30)]
+    public void MeleeCounterDamage_DependsOnDefendersAttackPhase(FighterLogicState defendingPhase, int expected)
+    {
+        string json = Mutate(Json("Kai"), o => o["moves"]!.AsArray()
+            .Single(m => (string?)m!["moveId"] == "StandLightPunch")!["attacks"]![0]!["counterDamage"] = 54);
+        FighterDefinition attacker = FighterDataLoader.Load(json);
+        var defender = new FighterDefinition("Defender", new[]
+        {
+            new Commands.CommandDefinition("5A", Array.Empty<Commands.CommandDirection>(), InputBits.LightPunch),
+        }, new[] { new MoveDefinition("Probe", "5A", 4, 4, 4) });
+        var simulation = new BattleSimulation(new FightRoster(attacker, defender));
+        BattleState initial = ActiveState("StandLightPunch", 2, p1X: -30, p2X: 30);
+        FighterState target = initial.Fighter(1);
+        if (defendingPhase != FighterLogicState.Standing)
+            target = target with { LogicState = defendingPhase, MoveId = "Probe", PhaseRemainingFrames = 3, MoveStartedFrame = 0 };
+
+        BattleStepResult result = simulation.Step(new BattleState(0,
+            new[] { initial.Fighter(0), target }, initial.StateVersion), F(0, InputBits.None));
+
+        Assert.Equal(expected, Assert.Single(result.Events, e => e.Type == BattleEventType.Hit).Amount);
+        Assert.Equal(1000 - expected, result.State.Fighter(1).Health);
+    }
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(7)]
+    public void MultipleMovesReplayTradeWithoutInheritingAnAttackInstance(int heavyActive)
+    {
+        var commands = new[]
+        {
+            new Commands.CommandDefinition("5A", Array.Empty<Commands.CommandDirection>(), InputBits.LightPunch,
+                bufferLifetimeFrames: 0),
+            new Commands.CommandDefinition("5B", Array.Empty<Commands.CommandDirection>(), InputBits.HeavyPunch,
+                bufferLifetimeFrames: 0),
+        };
+        var hurt = new GroundHurtboxes(new[] { new FixedRect(-20, 19, 1, 88) },
+            new[] { new FixedRect(-20, 19, 1, 72) });
+        AttackDefinition Attack(int offset, int damage, int counter, int stun) => new(offset, 76, 27, 8,
+            damage: damage, counterDamage: counter, hitstunFrames: stun, hitstopByOutcome: new(new(11, 13), new(11, 11)));
+        var fighter = new FighterDefinition("TestNormals", commands, new[]
+        {
+            new MoveDefinition("Light", "5A", 3, 4, 5, MoveAllowedStates.Standing, new[] { Attack(31, 46, 54, 11) }),
+            new MoveDefinition("Heavy", "5B", 5, heavyActive, 25 - heavyActive, MoveAllowedStates.Standing,
+                new[] { Attack(40, 115, 154, 19) }, minimumStartDistance: 65),
+        }, groundHurtboxes: hurt);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState initial = new(0, new[]
+        {
+            FighterState.Create(0, 1000, -36, Facing.Right),
+            FighterState.Create(1, 1000, 36, Facing.Left),
+        }, BattleState.CreateDefault().StateVersion);
+
+        FrameInput[] inputs = Enumerable.Range(0, 66).Select(i => F(i,
+            i == 0 ? InputBits.HeavyPunch : i == 38 ? InputBits.LightPunch : InputBits.None,
+            i == 2 ? InputBits.LightPunch : InputBits.None)).ToArray();
+        BattleState current = initial;
+        var committed = new List<BattleStepResult>();
+        foreach (FrameInput input in inputs)
+        {
+            BattleStepResult step = simulation.Step(current, input);
+            committed.Add(step);
+            current = step.State;
+        }
+
+        Assert.Equal("Heavy", committed[0].State.Fighter(0).MoveId);
+        Assert.Equal("Light", committed[2].State.Fighter(1).MoveId);
+        Assert.Equal(new[] { 54, 154 }, committed[5].Events.Where(e => e.Type == BattleEventType.Hit).Select(e => e.Amount));
+        Assert.All(committed[5].State.Fighters, f =>
+        {
+            Assert.Null(f.MoveId);
+            Assert.Equal(0, f.MoveElapsedFrames);
+            Assert.Equal(13, f.HitstopRemainingFrames);
+        });
+        Assert.Equal("Light", committed[38].State.Fighter(0).MoveId);
+        Assert.Equal(46, Assert.Single(committed[41].Events, e => e.Type == BattleEventType.Hit).Amount);
+        Assert.Equal(800, current.Fighter(1).Health);
+
+        BattleState replay = committed[4].State;
+        for (int i = 5; i < inputs.Length; i++)
+        {
+            BattleStepResult step = simulation.Step(replay, inputs[i]);
+            Assert.Equal(committed[i].Events, step.Events);
+            Assert.Equal(committed[i].State.Fighters, step.State.Fighters);
+            replay = step.State;
+        }
+    }
+
     [Fact]
     public void MalformedJson_AndUnsupportedVersion_AreRejected()
     {

@@ -56,7 +56,10 @@ public static class FighterBoxes
     public static IReadOnlyList<FixedRect> GetHurtboxes(FighterState fighter, FighterDefinition definition,
         FighterLogicState? previousState = null)
     {
-        IReadOnlyList<FixedRect>? local = fighter.LogicState switch
+        IReadOnlyList<FixedRect>? local = fighter.IsInMove && fighter.MoveId is { } moveId
+            ? definition.FindMoveById(moveId)?.HurtboxesAt(fighter.MoveElapsedFrames)
+            : null;
+        local ??= fighter.LogicState switch
         {
             FighterLogicState.Standing => definition.GroundHurtboxes?.Standing,
             FighterLogicState.Crouching when previousState == FighterLogicState.Standing
