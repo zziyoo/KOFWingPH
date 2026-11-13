@@ -15,6 +15,14 @@ def load(path):
     return json.loads(path.read_bytes())
 
 
+def replay_rows(path):
+    return [
+        {key: value for key, value in row.items() if key not in ("tick", "matchTime")}
+        for row in map(json.loads, path.read_bytes().splitlines())
+        if row["frame"] != 0 or row["phase"] not in ("before-command", "after-command")
+    ]
+
+
 def merge(output, inputs):
     if output.exists():
         raise ValueError(f"output already exists: {output}")
@@ -30,6 +38,7 @@ def merge(output, inputs):
         if any(run[key] != metadata[key] for key in IDENTITY):
             raise ValueError(f"incompatible capture identity: {directory}")
         completed = []
+        repeated = []
         for name in run["executed_cases"]:
             case_path = directory / f"{name}-metadata.json"
             if not case_path.is_file():
@@ -42,7 +51,10 @@ def merge(output, inputs):
             ) or case["initial_distance"] != run["scenario_distance"][name]:
                 raise ValueError(f"invalid individual trace metadata: {case_path}")
             if name in combined:
-                raise ValueError(f"duplicate completed native case: {name}")
+                if replay_rows(expected_files[name][0]) != replay_rows(trace):
+                    raise ValueError(f"conflicting native replay for {name}")
+                repeated.append(name)
+                continue
             files = [trace, case_path]
             for suffix in ("stderr.txt", "stdout.txt"):
                 log = directory / f"{name}-{suffix}"
@@ -60,6 +72,7 @@ def merge(output, inputs):
         captures[directory.as_posix()] = {
             "metadata_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "completed_cases": completed,
+            "identical_replays": repeated,
         }
     if not combined:
         raise ValueError("no completed captures")

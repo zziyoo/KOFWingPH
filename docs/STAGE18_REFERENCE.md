@@ -40,4 +40,11 @@ Windows 本地原引擎采集使用独立目录，拒绝覆盖已有结果。全
 python tools/Stage18Reference/Check-Traces.py local-mugen/stage18-reference-new/results
 ```
 
-本轮的原引擎采集使用 `local-mugen/stage18-reference-canonical/results` 和 `local-mugen/stage18-reference-down/results`。原始根角色单独输入的先导运行保存在 `local-mugen/stage18-reference/results`，用于确认 Helper 输入通路对 F10/F11 的影响。
+本轮的原引擎采集使用 `local-mugen/stage18-reference-canonical/results` 和 `local-mugen/stage18-reference-down/results`。原始根角色单独输入的先导运行保存在 `local-mugen/stage18-reference/results`，用于确认 Helper 输入通路对 F10/F11 的影响。合并工具验证输入运行身份、逐项 SHA，重复场景会检查归一化轨迹一致，原始运行目录保留。
+
+```powershell
+python tools/Stage18Reference/Merge-Captures.py local-mugen/stage18-reference-canonical-new/results local-mugen/stage18-reference-v2/results local-mugen/stage18-reference-secondary/results local-mugen/stage18-reference-cross/results local-mugen/stage18-reference-final/results local-mugen/stage18-reference-critical/results
+python tools/Stage18Reference/Check-Traces.py local-mugen/stage18-reference-canonical/results local-mugen/stage18-reference-down/results
+```
+
+检查通过 76 份轨迹。标准清单 70 项，另有 2 次重复原场景的归一化轨迹一致。方向输入补测有 6 项。两组 `run-metadata.json` SHA-256 分别为 `f16a66f199b9d4dfcce58b4ccfdec016d5384c38d022258bee65fb961bffcde5` 和 `fbc811c46d4a910ac6b58168fcb45aba4f398e286f11a799ca9b3a5e2d537051`。对应执行文件 SHA-256 分别为 `9d58a588b806cff16e8b35dc0b7b0bfc65725e625108d11419250b7d757e5639` 和 `6738943ce583aca1d9f0dec5727e646e5257ec7ff9368ba1300c5f53613334c2`。

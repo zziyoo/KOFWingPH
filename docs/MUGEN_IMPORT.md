@@ -133,3 +133,20 @@ python -m unittest discover -s tools/MugenImporter/tests -p test_state_damage.py
 State 200、205、210 按反击状态选择基础值，再减去随机量。State 215 使用固定基础值，减去随机量后按当次接触的分母作整数除法。两条路径随后乘以脚本倍率并向下取整，应用实际攻防倍率后按最近整数结算生命变化。来源 JSON 记录每次原版 HitDef 对应的 `var(21)` 抽样、反击年龄、双段分母及命中伤害，并在同种子重跑时核对对应接触。同一站轻拳打断场景中，种子 1、1337、2026 的 `var(21)` 分别为 0、1、2，实际伤害为 61、54、46。格挡补测核对近身两段分母由 1 变为 2，近身和远身重拳的实扣均为 0。
 
 NewKOF 的预设使用每席独立的可重放伤害随机流，原引擎使用全局共享随机流。跨引擎比较以记录中的随机量和反击等条件为准。预设覆盖审查过的普通模式站立轻重拳以及模式 2 的动作选择，其他脚本控制器仍超出范围。
+
+## 阶段 18 站轻拳重进
+
+用冻结的阶段 17 角色和绑定文件生成独立预设。转换校验四个基线文件的 SHA-256、原始 ZIP 和 Manifest，再校验所提供运行的完整轨迹及逐场哈希。两个预设各生成角色、绑定和来源三个 JSON。使用新的输出目录。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+python -m mugen_importer.state_reentry local-mugen/terry.zip data/imported-characters/terry98/manifest.json --audit-only
+python -m mugen_importer.state_reentry local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
+  --base-profile-dir data/imported-characters/terry98-stage17-data `
+  --reference local-mugen/stage18-reference-canonical/results/run-metadata.json `
+  --reference local-mugen/stage18-reference-down/results/run-metadata.json `
+  --output-dir data/imported-characters/terry98-stage18-data
+python -m unittest discover -s tools/MugenImporter/tests -p test_state_reentry.py
+```
+
+State 200／205 均可在零基动作 tick 7–11 以站轻拳重进。近身分支优先，身体距离等于 16 时选 205，超过 16 选 200。原版按键 Helper 99999 支持年龄最多 2 个逻辑 tick 的 `x` 边沿，转入新状态时读取当时的下方向。新预设用既有命令缓冲和可选取消规则表达这些条件。动作 tick 12 的原版普通技入口属于自然恢复后的再起手。收招中下加轻拳会走原版 State 400，阶段 18 仅覆盖站轻拳入口。保留阶段 17 的伤害和 RNG 范围，空中轨迹仅核对距离与分支选择。
