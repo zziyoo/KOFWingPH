@@ -1,3 +1,5 @@
+using NewKOF.BattleCore.Numerics;
+
 namespace NewKOF.BattleCore.Combat;
 
 /// <summary>
@@ -22,6 +24,11 @@ public sealed class FightRoster
 
     /// <summary>P2 侧角色配置。</summary>
     public FighterDefinition Player2 { get; }
+
+    /// <summary>双方均提供身体宽度时，面对面刚好接触的中心距。</summary>
+    public FixedPoint? FacingGroundSeparation =>
+        Player1.GroundBodyWidths is { } first && Player2.GroundBodyWidths is { } second
+            ? first.Front + second.Front : null;
 
     /// <summary>按索引取角色配置（0 = P1，1 = P2）。</summary>
     public FighterDefinition Fighter(int index) => index switch

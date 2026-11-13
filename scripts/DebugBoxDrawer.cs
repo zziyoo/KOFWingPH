@@ -47,7 +47,8 @@ public partial class DebugBoxDrawer : Node2D
                 DrawRect(ToScreenRect(hurtbox), new Color(0.3f, 0.55f, 1f, 0.30f));
 
             // Pushbox：绿色轮廓（实体占位；权威推挤仍由内核 D73 负责）。
-            DrawRect(ToScreenRect(FighterBoxes.GetPushbox(fighter)), new Color(0.2f, 1f, 0.3f, 0.9f),
+            GroundBodyWidths? widths = _roster.FacingGroundSeparation.HasValue ? definition.GroundBodyWidths : null;
+            DrawRect(ToScreenRect(FighterBoxes.GetPushbox(fighter, widths)), new Color(0.2f, 1f, 0.3f, 0.9f),
                 filled: false, width: 2f);
 
             // Hitbox：红色半透明（仅 Active 生效帧存在）。

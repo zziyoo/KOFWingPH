@@ -61,11 +61,11 @@ public sealed class StageDefinition
     /// 默认演示场地：X ∈ [-640, 640]（与 1280 宽的 Godot 视口对齐）、地面 0、
     /// 最小中心间距 60（色块宽 60，相接即止）。
     /// </summary>
-    public static StageDefinition CreateDefault() => new(
+    public static StageDefinition CreateDefault(FixedPoint? minimumFighterSeparation = null) => new(
         minX: -640,
         maxX: 640,
         groundY: FixedPoint.Zero,
-        minimumFighterSeparation: FixedPoint.FromInt(60));
+        minimumFighterSeparation: minimumFighterSeparation ?? FixedPoint.FromInt(60));
 
     /// <summary>把 X 钳制到场地边界内（含边界；持续顶墙输入不会穿墙、不反弹）。</summary>
     public FixedPoint ClampX(FixedPoint x) =>

@@ -111,11 +111,20 @@ public static class FighterDataLoader
                 sourceName, "groundHurtboxes")
             : null;
 
+        GroundBodyWidths? groundBodyWidths = dto.GroundBodyWidths is { } widths
+            ? BuildBodyWidths(widths, sourceName, "groundBodyWidths") : null;
+        GroundBodyWidths? airBodyWidths = dto.AirBodyWidths is { } airWidths
+            ? BuildBodyWidths(airWidths, sourceName, "airBodyWidths") : null;
+
         FighterDefinition definition = Guard(
-            () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes),
+            () => new FighterDefinition(fighterId, commands, moves, movement, groundHurtboxes, groundBodyWidths, airBodyWidths),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }
+
+    private static GroundBodyWidths BuildBodyWidths(GroundBodyWidthsDto dto, string source, string path) =>
+        Guard(() => new GroundBodyWidths(Fraction(dto.Front, source, path + ".front"),
+            Fraction(dto.Back, source, path + ".back")), source, path);
 
     /// <summary>
     /// 从多份文档构建 <see cref="FighterCatalog"/>（角色目录 → 选人 → FightRoster 的入口）。
@@ -202,7 +211,9 @@ public static class FighterDataLoader
             minimumStartDistance: dto.MinimumStartDistance is { } distance
                 ? Fraction(distance, source, path + ".minimumStartDistance") : FixedPoint.Zero,
             hurtboxTimeline: dto.HurtboxTimeline is { } timeline
-                ? BuildArray(timeline, source, path + ".hurtboxTimeline", BuildMoveHurtboxSpan) : null),
+                ? BuildArray(timeline, source, path + ".hurtboxTimeline", BuildMoveHurtboxSpan) : null,
+            maximumStartBodyDistance: dto.MaximumStartBodyDistance is { } bodyDistance
+                ? Fraction(bodyDistance, source, path + ".maximumStartBodyDistance") : null),
         source, path);
 
     private static MoveHurtboxSpan BuildMoveHurtboxSpan(MoveHurtboxSpanDto dto, string source, string path) => Guard(
@@ -237,7 +248,9 @@ public static class FighterDataLoader
                     BuildHitstopPair(outcome.Block, source, path + ".hitstopByOutcome.block"))
                 : null,
             contactOnEdge: dto.ContactOnEdge,
-            counterDamage: dto.CounterDamage),
+            counterDamage: dto.CounterDamage,
+            contactGroup: dto.ContactGroup,
+            damageAfterPriorContact: dto.DamageAfterPriorContact),
         source, path);
 
     private static HitstopPair BuildHitstopPair(HitstopPairDto? dto, string source, string path)

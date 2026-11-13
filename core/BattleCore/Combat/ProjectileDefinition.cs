@@ -49,6 +49,8 @@ public sealed class ProjectileDefinition
             throw new ArgumentException("contactOnEdge 仅用于近身攻击。", nameof(hit));
         if (hit.CounterDamage is not null)
             throw new ArgumentException("counterDamage 仅用于近身攻击。", nameof(hit));
+        if (hit.ContactGroup != 0)
+            throw new ArgumentException("contactGroup 仅用于近身攻击。", nameof(hit));
         if (speedX <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(speedX), speedX,
                 "投掷物水平速度必须为正（方向由发射者朝向决定）。");

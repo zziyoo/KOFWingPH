@@ -62,7 +62,8 @@ public MoveDefinition(
     IReadOnlyList<ThrowDefinition>? throws = null,
     IReadOnlyList<ProjectileDefinition>? projectiles = null,
     FixedPoint minimumStartDistance = default,
-    IReadOnlyList<MoveHurtboxSpan>? hurtboxTimeline = null)
+    IReadOnlyList<MoveHurtboxSpan>? hurtboxTimeline = null,
+    FixedPoint? maximumStartBodyDistance = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -83,6 +84,8 @@ public MoveDefinition(
 
         if (minimumStartDistance < FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(minimumStartDistance), "最小发动距离不能为负。");
+        if (maximumStartBodyDistance is { } maximum && maximum < FixedPoint.Zero)
+            throw new ArgumentOutOfRangeException(nameof(maximumStartBodyDistance), "最大发动身体距离不能为负。");
 
         MoveId = moveId;
         CommandId = commandId;
@@ -91,6 +94,7 @@ public MoveDefinition(
         RecoveryFrames = recoveryFrames;
         AllowedFrom = allowedFrom;
         MinimumStartDistance = minimumStartDistance;
+        MaximumStartBodyDistance = maximumStartBodyDistance;
         if (hurtboxTimeline is not null)
         {
             MoveHurtboxSpan[] spans = hurtboxTimeline.ToArray();
@@ -104,6 +108,8 @@ public MoveDefinition(
         // （0 起始含两端）。LastActiveFrame == int.MaxValue 是「直到 Active 末帧」的
         // 显式哨兵（默认值）；显式给出的其他越界范围构造期失败，不进入模拟。
         var attackCopy = (attacks ?? Array.Empty<AttackDefinition>()).ToArray();
+        if (attackCopy.Any(attack => attack.ContactGroup != 0) && attackCopy.Any(attack => attack.ContactGroup == 0))
+            throw new ArgumentException("招式的判定框必须统一使用显式接触组或整招一次结算。", nameof(attacks));
         foreach (AttackDefinition attack in attackCopy)
         {
             if (attack.LastActiveFrame != int.MaxValue && attack.LastActiveFrame >= activeFrames)
@@ -171,6 +177,11 @@ public MoveDefinition(
     public MoveAllowedStates AllowedFrom { get; }
 
     public FixedPoint MinimumStartDistance { get; }
+    public FixedPoint? MaximumStartBodyDistance { get; }
+
+    internal bool CanStartAtDistance(FixedPoint centerDistance, FixedPoint bodyDistance) =>
+        centerDistance >= MinimumStartDistance &&
+        (MaximumStartBodyDistance is not { } maximum || bodyDistance <= maximum);
 
     public IReadOnlyList<MoveHurtboxSpan>? HurtboxTimeline { get; }
 

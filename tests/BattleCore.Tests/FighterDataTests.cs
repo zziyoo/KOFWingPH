@@ -646,6 +646,88 @@ public class FighterDataTests
         Assert.Equal(simulation.Stage.MaxX, next.Fighter(1).PositionX);
     }
 
+    [Theory]
+    [InlineData(0, false, 184, true)]
+    [InlineData(1, false, 185, false)]
+    [InlineData(1, true, 256, true)]
+    [InlineData(0, true, 257, false)]
+    public void CloseNormalSelection_UsesBothFacingBodyWidthsAtTheInputTick(
+        int seat, bool heavy, int quarters, bool near)
+    {
+        string json = Mutate(Json("Kai"), o =>
+        {
+            o["groundBodyWidths"] = JsonNode.Parse("""
+                {"front":{"numerator":15,"denominator":1},"back":{"numerator":16,"denominator":1}}
+                """);
+            string command = heavy ? "5B" : "5A";
+            JsonArray moves = o["moves"]!.AsArray();
+            JsonNode far = moves.Single(m => (string?)m!["commandId"] == "5A")!;
+            if (heavy)
+            {
+                o["commands"]!.AsArray().Add(JsonNode.Parse("""
+                    {"commandId":"5B","directions":[],"buttons":["HeavyPunch"],"maxSequenceFrames":1,
+                     "buttonToleranceFrames":0,"priority":0,"bufferLifetimeFrames":1,"chargeHoldFrames":0,
+                     "chargeReleaseToleranceFrames":0}
+                    """));
+                far["commandId"] = command;
+            }
+            JsonNode close = far.DeepClone();
+            close["moveId"] = "Close";
+            close["maximumStartBodyDistance"] = new JsonObject { ["numerator"] = heavy ? 34 : 16, ["denominator"] = 1 };
+            moves.Insert(0, close);
+        });
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var sim = new BattleSimulation(new FightRoster(fighter, fighter));
+        FixedPoint half = FixedPoint.FromFraction(quarters, 8);
+        BattleState initial = new(0, new[]
+        {
+            FighterState.Create(0, 1000, 0, Facing.Right) with { PositionX = -half },
+            FighterState.Create(1, 1000, 0, Facing.Left) with { PositionX = half },
+        }, BattleState.CreateDefault().StateVersion);
+        InputBits punch = heavy ? InputBits.HeavyPunch : InputBits.LightPunch;
+
+        BattleState started = sim.Step(initial, F(0, seat == 0 ? punch : InputBits.None,
+            seat == 1 ? punch : InputBits.None)).State;
+        Assert.Equal(near ? "Close" : "StandLightPunch", started.Fighter(seat).MoveId);
+        Assert.Equal(half, started.Fighter(1).PositionX);
+
+        BattleState during = sim.Step(started, F(1, seat == 1 ? InputBits.Left : InputBits.None,
+            seat == 0 ? InputBits.Right : InputBits.None)).State;
+        Assert.True(during.Fighter(1).PositionX - during.Fighter(0).PositionX > half + half);
+        Assert.Equal(started.Fighter(seat).MoveId, during.Fighter(seat).MoveId);
+        Assert.Equal(0, during.Fighter(seat).MoveStartedFrame);
+    }
+
+    [Theory]
+    [InlineData(Facing.Left, false, 0, true)]
+    [InlineData(Facing.Left, false, 1, false)]
+    [InlineData(Facing.Right, false, 1, true)]
+    [InlineData(Facing.Left, true, 0, false)]
+    public void CloseNormalSelection_UsesOpponentsFacingEdgeAndAirWidth(
+        Facing opponentFacing, bool airborne, int distanceBeyond46Raw, bool near)
+    {
+        var command = new Commands.CommandDefinition("5A", Array.Empty<Commands.CommandDirection>(), InputBits.LightPunch);
+        var attacker = new FighterDefinition("Attacker", new[] { command }, new[]
+        {
+            new MoveDefinition("Near", "5A", 3, 4, 5, maximumStartBodyDistance: 16),
+            new MoveDefinition("Far", "5A", 3, 4, 5),
+        }, groundBodyWidths: new GroundBodyWidths(15, 16));
+        var opponent = new FighterDefinition("Opponent", Array.Empty<Commands.CommandDefinition>(), Array.Empty<MoveDefinition>(),
+            groundBodyWidths: new GroundBodyWidths(15, 16), airBodyWidths: new GroundBodyWidths(11, 11));
+        var sim = new BattleSimulation(new FightRoster(attacker, opponent));
+        var target = FighterState.Create(1, 1000, 46, opponentFacing) with
+        {
+            PositionX = FixedPoint.FromRaw(FixedPoint.FromInt(46).RawValue + distanceBeyond46Raw),
+            LogicState = airborne ? FighterLogicState.Airborne : FighterLogicState.Standing,
+            PositionY = airborne ? 50 : 0,
+            JumpKind = airborne ? JumpKind.HighJump : JumpKind.None,
+        };
+        var initial = new BattleState(0, new[] { FighterState.Create(0, 1000, 0, Facing.Right), target },
+            BattleState.CreateDefault().StateVersion);
+
+        Assert.Equal(near ? "Near" : "Far", sim.Step(initial, F(0, InputBits.LightPunch)).State.Fighter(0).MoveId);
+    }
+
     [Fact]
     public void MoveHurtboxTimeline_UsesAuthoritativeElapsedAndMirrors()
     {
@@ -782,6 +864,49 @@ public class FighterDataTests
             Assert.Equal(committed[i].State.Fighters, step.State.Fighters);
             replay = step.State;
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GroupedMeleeContact_ResolvesOncePerPulseAndRestartsForNextMove(bool guard)
+    {
+        string json = Mutate(Json("Kai"), document =>
+        {
+            var move = document["moves"]!.AsArray()
+                .Single(value => (string?)value!["moveId"] == "StandLightPunch")!;
+            move["activeFrames"] = 3;
+            var attacks = move["attacks"]!.AsArray();
+            var first = attacks[0]!;
+            first["firstActiveFrame"] = 0;
+            first["lastActiveFrame"] = 1;
+            first["contactGroup"] = 1;
+            first["groundKnockback"]!["numerator"] = 0;
+            first["blockKnockback"]!["numerator"] = 0;
+            first["groundKnockbackFriction"]!["numerator"] = 0;
+            var second = first.DeepClone();
+            second["firstActiveFrame"] = 2;
+            second["lastActiveFrame"] = 2;
+            second["contactGroup"] = 2;
+            second["damageAfterPriorContact"] = 9;
+            attacks.Add(second);
+        });
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = ActiveState("StandLightPunch", 3, p1X: -30, p2X: 30);
+        var contacts = new List<BattleEvent>();
+        for (int i = 0; i < 60; i++)
+        {
+            InputBits p1 = i == 40 ? InputBits.LightPunch : InputBits.None;
+            InputBits p2 = guard && i is 0 or 43 ? InputBits.Right : InputBits.None;
+            BattleStepResult step = simulation.Step(state, F(i, p1, p2));
+            contacts.AddRange(step.Events.Where(e => e.Type is BattleEventType.Hit or BattleEventType.Blocked));
+            state = step.State;
+        }
+        Assert.Equal(4, contacts.Count);
+        Assert.All(contacts, contact => Assert.Equal(guard ? BattleEventType.Blocked : BattleEventType.Hit, contact.Type));
+        if (!guard)
+            Assert.Equal(new[] { 30, 9, 30, 9 }, contacts.Select(contact => contact.Amount));
     }
 
     [Fact]

@@ -249,10 +249,12 @@ public partial class BattleScene : Node2D
     }
 
     /// <summary>1v1 每回合初态（<c>--hp</c> / <c>--duel</c> 只影响命令行调试）。</summary>
-    private static BattleState CreateDuelInitialState(MatchRules rules)
+    private BattleState CreateDuelInitialState(MatchRules rules)
     {
         int health = CapByDebugHealth(1000);
-        FixedPoint distance = DuelDistanceFromArgs();
+        FixedPoint? facingSeparation = BuildDuelRoster(_match.State.P1FighterId!, _match.State.P2FighterId!)
+            .FacingGroundSeparation;
+        FixedPoint distance = DuelDistanceFromArgs(facingSeparation);
         IReadOnlyList<FighterState> fighters = new[]
         {
             FighterState.Create(0, 1000, 0, Facing.Right) with { Health = health, PositionX = -distance },
@@ -355,15 +357,19 @@ public partial class BattleScene : Node2D
         return 120;
     }
 
-    private static FixedPoint DuelDistanceFromArgs()
+    private static FixedPoint DuelDistanceFromArgs(FixedPoint? facingSeparation)
     {
         foreach (string arg in OS.GetCmdlineUserArgs())
         {
             if (arg.StartsWith("--duel=", StringComparison.Ordinal)
                 && decimal.TryParse(arg["--duel=".Length..], NumberStyles.AllowDecimalPoint,
                     CultureInfo.InvariantCulture, out decimal halfDistance)
-                && halfDistance is >= 30 and <= 600 && halfDistance * 4 % 1 == 0)
-                return FixedPoint.FromFraction((long)(halfDistance * 4), 4);
+                && halfDistance is >= 0 and <= 600 && halfDistance * 4 % 1 == 0)
+            {
+                FixedPoint distance = FixedPoint.FromFraction((long)(halfDistance * 4), 4);
+                if (distance + distance >= (facingSeparation ?? FixedPoint.FromInt(60)))
+                    return distance;
+            }
         }
         return InitialDistanceFromArgs();
     }

@@ -99,7 +99,8 @@ public static class FighterStateMachine
         int blockConfirmFrame = -1,
         int landingWakeupFrames = 0,
         int moveElapsedFrames = 0,
-        FixedPoint opponentDistance = default)
+        FixedPoint opponentDistance = default,
+        FixedPoint opponentBodyDistance = default)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -129,7 +130,8 @@ public static class FighterStateMachine
             // 因此停顿期间窗口不会悄悄过期（无 Hitstop 时它恒等于 frame − moveStartedFrame）。
             FighterActionTick? cancel = TryCancel(
                 state, move, definition, recognition, frame,
-                moveStartedFrame, moveElapsedFrames, hitConfirmFrame, blockConfirmFrame, opponentDistance);
+                moveStartedFrame, moveElapsedFrames, hitConfirmFrame, blockConfirmFrame,
+                opponentDistance, opponentBodyDistance);
             if (cancel is FighterActionTick cancelled)
                 return cancelled;
 
@@ -245,31 +247,31 @@ public static class FighterStateMachine
                 continue;
 
             CommandMatch match = result.Match;
-            MoveDefinition? move = definition.FindMove(match.CommandId);
-            if (move is null)
-                continue; // 该指令不触发本角色的任何招式 → 保留在缓冲中。
-
             MoveAllowedStates required = idle == FighterLogicState.Crouching
                 ? MoveAllowedStates.Crouching
                 : MoveAllowedStates.Standing;
-            if ((move.AllowedFrom & required) == 0)
-                continue; // 当前待机状态不允许发动 → 保留，恢复可行动后再消费（B5）。
-            if (opponentDistance < move.MinimumStartDistance)
+            bool eligiblePosture = false;
+            foreach (MoveDefinition move in definition.FindMoves(match.CommandId))
             {
-                // 近身输入不能留在缓冲中，等双方分开时再发动远身招式。
-                recognition = recognition.WithResultConsumed(match.RecognizedFrame);
-                continue;
+                if ((move.AllowedFrom & required) == 0)
+                    continue;
+                eligiblePosture = true;
+                if (!move.CanStartAtDistance(opponentDistance, opponentBodyDistance))
+                    continue;
+
+                return new FighterActionTick(
+                    FighterLogicState.Startup,
+                    move.MoveId,
+                    move.StartupFrames,
+                    recognition.WithResultConsumed(match.RecognizedFrame),
+                    match,
+                    MoveStartedFrame: frame,
+                    MoveElapsedFrames: 0);
             }
 
-            // 消费一次（不可变替换），进入 Startup；攻击实例身份 = 当帧发动帧（D81）。
-            return new FighterActionTick(
-                FighterLogicState.Startup,
-                move.MoveId,
-                move.StartupFrames,
-                recognition.WithResultConsumed(match.RecognizedFrame),
-                match,
-                MoveStartedFrame: frame,
-                MoveElapsedFrames: 0);
+            // 距离未通过的输入不能等到距离变化时自动发动；姿态未通过仍沿用缓冲规则。
+            if (eligiblePosture)
+                recognition = recognition.WithResultConsumed(match.RecognizedFrame);
         }
 
         return new FighterActionTick(idle, MoveId: null, 0, recognition, ConsumedMatch: null);
@@ -329,7 +331,8 @@ public static class FighterStateMachine
         int moveElapsedFrames,
         int hitConfirmFrame,
         int blockConfirmFrame,
-        FixedPoint opponentDistance)
+        FixedPoint opponentDistance,
+        FixedPoint opponentBodyDistance)
     {
         if (move.Cancels.Count == 0 || moveStartedFrame < 0)
             return null;
@@ -347,7 +350,7 @@ public static class FighterStateMachine
                 continue;
 
             MoveDefinition? target = definition.FindMoveById(cancel.TargetMoveId);
-            if (target is null || opponentDistance < target.MinimumStartDistance)
+            if (target is null || !target.CanStartAtDistance(opponentDistance, opponentBodyDistance))
                 continue;
 
             foreach (BufferedResult result in recognition.Buffer)

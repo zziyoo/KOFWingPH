@@ -59,6 +59,7 @@ public sealed class BattleSimulation
 {
     private readonly FightRoster _roster;
     private readonly StageDefinition _stage;
+    private readonly bool _useFighterSeparation;
 
     /// <param name="roster">双方角色配置；null 表示空配置（双方无指令无招式，
     /// 等价于阶段 01–03 的默认行为——识别状态仍随帧推进，只是没有可匹配指令）。</param>
@@ -67,11 +68,31 @@ public sealed class BattleSimulation
     public BattleSimulation(FightRoster? roster = null, StageDefinition? stage = null)
     {
         _roster = roster ?? FightRoster.CreateEmpty();
-        _stage = stage ?? StageDefinition.CreateDefault();
+        _useFighterSeparation = stage is null && _roster.FacingGroundSeparation.HasValue;
+        _stage = stage ?? StageDefinition.CreateDefault(_roster.FacingGroundSeparation);
     }
 
     /// <summary>对局双方的角色配置。</summary>
     public FightRoster Roster => _roster;
+
+    private static FixedPoint OpponentBodyDistance(FighterState fighter, FighterState opponent,
+        FighterDefinition definition, FighterDefinition opponentDefinition)
+    {
+        if (definition.GroundBodyWidths is not { } own)
+            return FixedPoint.Zero;
+
+        int facing = fighter.Facing == Facing.Right ? 1 : -1;
+        int opponentFacing = opponent.Facing == Facing.Right ? 1 : -1;
+        Int128 distance = ((Int128)opponent.PositionX.RawValue - fighter.PositionX.RawValue) * facing;
+        GroundBodyWidths? other = opponent.LogicState.IsAirborneLike()
+            ? opponentDefinition.AirBodyWidths ?? opponentDefinition.GroundBodyWidths
+            : opponentDefinition.GroundBodyWidths;
+        bool opponentFront = (distance >= 0) == (facing != opponentFacing);
+        FixedPoint width = (opponentFront ? other?.Front : other?.Back) ?? FighterBoxes.PushboxHalfWidth;
+        Int128 opponentEdge = (Int128)width.RawValue * facing * opponentFacing * (opponentFront ? 1 : -1);
+        Int128 bodyDistance = distance - own.Front.RawValue + opponentEdge;
+        return FixedPoint.FromRaw((long)Int128.Clamp(bodyDistance, long.MinValue, long.MaxValue));
+    }
 
     /// <summary>本模拟使用的场地配置。</summary>
     public StageDefinition Stage => _stage;
@@ -216,7 +237,8 @@ public sealed class BattleSimulation
                 fighter.BlockConfirmFrame,
                 fighter.LandingWakeupFrames,
                 moveElapsed,
-                opponentDistance);
+                opponentDistance,
+                OpponentBodyDistance(fighter, state.Fighters[1 - i], definition, _roster.Fighter(1 - i)));
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -643,6 +665,7 @@ public sealed class BattleSimulation
                     KnockbackFriction = defenderState.LogicState.IsAirborneLike() ? FixedPoint.Zero : settled.KnockbackFriction,
                     // 被防御亦视为该攻击实例已结算（D81）：记录发动帧，抑制后续帧重复结算。
                     LastHitAttackStartFrame = settled.AttackStartFrame,
+                    LastHitContactGroups = settled.ContactGroups,
                     // 被击者自身的动作被打断：攻击实例身份一并清除（防御者通常无动作，
                     // 但同帧互中时防御不成立，此处理覆盖所有路径）。
                     MoveStartedFrame = -1,
@@ -682,6 +705,7 @@ public sealed class BattleSimulation
                     LandingKnockdownFrames = settled.KnockdownFrames,
                     LandingWakeupFrames = settled.WakeupFrames,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
+                    LastHitContactGroups = settled.ContactGroups,
                     MoveStartedFrame = -1,
                     MoveElapsedFrames = 0, // 招式中断：动作时间随实例一并清除（D96）
                     HitConfirmFrame = -1,
@@ -706,6 +730,7 @@ public sealed class BattleSimulation
                     LandingKnockdownFrames = 0,
                     LandingWakeupFrames = 0,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
+                    LastHitContactGroups = settled.ContactGroups,
                     MoveStartedFrame = -1,
                     MoveElapsedFrames = 0, // 招式中断：动作时间随实例一并清除（D96）
                     HitConfirmFrame = -1,
@@ -727,6 +752,7 @@ public sealed class BattleSimulation
                     VelocityY = FixedPoint.Zero,
                     KnockbackFriction = settled.KnockbackFriction,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
+                    LastHitContactGroups = settled.ContactGroups,
                     MoveStartedFrame = -1, // 招式中断（D78）：实例身份随 MoveId 一并清除。
                     MoveElapsedFrames = 0, // 动作时间随实例一并清除（D96）。
                     // 确认帧属于被中断的旧实例，必须一并清空（D91 不变式）。
@@ -1492,43 +1518,35 @@ public sealed class BattleSimulation
         IReadOnlyList<AttackContact> contacts,
         bool backHeld)
     {
-        FighterState defenderState = fighters[defender];
-        bool defenderAirborne = defenderState.LogicState.IsAirborneLike();
-
-        // 取针对该被击者的第一条接触（Detect 顺序确定：攻击者 0→1、攻击序号升序）。
-        AttackContact contact = default;
-        bool found = false;
-        for (int i = 0; i < contacts.Count; i++)
-        {
-            if (contacts[i].TargetId == defender)
-            {
-                contact = contacts[i];
-                found = true;
-                break;
-            }
-        }
-
-        if (!found)
-            return null;
-
-        FighterDefinition attackerDefinition = _roster.Fighter(1 - defender);
-        MoveDefinition? move = attackerDefinition.FindMoveById(contact.MoveId);
-        if (move is null || contact.AttackIndex >= move.Attacks.Count)
-            return null; // 配置与状态不匹配：防御性跳过（正常路径不可达）。
-
-        AttackDefinition attack = move.Attacks[contact.AttackIndex];
-
-        // 攻击实例去重（D81）：同一「攻击者 + 发动帧」实例对同一目标只结算一次
-        // （被防御也算已结算）。新一次独立发动（新的发动帧）可再次命中；
-        // 被中断的攻击不再产生攻击框，也不会复活。
         FighterState attackerState = fighters[1 - defender];
-        if (attackerState.MoveStartedFrame < 0 ||
-            attackerState.MoveStartedFrame == defenderState.LastHitAttackStartFrame)
+        if (attackerState.MoveStartedFrame < 0 || attackerState.MoveId is not { } moveId ||
+            _roster.Fighter(1 - defender).FindMoveById(moveId) is not { } move)
             return null;
 
+        FighterState defenderState = fighters[defender];
+        bool sameInstance = attackerState.MoveStartedFrame == defenderState.LastHitAttackStartFrame;
+        uint priorGroups = sameInstance ? defenderState.LastHitContactGroups : 0;
+        // Detect 的顺序决定本帧优先级。同组已结算时仍检查后续独立组。
+        foreach (AttackContact contact in contacts)
+        {
+            if (contact.TargetId != defender || contact.MoveId != moveId || contact.AttackIndex >= move.Attacks.Count)
+                continue;
+            AttackDefinition attack = move.Attacks[contact.AttackIndex];
+            uint group = attack.ContactGroup == 0 ? 0 : 1u << (attack.ContactGroup - 1);
+            if (sameInstance && (group == 0 || (priorGroups & group) != 0))
+                continue;
+            return ResolveAttack(attack, moveId, attackerState, defenderState, backHeld, priorGroups, group);
+        }
+        return null;
+    }
+
+    private static CombatSettlement ResolveAttack(AttackDefinition attack, string moveId,
+        FighterState attackerState, FighterState defenderState, bool backHeld, uint priorGroups, uint group)
+    {
         // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
         // D131：正常 Airborne 可防 High/Mid，AirHitstun 与动作状态没有防御资格。
-        bool guarding = CanGuard(defenderState.LogicState, backHeld, attack.Height);
+        bool guarding = CanGuard(defenderState.LogicState, backHeld, attack.Height) ||
+            (priorGroups != 0 && defenderState.LogicState == FighterLogicState.Blockstun && attack.Height == AttackHeight.Mid);
 
         // 击退/击飞方向（D92/D93）：按<b>命中时双方的权威相对位置</b>决定「远离攻击者」；
         // 位置完全相同时退化为攻击者的朝向（确定性平局规则）。
@@ -1546,7 +1564,8 @@ public sealed class BattleSimulation
         {
             return new CombatSettlement(
                 Blocked: true, Damage: 0, StunFrames: attack.BlockstunFrames,
-                MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame,
+                MoveId: moveId, AttackStartFrame: attackerState.MoveStartedFrame,
+                ContactGroups: priorGroups | group,
                 AirHit: false, Launch: false,
                 KnockbackX: knockbackX, KnockbackFriction: friction,
                 LaunchVelocityX: FixedPoint.Zero, LaunchVelocityY: FixedPoint.Zero,
@@ -1555,12 +1574,14 @@ public sealed class BattleSimulation
         }
 
         bool launches = attack.Launches;
-        int damage = defenderState.LogicState is FighterLogicState.Startup or FighterLogicState.Active
-            ? attack.CounterDamage ?? attack.Damage : attack.Damage;
+        int damage = priorGroups != 0 && attack.DamageAfterPriorContact is { } afterContact ? afterContact
+            : defenderState.LogicState is FighterLogicState.Startup or FighterLogicState.Active
+                ? attack.CounterDamage ?? attack.Damage : attack.Damage;
         return new CombatSettlement(
             Blocked: false, Damage: damage, StunFrames: attack.HitstunFrames,
-            MoveId: contact.MoveId, AttackStartFrame: attackerState.MoveStartedFrame,
-            AirHit: defenderAirborne, Launch: launches,
+            MoveId: moveId, AttackStartFrame: attackerState.MoveStartedFrame,
+            ContactGroups: priorGroups | group,
+            AirHit: defenderState.LogicState.IsAirborneLike(), Launch: launches,
             KnockbackX: launches ? FixedPoint.Zero : knockbackX,
             KnockbackFriction: launches ? FixedPoint.Zero : friction,
             LaunchVelocityX: launches ? (direction > 0 ? attack.LaunchVelocityX : -attack.LaunchVelocityX)
@@ -1848,6 +1869,7 @@ public sealed class BattleSimulation
         int StunFrames,
         string MoveId,
         int AttackStartFrame,
+        uint ContactGroups,
         bool AirHit,
         bool Launch,
         FixedPoint KnockbackX,
@@ -1907,7 +1929,6 @@ public sealed class BattleSimulation
         if (candidates[0].LogicState.IsAirborneLike() || candidates[1].LogicState.IsAirborneLike())
             return;
 
-        FixedPoint separation = _stage.MinimumFighterSeparation;
         FixedPoint p1Cand = candidates[0].PositionX;
         FixedPoint p2Cand = candidates[1].PositionX;
 
@@ -1919,6 +1940,14 @@ public sealed class BattleSimulation
 
         int lo = p1IsLeft ? 0 : 1; // 本帧结束时必须在左侧的角色
         int hi = 1 - lo;
+        FixedPoint separation = _stage.MinimumFighterSeparation;
+        if (_useFighterSeparation)
+        {
+            GroundBodyWidths left = _roster.Fighter(lo).GroundBodyWidths!;
+            GroundBodyWidths right = _roster.Fighter(hi).GroundBodyWidths!;
+            separation = (candidates[lo].Facing == Facing.Right ? left.Front : left.Back)
+                + (candidates[hi].Facing == Facing.Left ? right.Front : right.Back);
+        }
         FixedPoint loCand = candidates[lo].PositionX;
         FixedPoint hiCand = candidates[hi].PositionX;
         FixedPoint gap = hiCand - loCand;

@@ -86,10 +86,10 @@ public static class FighterBoxes
     /// <summary>
     /// 该角色当帧的 <b>Pushbox</b>（仅显示/调试查询；权威推挤仍由 D73 求解器负责）。
     /// </summary>
-    public static FixedRect GetPushbox(FighterState fighter) =>
+    public static FixedRect GetPushbox(FighterState fighter, GroundBodyWidths? widths = null) =>
         new(
-            fighter.PositionX - PushboxHalfWidth,
-            fighter.PositionX + PushboxHalfWidth,
+            fighter.PositionX - (fighter.Facing == Facing.Right ? widths?.Back : widths?.Front).GetValueOrDefault(PushboxHalfWidth),
+            fighter.PositionX + (fighter.Facing == Facing.Right ? widths?.Front : widths?.Back).GetValueOrDefault(PushboxHalfWidth),
             fighter.PositionY,
             fighter.PositionY + StandHeight);
 

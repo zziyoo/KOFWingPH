@@ -3,6 +3,22 @@ using NewKOF.BattleCore.Numerics;
 
 namespace NewKOF.BattleCore.Combat;
 
+/// <summary>地面角色原点到朝向两侧身体边缘的距离。</summary>
+public sealed class GroundBodyWidths
+{
+    public GroundBodyWidths(FixedPoint front, FixedPoint back)
+    {
+        FixedPoint max = FixedPoint.FromInt(640);
+        if (front <= FixedPoint.Zero || front > max || back <= FixedPoint.Zero || back > max)
+            throw new ArgumentOutOfRangeException(nameof(front), "地面身体宽度必须在 (0, 640] 内。");
+        Front = front;
+        Back = back;
+    }
+
+    public FixedPoint Front { get; }
+    public FixedPoint Back { get; }
+}
+
 /// <summary>站立和蹲伏的局部受击矩形，X 沿面向，Y 向上。</summary>
 public sealed class GroundHurtboxes
 {
@@ -65,7 +81,9 @@ public sealed class FighterDefinition
         IReadOnlyList<CommandDefinition> commands,
         IReadOnlyList<MoveDefinition> moves,
         MovementDefinition? movement = null,
-        GroundHurtboxes? groundHurtboxes = null)
+        GroundHurtboxes? groundHurtboxes = null,
+        GroundBodyWidths? groundBodyWidths = null,
+        GroundBodyWidths? airBodyWidths = null)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -122,18 +140,26 @@ public sealed class FighterDefinition
         // 运动配置（D64）：null → 默认配置；非 null 直接持有（MovementDefinition 自身构造期不可变）。
         Movement = movement ?? MovementDefinition.CreateDefault();
         GroundHurtboxes = groundHurtboxes;
+        GroundBodyWidths = groundBodyWidths;
+        AirBodyWidths = airBodyWidths;
+        if (airBodyWidths is not null && groundBodyWidths is null)
+            throw new ArgumentException("airBodyWidths 需要配置 groundBodyWidths。", nameof(airBodyWidths));
 
-        // 指令 ID → 招式 的只读查找表（构造期建好，识别外不扫描）。
-        var byCommand = new Dictionary<string, MoveDefinition>(StringComparer.Ordinal);
-        var byId = new Dictionary<string, MoveDefinition>(StringComparer.Ordinal);
-        foreach (MoveDefinition move in moveCopy)
+        _movesByCommandId = new(StringComparer.Ordinal);
+        foreach (var group in moveCopy.GroupBy(move => move.CommandId, StringComparer.Ordinal))
         {
-            byCommand.Add(move.CommandId, move);
-            byId.Add(move.MoveId, move);
+            MoveDefinition[] variants = group.ToArray();
+            if (variants.Any(move => move.MaximumStartBodyDistance.HasValue) && groundBodyWidths is null)
+                throw new ArgumentException($"指令 {group.Key} 的身体距离条件需要 groundBodyWidths。", nameof(moves));
+            for (int i = 0; i < variants.Length - 1; i++)
+            {
+                if (variants[i].MaximumStartBodyDistance is not { } threshold ||
+                    variants[i + 1].MaximumStartBodyDistance is { } next && threshold >= next)
+                    throw new ArgumentException($"指令 {group.Key} 的距离变体必须按递增阈值排列。", nameof(moves));
+            }
+            _movesByCommandId.Add(group.Key, Array.AsReadOnly(variants));
         }
-
-        _moveByCommandId = byCommand;
-        _moveById = byId;
+        _moveById = moveCopy.ToDictionary(move => move.MoveId, StringComparer.Ordinal);
     }
 
     /// <summary>角色唯一标识。</summary>
@@ -149,13 +175,18 @@ public sealed class FighterDefinition
     public MovementDefinition Movement { get; }
 
     public GroundHurtboxes? GroundHurtboxes { get; }
+    public GroundBodyWidths? GroundBodyWidths { get; }
+    public GroundBodyWidths? AirBodyWidths { get; }
 
-    private readonly Dictionary<string, MoveDefinition> _moveByCommandId;
+    private readonly Dictionary<string, IReadOnlyList<MoveDefinition>> _movesByCommandId;
     private readonly Dictionary<string, MoveDefinition> _moveById;
 
-    /// <summary>按指令 ID 查招式；该指令不触发任何招式时返回 null（指令保留在缓冲中）。</summary>
-    public MoveDefinition? FindMove(string commandId) =>
-        _moveByCommandId.TryGetValue(commandId, out MoveDefinition? move) ? move : null;
+    /// <summary>按指令 ID 查第一个配置的招式。</summary>
+    public MoveDefinition? FindMove(string commandId) => FindMoves(commandId).FirstOrDefault();
+
+    /// <summary>按配置优先级返回该指令的招式候选。</summary>
+    public IReadOnlyList<MoveDefinition> FindMoves(string commandId) =>
+        _movesByCommandId.GetValueOrDefault(commandId) ?? Array.Empty<MoveDefinition>();
 
     /// <summary>按招式 ID 查招式；未配置时抛出异常由调用方处理（状态携带的 MoveId 必须已配置）。</summary>
     public MoveDefinition? FindMoveById(string moveId) =>

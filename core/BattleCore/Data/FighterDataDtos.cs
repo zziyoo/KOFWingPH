@@ -35,6 +35,21 @@ public sealed class FighterDocumentDto
 
     [JsonPropertyName("groundHurtboxes")]
     public GroundHurtboxesDto? GroundHurtboxes { get; set; }
+
+    [JsonPropertyName("groundBodyWidths")]
+    public GroundBodyWidthsDto? GroundBodyWidths { get; set; }
+
+    [JsonPropertyName("airBodyWidths")]
+    public GroundBodyWidthsDto? AirBodyWidths { get; set; }
+}
+
+public sealed class GroundBodyWidthsDto
+{
+    [JsonPropertyName("front")]
+    public FractionDto? Front { get; set; }
+
+    [JsonPropertyName("back")]
+    public FractionDto? Back { get; set; }
 }
 
 public sealed class GroundHurtboxesDto
@@ -169,6 +184,9 @@ public sealed class MoveDto
     [JsonPropertyName("minimumStartDistance")]
     public FractionDto? MinimumStartDistance { get; set; }
 
+    [JsonPropertyName("maximumStartBodyDistance")]
+    public FractionDto? MaximumStartBodyDistance { get; set; }
+
     [JsonPropertyName("hurtboxTimeline")]
     public List<MoveHurtboxSpanDto>? HurtboxTimeline { get; set; }
 
@@ -259,6 +277,12 @@ public sealed class AttackDto
 
     [JsonPropertyName("counterDamage")]
     public int? CounterDamage { get; set; }
+
+    [JsonPropertyName("contactGroup")]
+    public int ContactGroup { get; set; }
+
+    [JsonPropertyName("damageAfterPriorContact")]
+    public int? DamageAfterPriorContact { get; set; }
 }
 
 public sealed class HitstopByOutcomeDto

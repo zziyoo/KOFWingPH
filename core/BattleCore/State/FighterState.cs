@@ -67,7 +67,8 @@ public readonly record struct FighterState(
     int MoveElapsedFrames = 0,
     int HitstopRemainingFrames = 0,
     int LastThrowStartFrame = -1,
-    int ProjectileSpawnMask = 0)
+    int ProjectileSpawnMask = 0,
+    uint LastHitContactGroups = 0)
 {
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
         new(id, maxHealth, maxHealth, positionX, 0, facing);
