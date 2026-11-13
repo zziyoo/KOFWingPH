@@ -1632,3 +1632,8 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - 默认实验配置 `TerryPowerWaveRoutes` 保留 200→1000，并从原始 State 205 AIR 和 State −2 生成独立的 205→1000 窗口。阶段 19 配置哈希不变。模式 2 普通技对照仍走原有重进。取证与实际门禁见[阶段 20 验收](STAGE20_ACCEPTANCE.md)。
 - 阶段 20 正式 PASS。固定帧用于源轨迹和图像的完整对照，实时样本用稀疏审计保留 30 FPS 及 60／58 FPS 的实际取证。证据、双覆盖复跑及历史门禁已归档。下一步可先取证默认模式 215→1000，重点核对跨两段攻击的许可和旧接触组清理。 [复现命令](../tools/Stage20Validation/README.md)
+
+### 阶段 21 近重拳双段取消
+
+- `TerryPowerWaveHeavyRoutes` 由阶段 20 冻结数据、原版 Action 215、State −2 和 38 场 IKEMEN GO 参考生成。取消使用现有窗口和 CMD 优先级，动作实例、双接触组、角色 RNG、暂停和 Helper 生命周期分别核对。 [原版取证](STAGE21_REFERENCE.md) · [验收与复现](STAGE21_ACCEPTANCE.md)
+- 阶段 21 正式 PASS。默认预设修正晚段地面受击框、退出保护、续防与守势进入惯性。固定／实时证据、同种子重放和 13C–20 冻结门禁结果已归档。下一候选只静态审查了蹲轻拳 400→1000。 [验收矩阵](STAGE21_ACCEPTANCE.md) · [复现命令](../tools/Stage21Validation/README.md)

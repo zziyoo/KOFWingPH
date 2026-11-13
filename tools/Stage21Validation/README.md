@@ -35,11 +35,16 @@ py tools/Stage21Validation/heavy_wave_duel.py @live --output "$run/real60" --fps
 
 ```powershell
 py tools/Stage21Validation/stage14_15_authority.py --godot $godot --output "$run/stage14-15"
+py tools/Stage15Validation/stage14_authority.py --baseline local-mugen/stage14-validation/fixed-v3 --candidate "$run/stage14-15/compact-14"
+py tools/Stage16Validation/stage15_authority.py --baseline local-mugen/stage15-validation/fixed-v3 --candidate "$run/stage14-15/compact-15"
+py tools/Stage16Validation/stage15_authority.py --baseline local-mugen/stage15-validation/fractional --candidate "$run/stage14-15/compact-15-fractional" --scene far-64.5
 py tools/Stage20Validation/stage19_authority.py --godot $godot --output "$run/stage19"
 py tools/Stage21Validation/stage20_authority.py --godot $godot --output "$run/stage20"
 ```
 
 阶段 21 的站防位置误差按 Q16 叠加控制为接触时 0.005、连续两次击退恢复时 0.01。接触帧、攻守结果、削血、停顿和恢复控制时机仍逐项检查。空挥起始样本的 Wave 在两边同一逻辑帧命中，原版目标此时距地 4.640022，Godot 已落地。中后段空挥样本的 Wave 接触在地面。该跳轨差异只用于空挥对照。
+
+固定帧通过 47 场、94 次对局，共 6,062 个逻辑帧、56,315 条视觉覆盖开关一致的权威记录、1,886 张实际图像。原版对应矩阵含 32 个默认场景、2 个模式 2、2 个混合及镜像场景、2 个松键场景。另有 3 个既有轻拳路径、6 个重进与拒绝输入对照。主批次的 `whiff-17` 在 C 盘空间告急时退出，保持该次原始日志，单场在 `D:/NewKOF-stage21-evidence-vulkan-final-20261113/whiff-17` 重跑并通过，计入最终矩阵。预跑日志及画面完整保存于 `D:/NewKOF-stage21-evidence-vulkan-preliminary-20261113`。
 
 两个实时回放在 320×180 下使用稀疏审计，关闭逐精灵打印，每场读回三张图像。方向边沿按真实渲染帧注入并保留顺序，间隔压缩以便在 11 tick HitPause 中完成输入。以同次权威日志定位图像，实时渲染状态可能跳过或重复，验收比较所采到的提交版本、实体身份及寿命。复现时优先独占 GPU，以日志中的 `Project FPS` 和调度积压警告为准。
 
