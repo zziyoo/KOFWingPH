@@ -125,8 +125,11 @@ python -m mugen_importer.state_damage local-mugen/terry.zip data/imported-charac
   --reference local-mugen/stage17-reference-seed-2026/results/run-metadata.json `
   --reference local-mugen/stage17-reference-replay/results/run-metadata.json `
   --reference local-mugen/stage17-reference-carry-edge/results/run-metadata.json `
+  --reference local-mugen/stage17-reference-guard-v2/results/run-metadata.json `
   --output-dir data/imported-characters/terry98-stage17-data
 python -m unittest discover -s tools/MugenImporter/tests -p test_state_damage.py
 ```
 
-State 200、205、210 按反击状态选择基础值。State 215 先从基础值减去随机量，再按当次接触的分母作整数除法。两条路径随后乘以脚本倍率并向下取整，再由实际攻防倍率结算生命变化。来源 JSON 记录每次原版 HitDef 对应的 `var(21)` 抽样、反击年龄、双段分母及命中伤害，并在同种子重跑时核对对应接触。NewKOF 的预设使用每席独立的可重放伤害随机流，原引擎使用全局共享随机流。跨引擎比较以记录中的随机量和反击等条件为准。预设覆盖审查过的普通模式站立轻重拳以及模式 2 的动作选择，其他脚本控制器仍超出范围。
+State 200、205、210 按反击状态选择基础值，再减去随机量。State 215 使用固定基础值，减去随机量后按当次接触的分母作整数除法。两条路径随后乘以脚本倍率并向下取整，应用实际攻防倍率后按最近整数结算生命变化。来源 JSON 记录每次原版 HitDef 对应的 `var(21)` 抽样、反击年龄、双段分母及命中伤害，并在同种子重跑时核对对应接触。同一站轻拳打断场景中，种子 1、1337、2026 的 `var(21)` 分别为 0、1、2，实际伤害为 61、54、46。格挡补测核对近身两段分母由 1 变为 2，近身和远身重拳的实扣均为 0。
+
+NewKOF 的预设使用每席独立的可重放伤害随机流，原引擎使用全局共享随机流。跨引擎比较以记录中的随机量和反击等条件为准。预设覆盖审查过的普通模式站立轻重拳以及模式 2 的动作选择，其他脚本控制器仍超出范围。

@@ -20,6 +20,15 @@ def f32(value):
     return struct.unpack("<f", struct.pack("<f", value))[0]
 
 
+def replay_snapshots(rows):
+    # var21 inherited from the unseeded intro is replaced by State -2 on F0.
+    return [
+        {key: value for key, value in row.items() if key not in ("tick", "matchTime")}
+        for row in rows
+        if row["frame"] != 0 or row["phase"] not in ("before-command", "after-command")
+    ]
+
+
 def verify_trace(directory, name, metadata):
     file = directory / f"{name}.jsonl"
     rows = json_rows(file)
@@ -121,7 +130,7 @@ def verify_trace(directory, name, metadata):
         ], (name, contacts)
     print(f"{name:35} seed={metadata['rng_seed']:4} draws={len(draws):3} "
           f"contact={[(tick, owner, state, age, bucket, divisor, raw, damage) for tick, owner, state, age, bucket, divisor, raw, damage, _, _ in contacts]}")
-    return state_rows, draws, age_changes, contacts
+    return replay_snapshots(state_rows), draws, age_changes, contacts
 
 
 def main():
@@ -144,9 +153,8 @@ def main():
         for name in metadata["executed_cases"]:
             actual = verify_trace(options.replay, name, metadata)
             expected = results[(metadata["rng_seed"], name)]
-            # Native startup intro counters may vary. The fixture reseeds at RoundState 2.
-            assert actual[1:] == expected[1:], (name, "replay RNG/controller/settlement mismatch")
-        print(f"Repeated seed {metadata['rng_seed']}: {len(metadata['executed_cases'])} identical event streams")
+            assert actual == expected, (name, "replay state/RNG/controller/settlement mismatch")
+        print(f"Repeated seed {metadata['rng_seed']}: {len(metadata['executed_cases'])} identical normalized state and event streams")
     default = "default-damage-interrupt"
     if (1, default) in results and (1337, default) in results:
         first, second = (results[(seed, default)][-1][0] for seed in (1, 1337))
