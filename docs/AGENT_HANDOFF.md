@@ -1595,3 +1595,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - `TerryS200` 为显式 1v1 实验规则。用 `--p1-fighter-file` / `--p2-fighter-file` 指定生成数据。各席位的 `--p1-visual` / `--p2-visual` 独立选择视觉。默认目录和 3v3 阵容保持封版行为。
 - 原引擎证据在 `local-mugen/stage14-reference-replay/results/`，补充持续蹲防在 `local-mugen/stage14-reference-held/results/`。Godot 图像、权威日志和逐帧对照在 `local-mugen/stage14-validation/`。按 [验收矩阵](STAGE14_ACCEPTANCE.md) 和 [命令](../tools/Stage14Validation/README.md) 复现，使用新证据目录。
 - 后续可先取 State 210/211 的真实参考行为，覆盖近身 State 215 优先、模式分支和更长的有效窗口。静态审查在 [原引擎基准](STAGE14_REFERENCE.md)。守势惯性、完整受击框、脚本控制器和取消的范围见验收矩阵。保留原有 `project.godot` 工作区差异。
+
+### 阶段 15 交接
+
+- 生成目录 `data/imported-characters/terry98-stage15-data/` 的 `default.fighter.json`、`mode2.fighter.json` 同时提供 `5A` 和 `5B`。对应视觉别名 `terry98-stage15-default`、`terry98-stage15-mode2`。保持阶段 14 的独立配置与冻结证据。
+- 原引擎规范轨迹、分数距离补测及四个互动复验都在 `local-mugen` 的阶段 15 目录。Godot 输出在 `local-mugen/stage15-validation/`。按 [阶段 15 验收](STAGE15_ACCEPTANCE.md) 和 [取证命令](../tools/Stage15Validation/README.md) 用新目录复现。
+- 近身 205/215、原版模式交互、动态反击变量及 RNG、取消、守势惯性和空中规则仍在后续范围。继续保留原 `project.godot` 差异及素材诊断。
