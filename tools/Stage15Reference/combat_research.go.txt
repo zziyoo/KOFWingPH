@@ -21,6 +21,9 @@ var researchScenario = strings.TrimPrefix(strings.TrimPrefix(researchCase, "mode
 var researchStage17 = strings.HasPrefix(researchScenario, "damage-")
 var researchDamageScenario = strings.TrimPrefix(researchScenario, "damage-")
 var researchDamageMirror = researchStage17 && strings.HasPrefix(researchDamageScenario, "mirror-")
+var researchStage18 = strings.HasPrefix(researchScenario, "reentry-")
+var researchReentryScenario = strings.TrimPrefix(researchScenario, "reentry-")
+var researchReentryMirror = researchStage18 && strings.HasPrefix(researchReentryScenario, "mirror-")
 var researchStage16 = strings.HasPrefix(researchScenario, "light-") || strings.HasPrefix(researchScenario, "heavy-")
 var researchTraceFile *os.File
 var researchEncoder *json.Encoder
@@ -64,7 +67,7 @@ func researchBegin() {
 		}
 		researchEncoder = json.NewEncoder(researchTraceFile)
 		sys.randseed = 1337
-		if researchStage17 {
+		if researchStage17 || researchStage18 {
 			seed, err := strconv.ParseInt(os.Getenv("RESEARCH_SEED"), 10, 32)
 			if err != nil || seed <= 0 || seed >= int64(IMax) {
 				panic("RESEARCH_SEED must be between 1 and 2147483646")
@@ -75,7 +78,7 @@ func researchBegin() {
 		for pn := 0; pn < 2; pn++ {
 			c := sys.chars[pn][0]
 			sign := float32(1 - 2*pn)
-			if researchScenario == "mirror" || researchStage16 && strings.HasSuffix(researchScenario, "-mirror") || researchDamageMirror {
+			if researchScenario == "mirror" || researchStage16 && strings.HasSuffix(researchScenario, "-mirror") || researchDamageMirror || researchReentryMirror {
 				sign = -sign
 			}
 			c.pos, c.facing = [3]float32{-sign * float32(distance) / 2, 0, 0}, sign
@@ -105,6 +108,9 @@ func researchBits(pn int) InputBits {
 	if researchStage17 {
 		return researchDamageBits(pn)
 	}
+	if researchStage18 {
+		return researchReentryBits(pn)
+	}
 	if pn == 0 && researchFrame == 5 {
 		return IB_Y
 	}
@@ -130,6 +136,57 @@ func researchBits(pn int) InputBits {
 			if researchFrame >= 10 && researchFrame <= 39 {
 				return IB_PR | IB_PD
 			}
+		}
+	}
+	return 0
+}
+
+func researchReentryBits(pn int) InputBits {
+	scenario := strings.TrimPrefix(researchReentryScenario, "mirror-")
+	first := 5
+	jump := strings.HasPrefix(scenario, "approach-") || strings.HasPrefix(scenario, "near-jump-")
+	if jump {
+		first = 13
+	}
+	parts := strings.Split(scenario, "-")
+	second, _ := strconv.Atoi(parts[len(parts)-1])
+	if pn == 0 {
+		if researchFrame == first || (scenario == "held" && researchFrame >= first && researchFrame <= 40) {
+			return IB_X
+		}
+		if second == 0 || researchFrame < second {
+			return 0
+		}
+		if researchFrame > second && (!strings.Contains(scenario, "-held-") || researchFrame > second+8) {
+			return 0
+		}
+		if strings.Contains(scenario, "-both-") {
+			return IB_X | IB_Y
+		}
+		if strings.Contains(scenario, "-heavy-") {
+			return IB_Y
+		}
+		if strings.Contains(scenario, "-down-") {
+			return IB_X | IB_PD
+		}
+		return IB_X
+	}
+	back, forward := IB_PR, IB_PL
+	if researchReentryMirror {
+		back, forward = forward, back
+	}
+	if jump && researchFrame == 0 {
+		if strings.HasPrefix(scenario, "approach-") {
+			return IB_PU | forward
+		}
+		return IB_PU
+	}
+	if researchFrame >= 7 && researchFrame <= 40 {
+		if strings.Contains(scenario, "-guard-") {
+			return back
+		}
+		if strings.Contains(scenario, "-crouch-") {
+			return back | IB_PD
 		}
 	}
 	return 0
@@ -263,7 +320,8 @@ func researchCloseNormalBits(pn int) InputBits {
 }
 
 func researchInput(c *Char, original [14]bool) [14]bool {
-	if researchCase == "" || c == nil || c.helperIndex != 0 && c.helperId != 7600 {
+	if researchCase == "" || c == nil ||
+		(c.helperIndex != 0 && c.helperId != 7600 && !(researchStage18 && c.helperId == 99999)) {
 		return original
 	}
 	return researchBits(c.playerNo).BitsToKeys()
@@ -366,6 +424,11 @@ func researchTraceWithOwner(phase string, owner int) {
 		if researchStage16 || researchStage17 {
 			char["vars"].(map[string]interface{})["var23"] = c.varGet(23).ToI()
 		}
+		if researchStage18 {
+			helperX, helperY := researchCommandHelper(c)
+			char["helperX"], char["helperY"] = helperX, helperY
+			char["vars"].(map[string]interface{})["var2"] = c.varGet(2).ToI()
+		}
 		chars = append(chars, char)
 	}
 	row := map[string]interface{}{
@@ -375,6 +438,36 @@ func researchTraceWithOwner(phase string, owner int) {
 	}
 	if researchStage17 {
 		row["rng"] = sys.randseed
+	}
+	if err := researchEncoder.Encode(row); err != nil {
+		panic(err)
+	}
+}
+
+func researchCommandHelper(c *Char) (int32, int32) {
+	for _, helper := range sys.chars[c.playerNo][1:] {
+		if helper.helperId == 99999 {
+			return helper.varGet(0).ToI(), helper.varGet(2).ToI()
+		}
+	}
+	return -1, -1
+}
+
+func researchStateChange(c *Char, next int32) {
+	if !researchStage18 || researchEncoder == nil || c.helperIndex != 0 ||
+		(c.ss.no != 200 && c.ss.no != 205 && next != 200 && next != 205 && next != 210 && next != 215) {
+		return
+	}
+	helperX, helperY := researchCommandHelper(c)
+	row := map[string]interface{}{
+		"case": researchCase, "frame": researchFrame, "phase": "state-change", "tick": sys.tickCount,
+		"seat": c.playerNo+1, "from": c.ss.no, "to": next, "stateTime": c.ss.time, "anim": c.animNo,
+		"elem": c.anim.curelem, "elemTime": c.anim.curelemtime, "animTime": c.animTime(),
+		"bodyDistX": c.p2BodyDistX(c).ToF(), "raw": researchBits(c.playerNo),
+		"xBuffer": c.commandByName("x"), "yBuffer": c.commandByName("y"),
+		"helperX": helperX, "helperY": helperY, "hitPause": c.hitPauseTime,
+		"minus": c.minus, "ctrl": c.scf(SCF_ctrl), "var2": c.varGet(2).ToI(),
+		"moveContact": c.moveContact(), "moveHit": c.moveHit(), "moveGuarded": c.moveGuarded(),
 	}
 	if err := researchEncoder.Encode(row); err != nil {
 		panic(err)
@@ -419,7 +512,7 @@ func researchDamageVariable(c *Char, operation string, index, before, after int3
 }
 
 func researchHitDef(c *Char) {
-	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || (researchStage16 || researchStage17) && c.ss.no == 205) {
+	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || (researchStage16 || researchStage17 || researchStage18) && c.ss.no == 205) {
 		researchTraceWithOwner("hitdef", c.playerNo+1)
 	}
 }
