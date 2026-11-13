@@ -147,7 +147,8 @@ def fighter_poses(scene, events, committed, timelines, modes, *, actions=ACTIONS
     return windows
 
 
-def verify_entities(lines, phases, starts, moves, *, fixed, strict_native=True, allow_interrupted_spawn=False):
+def verify_entities(lines, phases, starts, moves, *, fixed, strict_native=True, allow_interrupted_spawn=False,
+                    entity_position_tolerance=0.005):
     records = defaultdict(list)
     for row in audit_rows(lines, "WaveEntityAudit"):
         records[int(row["id"])].append({**row, "age": 25 - int(row["life"])})
@@ -205,7 +206,7 @@ def verify_entities(lines, phases, starts, moves, *, fixed, strict_native=True, 
                 source = helpers[0]
                 assert_equal(int(source["facing"]), facing, f"entity {entity_id} native facing")
                 assert_equal(source["time"], age + 1, f"entity {entity_id} native local age at logic {logic}")
-                if abs(source["pos"][0] - int(row["x"]) / Q16) > 0.005:
+                if abs(source["pos"][0] - int(row["x"]) / Q16) > entity_position_tolerance:
                     raise ValueError(f"entity {entity_id} native X differs at logic {logic}: {source['pos']}, {row}")
         if strict_native:
             expiry = int(last["logic"]) - 13
@@ -403,7 +404,7 @@ def verify_recovery(phases, lines, moves, captures, *, mirrored):
 def run_case(options, name, reference, timelines, profile, *, mode="default", alias=ALIAS,
              prepared_scene=None, fixed_checks=None, contact_check=verify_contacts,
              recovery_check=verify_grounded_wave_recovery, minimum_render_frames=0, partial_capture=False,
-             pose_check=fighter_poses, allow_interrupted_spawn=False):
+             pose_check=fighter_poses, allow_interrupted_spawn=False, entity_position_tolerance=0.005):
     scene, phases, changes = prepared_scene or native_case(reference, name, recovery=options.recovery)
     fixed = options.fps == "fixed"
     logs = []
@@ -423,7 +424,8 @@ def run_case(options, name, reference, timelines, profile, *, mode="default", al
                                         fighter_id=profile["fighterId"])
         strict_native = True
         entities = verify_entities(lines, phases, started, moves, fixed=fixed, strict_native=strict_native,
-                                   allow_interrupted_spawn=allow_interrupted_spawn)
+                                   allow_interrupted_spawn=allow_interrupted_spawn,
+                                   entity_position_tolerance=entity_position_tolerance)
         pause = []
         divergences = []
         ground_recovery = []

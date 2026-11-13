@@ -215,12 +215,15 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_wave.p
 $env:PYTHONPATH = 'tools/MugenImporter'
 $base = 'data/imported-characters/terry98-stage22-data'
 $profiles = 'data/imported-characters/terry98-stage23-data'
-py -m mugen_importer.state_crouch_heavy_wave local-mugen/terry.zip data/imported-characters/terry98/manifest.json `
-  --base $base --reference local-mugen/stage23-reference/results `
-  --reference local-mugen/stage23-reference-supplement/results `
-  --reference local-mugen/stage23-reference-boundaries/results `
-  --reference local-mugen/stage23-reference-final-probes/results `
-  --reference local-mugen/stage23-reference-combined-input/results --output $profiles
+$body = 'data/imported-characters/terry98-stage23-body'
+$source = @('local-mugen/terry.zip','data/imported-characters/terry98/manifest.json','--base',$base,
+  '--reference','local-mugen/stage23-reference/results',
+  '--reference','local-mugen/stage23-reference-supplement/results',
+  '--reference','local-mugen/stage23-reference-boundaries/results',
+  '--reference','local-mugen/stage23-reference-final-probes/results',
+  '--reference','local-mugen/stage23-reference-combined-input/results')
+py -m mugen_importer.state_crouch_heavy_wave @source --output $profiles
+py -m mugen_importer.state_crouch_heavy_wave @source --output $body --body-only
 foreach ($mode in 'default','mode2') {
   py tools/Stage14Validation/stage_assets.py --binding "$profiles/$mode.binding.json" `
     --destination "data/imported-characters/terry98-stage23-$mode"
