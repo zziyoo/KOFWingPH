@@ -148,6 +148,27 @@ class OriginalStandingHeavyKickTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'verified native Wave'):
                     self.kicks.build_profile(self.audit, native, *base, mode)
 
+    def test_mode2_enables_audited_ground_guard_without_importing_projectile_rules(self):
+        guard_options = {'forwardGuardDistance', 'preserveGuardEntryMomentum', 'holdGroundBlockstunExitPosition',
+                         'retainProjectileGuard', 'projectileGuardRecoveryFrames'}
+        source = self.audit['mode2GroundGuard']
+        self.assertEqual({'numerator': 230, 'denominator': 1}, source['forwardGuardDistance'])
+        self.assertTrue(source['preserveGuardEntryMomentum'])
+        self.assertTrue(source['holdGroundBlockstunExitPosition'])
+        for mode in ('default', 'mode2'):
+            with self.subTest(mode=mode):
+                base, base_binding = self.frozen(mode)
+                fighter, _ = self.kicks.build_profile(self.audit, self.native(), base, base_binding, mode)
+                if mode == 'default':
+                    self.assertEqual({key: base[key] for key in guard_options if key in base},
+                                     {key: fighter[key] for key in guard_options if key in fighter})
+                else:
+                    self.assertEqual(source,
+                                     {key: fighter[key] for key in guard_options if key in fighter})
+                    self.assertTrue(guard_options.isdisjoint(base))
+                    far = next(move for move in fighter['moves'] if move['moveId'] == self.kicks.MOVE_IDS[240])
+                    self.assertEqual(23, far['guardThreatFrames'])
+
     def test_rejects_unproved_position_step_and_reaction_disagreement(self):
         base = self.frozen('default')
         native = self.native()

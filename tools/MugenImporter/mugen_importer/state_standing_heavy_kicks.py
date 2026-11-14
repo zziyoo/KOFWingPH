@@ -212,10 +212,38 @@ def source_attack(sections, number, actions):
     return result
 
 
+def source_ground_guard(constants, common, ground_movement):
+    sections = state_reentry.script_sections(constants)
+    size = unique((section for section in sections if section.title == 'size'), 'CNS Size')
+    movement = unique((section for section in sections if section.title == 'movement'), 'CNS Movement')
+    friction = fraction(movement.one('stand.friction'))
+    require(friction == ground_movement['velocityRetention'], 'common guard momentum friction differs from source')
+    common_sections = state_reentry.script_sections(common)
+    definition, controls = move_scope(common_sections, 120)
+    sweep.require_fields(definition, {'physics': 'u', 'type': 'u'}, 'unsupported common guard entry')
+    for posture in ('s', 'c'):
+        transition = unique((part for part in controls if normalized(part.one('type', '')) == 'statetypeset'
+                             and list(map(normalized, part.values('trigger1'))) == [f'time=0&&statetype={posture}']),
+                            f'common guard entry physics {posture}')
+        sweep.require_fields(transition, {'physics': posture}, 'unsupported common ground guard physics')
+    require(not any(normalized(part.one('type', '')) in ('velset', 'veladd', 'velmul', 'posset', 'posadd')
+                    for part in controls), 'common guard entry directly alters momentum')
+    exit_state, _ = move_scope(common_sections, 140)
+    sweep.require_fields(exit_state, {'physics': 'u', 'type': 'u', 'ctrl': '1'}, 'unsupported common guard exit')
+    for number in (151, 153):
+        _, blockstun = move_scope(common_sections, number)
+        stop = unique((part for part in blockstun if normalized(part.one('type')) == 'velset'),
+                      f'State {number} stops on guard exit')
+        sweep.require_fields(stop, {'trigger1': 'time=gethitvar(slidetime)', 'trigger2': 'hitover', 'x': '0'},
+                             f'unsupported State {number} guard exit movement')
+    return {'forwardGuardDistance': fraction(size.one('attack.dist')), 'preserveGuardEntryMomentum': True,
+            'holdGroundBlockstunExitPosition': True}
+
+
 def inspect_source(archive, manifest):
     prior = light.inspect_source(archive, manifest)
     members = prior['members']
-    keys = ('anim', 'cmd', 'st1', 'Terry-2-3.cns', 'Helper.cns')
+    keys = ('anim', 'cmd', 'st1', 'cns', 'stcommon', 'Terry-2-3.cns', 'Helper.cns')
     with zipfile.ZipFile(archive) as source:
         contents = {key: state200.archive_member(source, members[key]['name']) for key in keys}
     require(all(state200.digest(raw) == members[key]['sha256'] for key, raw in contents.items()), 'source archive changed')
@@ -253,6 +281,7 @@ def inspect_source(archive, manifest):
     return {**{key: prior[key] for key in ('zipSha256', 'manifestSha256', 'members', 'damageRules', 'groundMovement',
                                          'defaultWave', 'mode2Wave')},
             'command': command, 'actions': reviewed,
+            'mode2GroundGuard': source_ground_guard(contents['cns'], contents['stcommon'], prior['groundMovement']),
             'sourceLines': {**prior['sourceLines'], 'explicitHeavyKickPermission': permission.line,
                             'naturalHeavyKickPermission': natural.line}}
 
@@ -356,6 +385,14 @@ def build_profile(audit, native, base_fighter, base_binding, mode, *, body_only=
     if body_only:
         binding['visualId'] = f'terry98-stage27-body-{mode}'
     fighter['displayName'] = f'Terry Standing Heavy Kicks ({mode})'
+    guard = audit['mode2GroundGuard']
+    if mode == 'mode2':
+        require(guard.keys().isdisjoint(fighter) and not any(move['projectiles'] for move in fighter['moves']),
+                'frozen mode 2 ground guard and helper scope changed')
+        fighter.update(guard)
+    else:
+        require(all(fighter[key] == guard[key] for key in ('forwardGuardDistance', 'preserveGuardEntryMomentum')),
+                'frozen default ground guard differs from the common source')
     sweep_move = unique((move for move in fighter['moves'] if move['moveId'] == sweep.MOVE), 'frozen State 440')
     require(sweep_move['returnsToCrouch'] and not sweep_move.get('walkOnCrouchRecovery'),
             'frozen State 440 natural recovery changed')
@@ -395,8 +432,9 @@ def main():
         for mode in PRESETS:
             base = routes.load_frozen_base(args.base, mode, audit, frozen_base=FROZEN_BASE)
             fighter, binding = build_profile(audit, native, *base, mode, body_only=args.body_only)
+            source = {key: value for key, value in audit.items() if key != 'mode2GroundGuard' or mode == 'mode2'}
             documents.update({f'{mode}.fighter.json': fighter, f'{mode}.binding.json': binding,
-                              f'{mode}.source.json': {**audit, 'native': native, 'references': references,
+                              f'{mode}.source.json': {**source, 'native': native, 'references': references,
                                                      'frozenBaseSha256': FROZEN_BASE[mode], 'mode': mode,
                                                      'bodyOnly': args.body_only}})
         state200.output_documents(args.output, documents)

@@ -351,6 +351,8 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_standing_ligh
 
 默认远重脚绑定 Action 240，共 38 tick。模式 2 的 State 240 使用 Action 241，共 43 tick。两种 Action 的 `PosAdd` 由 `positionSteps` 数据表达并逐项核对原版轨迹。两套预设的近重脚均为 Action 245，共 29 tick，使用 5002／5007 站姿和 5022／5027 蹲姿重受击。默认 245 在旧 tick 4–8 复用弱 Wave 取消，模式 2 保留同一窗口的 1050 候选。阶段 27 的扫倒 440 启用既有 `walkOnCrouchRecovery`。
 
+模式 2 的新预设启用共用 `Constants.cns` 的地面防御距离 230，并按 `common_kof.cns` State 120 保留站防进入时的步行惯性。Action 241 的原版轨迹分别覆盖站防和蹲防。两种姿态退出格挡硬直当 tick 恢复控制且保持位置。下一 tick 持后时才开始走。模式 2 的投射物防御与恢复配置保留原有范围。
+
 地面 y+b 保留 250，身体距 ≤11 时前／后＋b 对可投地面目标保留 805。两个预设均保留这些 CMD 候选的条件与顺序，250、805 本体延期。245 的显式窗口允许既有 300／310 候选保留。
 
 ```powershell
