@@ -1,19 +1,20 @@
 param(
     [string]$IkemenRoot = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Ikemen-GO'),
     [switch]$Prepare,
-    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')]
+    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')]
     [string]$CaptureProfile = 'Stage14',
     [string]$RunDirectory = 'local-mugen/stage14-reference',
     [ValidateRange(1, 2147483646)]
     [int]$Seed = 1337,
     [ValidateRange(75, 600)]
     [int]$LastFrame = 75,
-    [string[]]$Cases
+    [string[]]$Cases,
+    [string]$PreparedEngineDirectory
 )
 
 $ErrorActionPreference = 'Stop'
-if ($LastFrame -ne 75 -and $CaptureProfile -notin @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) {
-    throw 'Extended reference traces are only enabled for Stage19 through Stage23'
+if ($LastFrame -ne 75 -and $CaptureProfile -notin @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
+    throw 'Extended reference traces are only enabled for Stage19 through Stage24'
 }
 $commit = '5dac5caf9a02a9b81bf2264e88a1bbf68e21bba0'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -23,6 +24,13 @@ if (!$workspace.StartsWith($localMugen, [StringComparison]::OrdinalIgnoreCase)) 
     throw 'Reference output must be contained in local-mugen'
 }
 $engine = Join-Path $workspace 'engine'
+if ($PreparedEngineDirectory) {
+    if ($Prepare) { throw 'Prepare and PreparedEngineDirectory are mutually exclusive' }
+    $engine = [IO.Path]::GetFullPath((Join-Path $root $PreparedEngineDirectory))
+    if (!$engine.StartsWith($localMugen, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'A reused research engine must be contained in local-mugen'
+    }
+}
 $results = Join-Path $workspace 'results'
 if ((Test-Path -LiteralPath (Join-Path $results 'run-metadata.json')) -or
     @(Get-ChildItem -LiteralPath $results -File -ErrorAction SilentlyContinue | Where-Object {
@@ -300,6 +308,32 @@ if ($CaptureProfile -eq 'Stage23') {
         if ($Cases -contains $supplement) { $distances[$supplement] = 140 }
     }
 }
+if ($CaptureProfile -eq 'Stage24') {
+    $captureDir = Join-Path $root 'tools/Stage15Reference'
+    $distances = [ordered]@{}
+    foreach ($scenario in @('hit-0','crouch-hit-0','guard-0','crouch-guard-0','mirror-hit-0','held-down-0','stand-0',
+        'air-0','light-kick-0','down-light-kicks-0','down-light-and-kick-0','down-heavy-and-kick-0',
+        'down-forward-heavy-and-kick-0','down-forward-kick-0','down-back-kick-0','hit-27','hit-33',
+        'hit-34','hit-held-19','hit-19','crouch-guard-27','guard-27','crouch-hit-27','mirror-hit-27','mixed-27')) {
+        $distances["default-crouch-kick-wave-$scenario"] = 54
+    }
+    $distances['default-crouch-kick-wave-interrupt-0'] = 44
+    foreach ($scenario in @('whiff-0','whiff-12','whiff-13','whiff-14','whiff-15','whiff-16','whiff-17','whiff-22',
+        'whiff-23','whiff-45','repeat-kick-23','repeat-kick-45','compete-kick-16','compete-heavy-16',
+        'incoming-wave-26','incoming-wave-34','incoming-wave-35')) {
+        $distances["default-crouch-kick-wave-$scenario"] = 150
+    }
+    $distances['default-crouch-kick-wave-approach-16'] = 110
+    $distances['default-crouch-kick-wave-approach-0'] = 110
+    $distances['mode2-crouch-kick-wave-hit-27'] = 54
+    $distances['mode2-crouch-kick-wave-hit-0'] = 54
+    foreach ($number in 30..72) {
+        foreach ($inputKind in @('tech', 'tech-held')) {
+            $tech = "default-crouch-kick-wave-$inputKind-$number"
+            if ($Cases -contains $tech) { $distances[$tech] = 54 }
+        }
+    }
+}
 if (!$Cases) { $Cases = @($distances.Keys) }
 foreach ($caseName in $Cases) {
     if (!$distances.Contains($caseName)) { throw "Unknown $CaptureProfile case $caseName" }
@@ -313,19 +347,19 @@ $expectedSourceHashes = @{
     'Terry.cmd' = 'ee57ffe1d6d4a2770b47590ab69177de79b24ccfc0153702dd3602f633507b59'
     'Terry.air' = '252646cc2940f776e94df0b7b7fd3772e098d75fda6e9b781135eaa36e0fd851'
 }
-if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) {
+if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
     $expectedSourceHashes['Terry-2-3.cns'] = '90b83cdacd33a3800a825ee42bdbd6502b7989f4dec358126587edeb4495fdc4'
 }
-if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) {
+if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
     $expectedSourceHashes['Helper.cns'] = 'b2d683f70a3c6dd76587edee1a54f0638f9c6e006d5c70af598ff9b0163dd62a'
 }
-if ($CaptureProfile -in @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) {
+if ($CaptureProfile -in @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
     $expectedSourceHashes['Terry-S.cns'] = '60171bf640c7e8316d34e2b0ab001f663472bfd14dc66d174dcf5a8eebd8dc21'
 }
-if ($CaptureProfile -in @('Stage20', 'Stage21', 'Stage22', 'Stage23')) {
+if ($CaptureProfile -in @('Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
     $expectedSourceHashes['Constants.cns'] = 'f2dec82cca8857f78a702ee03149642c632a2efa2a70f01ac2129ca82fa98c55'
 }
-if ($CaptureProfile -in @('Stage21', 'Stage22', 'Stage23')) {
+if ($CaptureProfile -in @('Stage21', 'Stage22', 'Stage23', 'Stage24')) {
     $expectedSourceHashes['common_kof.cns'] = '3b934b5390e0b805df549db35601b4882d6c28b9165b56e3dcff72d3bd86c65b'
 }
 
@@ -371,10 +405,10 @@ if ($Prepare) {
     if ($index -lt 0) { throw 'Cannot find HitDef finalization in pinned source' }
     $source = $source.Insert($index + $before.Length, [string][char]9 + 'researchHitDef(crun)' + $newline)
     [IO.File]::WriteAllText($bytecode, $source)
-    if ($CaptureProfile -in @('Stage17', 'Stage21', 'Stage22', 'Stage23')) {
+    if ($CaptureProfile -in @('Stage17', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
         & (Join-Path $root 'tools/Stage17Reference/Install-TraceHooks.ps1') -Engine $engine
     }
-    if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) {
+    if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
         & (Join-Path $root 'tools/Stage18Reference/Install-TraceHooks.ps1') -Engine $engine
     }
     $env:MSYSTEM = 'MINGW64'
@@ -407,7 +441,7 @@ $metadata = [ordered]@{
     scenario_distance = $distances
 }
 if ($CaptureProfile -ne 'Stage14') { $metadata.capture_profile = $CaptureProfile }
-if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) {
+if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
     $metadata.rng_seed = $Seed
     $metadata.executed_cases = @($Cases)
 }
@@ -418,10 +452,10 @@ if ($LastFrame -ne 75) {
 foreach ($caseName in $Cases) {
     $env:RESEARCH_CASE = $caseName
     $env:RESEARCH_DISTANCE = $distances[$caseName].ToString([Globalization.CultureInfo]::InvariantCulture)
-    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) {
+    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
         $env:RESEARCH_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
     }
-    if ($CaptureProfile -in @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) {
+    if ($CaptureProfile -in @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) {
         $env:RESEARCH_LAST_FRAME = $LastFrame.ToString([Globalization.CultureInfo]::InvariantCulture)
     }
     $env:RESEARCH_TRACE = Join-Path $results "$caseName.jsonl"
@@ -434,7 +468,7 @@ foreach ($caseName in $Cases) {
     }
     $process = Start-Process -FilePath $exe -WorkingDirectory $engine -ArgumentList $caseArguments -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $results "$caseName-stdout.txt") -RedirectStandardError $stderr
-    $timeout = if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) { 90000 } else { 45000 }
+    $timeout = if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) { 90000 } else { 45000 }
     if (!$process.WaitForExit($timeout)) {
         Stop-Process -Id $process.Id
         throw "Reference case $caseName timed out. Inspect $stderr"
@@ -452,7 +486,7 @@ foreach ($caseName in $Cases) {
         trace_sha256 = $trace.Hash.ToLowerInvariant()
     }
     if ($CaptureProfile -ne 'Stage14') { $caseMetadata.arguments = $caseArguments }
-    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23')) { $caseMetadata.rng_seed = $Seed }
+    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24')) { $caseMetadata.rng_seed = $Seed }
     [IO.File]::WriteAllText((Join-Path $results "$caseName-metadata.json"), ($caseMetadata | ConvertTo-Json) + [char]10, $enc)
     $trace
 }

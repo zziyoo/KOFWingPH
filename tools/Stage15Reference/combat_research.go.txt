@@ -30,12 +30,14 @@ var researchStage20 = strings.HasPrefix(researchScenario, "near-wave-")
 var researchStage21 = strings.HasPrefix(researchScenario, "heavy-wave-")
 var researchStage22 = strings.HasPrefix(researchScenario, "crouch-wave-")
 var researchStage23 = strings.HasPrefix(researchScenario, "crouch-heavy-wave-")
-var researchWaveTrace = researchStage19 || researchStage20 || researchStage21 || researchStage22 || researchStage23
+var researchStage24 = strings.HasPrefix(researchScenario, "crouch-kick-wave-")
+var researchWaveTrace = researchStage19 || researchStage20 || researchStage21 || researchStage22 || researchStage23 || researchStage24
 var researchSpecialMirror = researchStage19 && strings.HasPrefix(researchSpecialScenario, "mirror-") ||
 	researchStage20 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "near-wave-"), "mirror-") ||
 	researchStage21 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "heavy-wave-"), "mirror-") ||
 	researchStage22 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-wave-"), "mirror-") ||
-	researchStage23 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-heavy-wave-"), "mirror-")
+	researchStage23 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-heavy-wave-"), "mirror-") ||
+	researchStage24 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-kick-wave-"), "mirror-")
 const researchPowerWaveCommand = "\x8e\xe3\x83\x70\x83\x8f\x81\x5b\x83\x45\x83\x46\x83\x43\x83\x75"
 var researchStage16 = !researchStage21 && (strings.HasPrefix(researchScenario, "light-") || strings.HasPrefix(researchScenario, "heavy-"))
 var researchTraceFile *os.File
@@ -138,6 +140,9 @@ func researchBits(pn int) InputBits {
 	}
 	if researchStage23 {
 		return researchCrouchHeavyWaveBits(pn)
+	}
+	if researchStage24 {
+		return researchCrouchKickWaveBits(pn)
 	}
 	if pn == 0 && researchFrame == 5 {
 		return IB_Y
@@ -577,6 +582,92 @@ func researchCrouchHeavyWaveBits(pn int) InputBits {
 	return researchWaveMotion(button, forward, press)
 }
 
+func researchCrouchKickWaveBits(pn int) InputBits {
+	scenario := strings.TrimPrefix(strings.TrimPrefix(researchScenario, "crouch-kick-wave-"), "mirror-")
+	parts := strings.Split(scenario, "-")
+	button, _ := strconv.Atoi(parts[len(parts)-1])
+	forward, back := IB_PR, IB_PL
+	if researchSpecialMirror {
+		forward, back = back, forward
+	}
+	if pn == 1 {
+		switch {
+		case strings.HasPrefix(scenario, "tech-") && (researchFrame == button ||
+			strings.HasPrefix(scenario, "tech-held-") && researchFrame > button && researchFrame <= button+12):
+			return IB_X | IB_A
+		case strings.HasPrefix(scenario, "crouch-guard-") && researchFrame >= 9 && researchFrame <= 78:
+			return IB_PD | forward
+		case strings.HasPrefix(scenario, "guard-") && researchFrame >= 9 && researchFrame <= 78:
+			return forward
+		case strings.HasPrefix(scenario, "crouch-hit-") && researchFrame >= 9 && researchFrame <= 45:
+			return IB_PD
+		case scenario == "interrupt-0" && researchFrame == 3:
+			return IB_X
+		case strings.HasPrefix(scenario, "approach-") && researchFrame >= 15 && researchFrame <= 16:
+			return back
+		case strings.HasPrefix(scenario, "mixed-") && researchFrame == 112:
+			return IB_X
+		case strings.HasPrefix(scenario, "mixed-") && researchFrame >= 113 && researchFrame <= 116:
+			return researchWaveMotion(116, back, IB_X)
+		case strings.HasPrefix(scenario, "incoming-wave-"):
+			return researchWaveMotion(5, back, IB_X)
+		}
+		return 0
+	}
+	if scenario == "air-0" && researchFrame == 0 {
+		return IB_PU
+	}
+	initial := 5
+	if strings.HasPrefix(scenario, "incoming-wave-") {
+		initial = button - 11
+	}
+	if researchFrame == initial {
+		switch scenario {
+		case "stand-0":
+			return IB_B
+		case "light-kick-0":
+			return IB_PD | IB_A
+		case "down-light-kicks-0":
+			return IB_PD | IB_A | IB_B
+		case "down-light-and-kick-0":
+			return IB_PD | IB_X | IB_B
+		case "down-heavy-and-kick-0":
+			return IB_PD | IB_Y | IB_B
+		case "down-forward-heavy-and-kick-0":
+			return IB_PD | forward | IB_Y | IB_B
+		case "down-forward-kick-0":
+			return IB_PD | forward | IB_B
+		case "down-back-kick-0":
+			return IB_PD | back | IB_B
+		default:
+			return IB_PD | IB_B
+		}
+	}
+	if scenario == "held-down-0" && researchFrame > initial && researchFrame <= 69 {
+		return IB_PD
+	}
+	if button <= 0 || strings.HasPrefix(scenario, "tech-") {
+		return 0
+	}
+	if strings.Contains(scenario, "-held-") && researchFrame > button && researchFrame <= button+12 {
+		return IB_X
+	}
+	if strings.HasPrefix(scenario, "repeat-kick-") && researchFrame == button {
+		return IB_PD | IB_B
+	}
+	if strings.HasPrefix(scenario, "repeat-kick-") {
+		return 0
+	}
+	press := IB_X
+	if strings.HasPrefix(scenario, "compete-kick-") {
+		press |= IB_B
+	}
+	if strings.HasPrefix(scenario, "compete-heavy-") {
+		press |= IB_Y | IB_B
+	}
+	return researchWaveMotion(button, forward, press)
+}
+
 func researchWaveMotion(button int, forward, press InputBits) InputBits {
 	switch researchFrame {
 	case button - 3:
@@ -906,6 +997,24 @@ func researchTraceWithOwner(phase string, owner int) {
 			char["helperX"], char["helperY"] = researchCommandHelper(c)
 			char["vars"].(map[string]interface{})["var28"] = c.varGet(28).ToI()
 		}
+		if researchStage24 {
+			for _, name := range []string{"a", "b", "recovery"} {
+				if idx, ok := cl.Names[name]; ok {
+					for _, command := range cl.Commands[idx] {
+						commands[name] = append(commands[name], command.curbuftime)
+					}
+				}
+			}
+			char["helperX"], char["helperY"] = researchCommandHelper(c)
+			char["helperB"], char["helperRecovery"] = researchKickHelper(c)
+			char["hitId"], char["hitOwner"] = c.ghv.hitid, c.ghv.playerno+1
+			char["id"], char["hitPlayerId"] = c.id, c.ghv.playerid
+			char["fallTime"], char["fallRecover"], char["fallRecoverTime"] = c.ghv.fall_time, c.ghv.fall_recover, c.ghv.fall_recovertime
+			char["downRecoverTime"] = c.ghv.down_recovertime
+			for _, index := range []int32{4, 23, 28, 31} {
+				char["vars"].(map[string]interface{})["var"+strconv.Itoa(int(index))] = c.varGet(index).ToI()
+			}
+		}
 		chars = append(chars, char)
 	}
 	row := map[string]interface{}{
@@ -913,7 +1022,7 @@ func researchTraceWithOwner(phase string, owner int) {
 		"tick": sys.tickCount, "matchTime": sys.matchTime, "roundState": sys.roundState(),
 		"chars": chars,
 	}
-	if researchStage17 || researchStage20 || researchStage21 || researchStage22 || researchStage23 {
+	if researchStage17 || researchStage20 || researchStage21 || researchStage22 || researchStage23 || researchStage24 {
 		row["rng"] = sys.randseed
 	}
 	if researchWaveTrace {
@@ -933,6 +1042,15 @@ func researchCommandHelper(c *Char) (int32, int32) {
 	return -1, -1
 }
 
+func researchKickHelper(c *Char) (int32, int32) {
+	for _, helper := range sys.chars[c.playerNo][1:] {
+		if helper.helperId == 99999 {
+			return helper.varGet(3).ToI(), helper.varGet(6).ToI()
+		}
+	}
+	return -1, -1
+}
+
 func researchStateChange(c *Char, next int32) {
 	if !(researchStage18 || researchWaveTrace) || researchEncoder == nil || c.helperIndex != 0 {
 		return
@@ -940,6 +1058,9 @@ func researchStateChange(c *Char, next int32) {
 	relevant := c.ss.no == 200 || c.ss.no == 205 || researchStage21 && c.ss.no == 215 || next == 200 || next == 205 || next == 210 || next == 215
 	if researchStage23 {
 		relevant = relevant || c.ss.no == 410 || next == 400 || next == 410 || next == 310 || next == 11
+	}
+	if researchStage24 {
+		relevant = relevant || c.ss.no == 440 || next == 400 || next == 410 || next == 430 || next == 440 || next == 310 || next == 11 || next == 5070 || next == 5071 || next == 5100 || next == 5101 || next == 5110 || next == 5120 || next == 5201
 	}
 	if researchStage22 {
 		relevant = relevant || c.ss.no == 400 || next == 400 || next == 11
@@ -965,6 +1086,11 @@ func researchStateChange(c *Char, next int32) {
 		row["var1"] = c.varGet(1).ToI()
 		row["powerWaveCommand"] = c.commandByName(researchPowerWaveCommand)
 		row["helperWave"] = researchPowerWaveHelper(c)
+	}
+	if researchStage24 {
+		row["bBuffer"], row["recoveryBuffer"] = c.commandByName("b"), c.commandByName("recovery")
+		row["helperB"], row["helperRecovery"] = researchKickHelper(c)
+		row["var4"] = c.varGet(4).ToI()
 	}
 	if err := researchEncoder.Encode(row); err != nil {
 		panic(err)
@@ -1013,7 +1139,7 @@ func researchPowerWaveEntities(c *Char) []map[string]interface{} {
 }
 
 func researchStage17Event(kind string, values map[string]interface{}) {
-	if !(researchStage17 || researchStage21 || researchStage22 || researchStage23) || researchEncoder == nil {
+	if !(researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchStage24) || researchEncoder == nil {
 		return
 	}
 	values["case"], values["frame"], values["tick"], values["phase"] = researchCase, researchFrame, sys.tickCount, kind
@@ -1023,13 +1149,13 @@ func researchStage17Event(kind string, values map[string]interface{}) {
 }
 
 func researchRandom(before, after int32) {
-	if (researchStage17 || researchStage21 || researchStage22 || researchStage23) && researchEncoder != nil {
+	if (researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchStage24) && researchEncoder != nil {
 		researchStage17Event("rng-draw", map[string]interface{}{"before": before, "after": after})
 	}
 }
 
 func researchVarRandom(c *Char, variable, minimum, maximum, value int32) {
-	if (researchStage17 || researchStage21 || researchStage22 || researchStage23) && researchEncoder != nil && c.helperIndex == 0 && variable == 21 {
+	if (researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchStage24) && researchEncoder != nil && c.helperIndex == 0 && variable == 21 {
 		researchStage17Event("var21-draw", map[string]interface{}{
 			"seat": c.playerNo + 1, "state": c.ss.no, "min": minimum, "max": maximum, "value": value, "rng": sys.randseed,
 		})
@@ -1050,7 +1176,7 @@ func researchDamageVariable(c *Char, operation string, index, before, after int3
 }
 
 func researchHitDef(c *Char) {
-	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || researchStage22 && c.ss.no == 400 || researchStage23 && c.ss.no == 410 || (researchStage16 || researchStage17 || researchStage18 || researchWaveTrace) && c.ss.no == 205) {
+	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || researchStage22 && c.ss.no == 400 || researchStage23 && c.ss.no == 410 || researchStage24 && c.ss.no == 440 || (researchStage16 || researchStage17 || researchStage18 || researchWaveTrace) && c.ss.no == 205) {
 		researchTraceWithOwner("hitdef", c.playerNo+1)
 	}
 }
