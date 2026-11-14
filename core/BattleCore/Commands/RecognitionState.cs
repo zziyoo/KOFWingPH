@@ -45,15 +45,18 @@ public readonly struct BufferedResult
     private int HelperTicks { get; }
     private InputBits Buttons { get; }
     private bool HelperActive { get; }
+    internal bool HasRootClock => RootTicks > 0;
+    internal bool HasHelperClock => HelperTicks > 0 || HelperActive;
 
-    internal static BufferedResult Recognized(CommandMatch match, CommandDefinition definition, bool inHitPause, bool globalPaused)
+    internal static BufferedResult Recognized(CommandMatch match, CommandDefinition definition, bool inHitPause,
+        bool globalPaused, bool qualifiesForHelper)
     {
         if (definition.BufferPolicy is not { } policy)
             return new BufferedResult(match, false);
 
         // A root command completed during HitPause receives one extra tick on thaw.
         int root = checked(definition.BufferLifetimeFrames + 1 + (inHitPause && policy.PreserveDuringHitPause ? 1 : 0));
-        int helper = globalPaused ? 0 : Math.Max(0, policy.HelperTicks - policy.HelperHeldDecay);
+        int helper = globalPaused || !qualifiesForHelper ? 0 : Math.Max(0, policy.HelperTicks - policy.HelperHeldDecay);
         return new BufferedResult(match, false, policy, root, helper, definition.RequiredButtons);
     }
 
@@ -132,6 +135,21 @@ public readonly record struct ChargePending(bool HasPending, int AmountHeld, int
 /// </summary>
 public sealed class RecognitionState
 {
+    private readonly record struct HeldGroundDirections(bool Forward, bool Down, bool Frozen)
+    {
+        internal HeldGroundDirections Advance(RelativeInput input, bool inHitPause) =>
+            new(input.Forward || (Frozen && Forward), input.Down || (Frozen && Down), inHitPause);
+
+        internal CommandDirection Resolve(CommandDirection actual) => (Forward, Down) switch
+        {
+            (true, true) => CommandDirection.DownForward,
+            (true, false) => CommandDirection.Forward,
+            (false, true) when actual is CommandDirection.Back or CommandDirection.DownBack => CommandDirection.DownBack,
+            (false, true) => CommandDirection.Down,
+            _ => actual,
+        };
+    }
+
     /// <summary>方向条目数量上限（兜底，防极端抖动输入下无界增长）。</summary>
     private const int MaxDirectionEntries = 64;
 
@@ -155,7 +173,8 @@ public sealed class RecognitionState
         IReadOnlyList<BufferedResult> buffer,
         IReadOnlyList<int> consumedEndFrames,
         IReadOnlyList<ChargePending> chargePendings,
-        CommandMatch? last)
+        CommandMatch? last,
+        HeldGroundDirections heldReservationDirections = default)
     {
         LastObservedFrame = lastObservedFrame;
         HeldAttacks = heldAttacks;
@@ -165,6 +184,7 @@ public sealed class RecognitionState
         ConsumedEndFrames = consumedEndFrames;
         ChargePendings = chargePendings;
         Last = last;
+        ReservationDirections = heldReservationDirections;
     }
 
     /// <summary>最后一次观察的逻辑帧号（-1 = 尚未观察）。</summary>
@@ -190,6 +210,17 @@ public sealed class RecognitionState
 
     /// <summary>最近一次识别到的指令（HUD 显示用；不参与消费语义）。</summary>
     public CommandMatch? Last { get; }
+
+    private HeldGroundDirections ReservationDirections { get; }
+
+    internal bool AllowsReservation(CommandDefinition definition, BufferedResult result)
+    {
+        CommandDirection current = Directions[^1].Direction;
+        if (!definition.ReserveOnEdgeDirection)
+            return definition.MatchHeldMotion || definition.DirectionSequence.Contains(current);
+        return result.HasHelperClock || (result.HasRootClock &&
+            definition.DirectionSequence.Contains(ReservationDirections.Resolve(current)));
+    }
 
     /// <summary>
     /// 推进一帧：解析方向、更新蓄力挂起、记录按键边沿、裁剪历史、匹配并裁决，
@@ -233,7 +264,14 @@ public sealed class RecognitionState
 
         // 1) 方向：只在「变化」时追加条目（按住不重复计数），
         //    否则实时更新最后一个条目的持续结束帧。
-        CommandDirection direction = ToCommandDirection(DirectionResolver.Resolve(bits, facing));
+        RelativeInput relative = DirectionResolver.Resolve(bits, facing);
+        CommandDirection direction = ToCommandDirection(relative);
+        // The root's held directions and attack edge have independent clocks during HitPause.
+        // Only an actual same-frame combination arms the separate helper clock.
+        HeldGroundDirections reservationDirections = definitions.Any(definition => definition.ReserveOnEdgeDirection)
+            ? ReservationDirections.Advance(relative, inHitPause) : default;
+        CommandDirection rootDirection = reservationDirections.Resolve(direction);
+        CommandDirection helperDirection = new HeldGroundDirections(relative.Forward, relative.Down, false).Resolve(direction);
         bool directionChanged = directions.Count == 0 || directions[^1].Direction != direction;
         if (directionChanged)
             directions.Add(new DirectionEntry(frame, direction, frame));
@@ -269,6 +307,7 @@ public sealed class RecognitionState
         {
             CommandDefinition definition = definitions[definitionIndex];
             if (!TryMatch(pendings, consumedEndFrames, definitionIndex, definition, directions, presses,
+                    rootDirection, inHitPause,
                     frame, playerIndex, out CommandMatch? match, out int pressIndex, out int endFrame))
                 continue;
 
@@ -293,7 +332,7 @@ public sealed class RecognitionState
                 new ReadOnlyCollection<BufferedResult>(buffer),
                 new ReadOnlyCollection<int>(consumedEndFrames),
                 new ReadOnlyCollection<ChargePending>(pendings),
-                Last);
+                Last, reservationDirections);
         }
 
         // 一次按键边沿只允许完成一条指令：胜者与落败候选的边沿都消费（D47）。
@@ -315,7 +354,9 @@ public sealed class RecognitionState
         {
             foreach (var candidate in candidates)
             {
-                // During global Pause only the root can refresh this command. Keep the helper's original edge.
+                bool qualifiesForHelper = !candidate.Definition.ReserveOnEdgeDirection ||
+                    candidate.Definition.DirectionSequence.Contains(helperDirection);
+                // A root-only recognition leaves any independently captured helper edge available.
                 if (candidate.Definition.BufferPolicy is not null)
                 {
                     for (int i = buffer.Count - 1; i >= 0; i--)
@@ -323,7 +364,7 @@ public sealed class RecognitionState
                         if (!string.Equals(buffer[i].Match.CommandId, candidate.Match.CommandId, StringComparison.Ordinal))
                             continue;
                         BufferedResult helper = buffer[i].WithoutRootClock();
-                        if (globalPaused && !helper.IsExpiredAt(frame))
+                        if ((globalPaused || !qualifiesForHelper) && !helper.IsExpiredAt(frame))
                             buffer[i] = helper;
                         else
                             buffer.RemoveAt(i);
@@ -331,7 +372,8 @@ public sealed class RecognitionState
                 }
                 if (candidate.EndFrame >= 0 && !consumedEndFrames.Contains(candidate.EndFrame))
                     consumedEndFrames.Add(candidate.EndFrame);
-                buffer.Add(BufferedResult.Recognized(candidate.Match, candidate.Definition, inHitPause, globalPaused));
+                buffer.Add(BufferedResult.Recognized(candidate.Match, candidate.Definition, inHitPause, globalPaused,
+                    qualifiesForHelper));
             }
         }
 
@@ -341,7 +383,7 @@ public sealed class RecognitionState
             new ReadOnlyCollection<BufferedResult>(buffer),
             new ReadOnlyCollection<int>(consumedEndFrames),
             new ReadOnlyCollection<ChargePending>(pendings),
-            best);
+            best, reservationDirections);
     }
 
     /// <summary>
@@ -382,7 +424,7 @@ public sealed class RecognitionState
 
         // 其余四个集合复用旧状态的只读包装（只读实例可安全共享）；Buffer 换新包装。
         return new RecognitionState(LastObservedFrame, HeldAttacks, Directions, Presses,
-            new ReadOnlyCollection<BufferedResult>(buffer), ConsumedEndFrames, ChargePendings, Last);
+            new ReadOnlyCollection<BufferedResult>(buffer), ConsumedEndFrames, ChargePendings, Last, ReservationDirections);
     }
 
     internal RecognitionState WithReservedGroundInputConsumed(int recognizedFrame, int frame)
@@ -476,6 +518,8 @@ public sealed class RecognitionState
         CommandDefinition definition,
         List<DirectionEntry> directions,
         List<PressRecord> presses,
+        CommandDirection rootDirection,
+        bool inHitPause,
         int frame,
         int playerIndex,
         out CommandMatch match,
@@ -490,8 +534,9 @@ public sealed class RecognitionState
 
         if (definition.ReserveGroundInput && !definition.MatchHeldMotion)
         {
-            if ((definition.BufferLifetimeFrames == 0 || definition.ReserveOnEdgeDirection) &&
-                !sequence.Contains(directions[^1].Direction))
+            if (definition.ReserveOnEdgeDirection
+                ? !inHitPause && !sequence.Contains(rootDirection)
+                : definition.BufferLifetimeFrames == 0 && !sequence.Contains(directions[^1].Direction))
                 return false;
             pressIndex = FindPressIndex(presses, definition.RequiredButtons, frame, tolerance: 0);
             if (pressIndex < 0)
@@ -805,6 +850,7 @@ public sealed class RecognitionState
         other is not null &&
         LastObservedFrame == other.LastObservedFrame &&
         HeldAttacks == other.HeldAttacks &&
+        ReservationDirections == other.ReservationDirections &&
         Directions.SequenceEqual(other.Directions) &&
         Presses.SequenceEqual(other.Presses) &&
         Buffer.SequenceEqual(other.Buffer) &&
@@ -816,7 +862,7 @@ public sealed class RecognitionState
 
     public override int GetHashCode() =>
         HashCode.Combine(LastObservedFrame, HeldAttacks, Directions.Count,
-            Buffer.Count, ConsumedEndFrames.Count);
+            Buffer.Count, ConsumedEndFrames.Count, ReservationDirections);
 
     /// <summary>识别结果按语义键比较（CommandId + 识别帧）；缓冲内识别帧唯一。</summary>
     private static bool SameKey(CommandMatch? a, CommandMatch? b) =>

@@ -257,7 +257,7 @@ public static class FighterStateMachine
             CommandMatch match = result.Match;
             if (definition.ReservedGroundCommand(match.CommandId) is { } reservation)
             {
-                if (!reservation.AllowsReservedDirection(recognition.Directions[^1].Direction))
+                if (!recognition.AllowsReservation(reservation, result))
                     continue;
                 recognition = reservation.MatchHeldMotion || reservation.ReserveOnEdgeDirection
                     ? recognition.WithResultConsumed(match.RecognizedFrame)
@@ -453,7 +453,7 @@ public static class FighterStateMachine
                 continue;
             CommandMatch match = result.Match;
             if (definition.ReservedGroundCommand(match.CommandId) is { } reservation &&
-                reservation.AllowsReservedDirection(recognition.Directions[^1].Direction) &&
+                recognition.AllowsReservation(reservation, result) &&
                 move.ReservedCancels.Any(rule => rule.CommandId == match.CommandId && rule.IsOpen(state, elapsed)))
             {
                 if (rejectedStandingInputs is not null)

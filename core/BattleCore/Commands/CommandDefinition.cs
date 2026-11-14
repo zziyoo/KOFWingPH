@@ -225,8 +225,6 @@ public sealed class CommandDefinition
     public CommandBufferPolicy? BufferPolicy { get; }
     public bool ReserveGroundInput { get; }
     public bool MatchCompletedMotion { get; }
+    /// <summary>Latch directions and button edges separately for the root and qualify the helper on the physical edge.</summary>
     public bool ReserveOnEdgeDirection { get; }
-
-    internal bool AllowsReservedDirection(CommandDirection direction) =>
-        MatchHeldMotion || ReserveOnEdgeDirection || DirectionSequence.Contains(direction);
 }

@@ -154,6 +154,36 @@ public sealed class CommandPriorityTests
         Assert.All(resumed.Recognition.Buffer, entry => Assert.True(entry.Consumed));
     }
 
+    [Theory]
+    [InlineData(InputBits.LightPunch, InputBits.Right, true)]
+    [InlineData(InputBits.Right, InputBits.LightPunch, true)]
+    [InlineData(InputBits.HeavyPunch, InputBits.Right | InputBits.Down, true)]
+    [InlineData(InputBits.Right | InputBits.Down, InputBits.HeavyPunch, true)]
+    [InlineData(InputBits.LightPunch, InputBits.Right | InputBits.Down, false)]
+    [InlineData(InputBits.HeavyPunch, InputBits.Right, false)]
+    public void DirectionAndButtonRootLatchesCanBeCompletedSeparatelyAcrossHitPause(
+        InputBits first, InputBits thaw, bool shouldReserve)
+    {
+        InputBits button = (first | thaw) & DirectionResolver.AttackButtons;
+        CommandDirection direction = button == InputBits.LightPunch ? CommandDirection.Forward : CommandDirection.DownForward;
+        var deferred = new CommandDefinition("Deferred", [direction], button, maxSequenceFrames: 1,
+            buttonToleranceFrames: 0, priority: 2, bufferLifetimeFrames: 0,
+            bufferPolicy: new CommandBufferPolicy(true, 4, 1, 1), reserveGroundInput: true, reserveOnEdgeDirection: true);
+        var source = new MoveDefinition(Light, "Source", 4, 5, 7,
+            reservedCancels: [new ReservedCancelDefinition("Deferred", 5, 8, MoveCancelPhases.Active)]);
+        var fighter = new FighterDefinition("Test", [new CommandDefinition("Source", [], InputBits.LightKick), deferred],
+            [source], useCommandPriority: true);
+        RecognitionState frozen = Advance(fighter, [first, InputBits.None, InputBits.None], frozen: true);
+        RecognitionState resumed = Advance(fighter, [thaw], first: 3, prior: frozen);
+
+        FighterActionTick action = Tick(fighter, resumed, 5, 3, thaw);
+
+        Assert.Equal(shouldReserve, action.Recognition.Buffer.Any(result => result.Match.CommandId == "Deferred" && result.Consumed));
+        Assert.Equal(resumed, Advance(fighter, [thaw], first: 3, prior: frozen));
+        RecognitionState later = Advance(fighter, [InputBits.None], first: 4, prior: resumed);
+        Assert.DoesNotContain(Tick(fighter, later, 6, 4).Recognition.Buffer, result => result.Consumed);
+    }
+
     [Fact]
     public void ADeferredMotionAtNaturalRecoveryDoesNotReplayTheSamePunch()
     {
