@@ -1418,6 +1418,34 @@ public class FighterDataTests
     }
 
     [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public void AuthoredGuardExitProtectsOnlyTheRecoveryTick(bool protectsExit, int expectedContact)
+    {
+        FighterDefinition attacker = new("Attacker", [new Commands.CommandDefinition("Kick", [], InputBits.LightKick)],
+            [new MoveDefinition("FarKick", "Kick", 5, 3, 11,
+                attacks: [new AttackDefinition(67, 60, 35, 10, height: AttackHeight.Mid)])]);
+        FighterDefinition defender = FighterDataLoader.Load(Mutate(Json("Kai"), document =>
+        {
+            if (protectsExit)
+                document["protectGroundBlockstunExit"] = true;
+        }));
+        var simulation = new BattleSimulation(new FightRoster(attacker, defender));
+        var state = new BattleState(0, [
+            FighterState.Create(0, 1000, -20, Facing.Right) with
+            { LogicState = FighterLogicState.Startup, MoveId = "FarKick", PhaseRemainingFrames = 1, MoveStartedFrame = 0, MoveElapsedFrames = 4 },
+            FighterState.Create(1, 1000, 48, Facing.Left) with
+            { LogicState = FighterLogicState.Blockstun, StunRemainingFrames = 1, GroundGuardCrouching = true },
+        ], BattleState.CreateDefault().StateVersion);
+        BattleStepResult release = simulation.Step(state, F(0, InputBits.None, InputBits.Down));
+        BattleStepResult after = simulation.Step(release.State, F(1, InputBits.None, InputBits.Down));
+
+        Assert.Equal(expectedContact, Assert.Single(release.Events.Concat(after.Events), e => e.Type == BattleEventType.Hit).Frame);
+        if (protectsExit)
+            Assert.Equal(FighterLogicState.Crouching, release.State.Fighter(1).LogicState);
+    }
+
+    [Theory]
     [InlineData(Facing.Right, -20, 19)]
     [InlineData(Facing.Left, -19, 20)]
     public void NeutralJumpHurtboxes_MirrorWithoutReplacingMovingOrUnconfiguredAirHurtboxes(

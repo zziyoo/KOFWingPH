@@ -54,6 +54,9 @@ public sealed class FighterDocumentDto
     [JsonPropertyName("useOrderedGroundHitstunExit")]
     public bool UseOrderedGroundHitstunExit { get; set; }
 
+    [JsonPropertyName("protectGroundBlockstunExit")]
+    public bool ProtectGroundBlockstunExit { get; set; }
+
     [JsonPropertyName("moves")]
     public List<MoveDto>? Moves { get; set; }
 

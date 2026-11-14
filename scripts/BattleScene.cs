@@ -372,9 +372,9 @@ public partial class BattleScene : Node2D
             if (arg.StartsWith("--duel=", StringComparison.Ordinal)
                 && decimal.TryParse(arg["--duel=".Length..], NumberStyles.AllowDecimalPoint,
                     CultureInfo.InvariantCulture, out decimal halfDistance)
-                && halfDistance is >= 0 and <= 600 && halfDistance * 4 % 1 == 0)
+                && halfDistance is >= 0 and <= 600 && halfDistance * FixedPoint.Scale % 1 == 0)
             {
-                FixedPoint distance = FixedPoint.FromFraction((long)(halfDistance * 4), 4);
+                FixedPoint distance = FixedPoint.FromRaw((long)(halfDistance * FixedPoint.Scale));
                 if (distance + distance >= (facingSeparation ?? FixedPoint.FromInt(60)))
                     return distance;
             }

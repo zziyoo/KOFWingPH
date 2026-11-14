@@ -142,9 +142,9 @@ public sealed class BattleSimulation
         public FixedPoint? HitLaunchGravity;
         public LaunchReactionState? LaunchReaction;
         public bool ProtectWakeup;
-        public bool ProtectGroundHitstunExit;
+        public bool ProtectGroundStunExit;
 
-        public readonly bool ProtectStrike => ProtectWakeup || ProtectGroundHitstunExit;
+        public readonly bool ProtectStrike => ProtectWakeup || ProtectGroundStunExit;
 
         /// <summary>是否处于地面可转向状态（站立/蹲下；动作与空中朝向冻结，D72）。</summary>
         public readonly bool CanTurn =>
@@ -499,8 +499,12 @@ public sealed class BattleSimulation
                     ? fighter.ProjectileSpawnMask
                     : 0,
                 HitLaunchGravity = fighter.HitLaunchGravity,
-                ProtectGroundHitstunExit = definition.ProtectGroundHitstunExit &&
-                    fighter.LogicState == FighterLogicState.Hitstun && fighter.StunRemainingFrames == 1,
+                ProtectGroundStunExit = fighter.StunRemainingFrames == 1 && fighter.LogicState switch
+                {
+                    FighterLogicState.Hitstun => definition.ProtectGroundHitstunExit,
+                    FighterLogicState.Blockstun => definition.ProtectGroundBlockstunExit,
+                    _ => false,
+                },
             };
         }
 

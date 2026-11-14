@@ -167,7 +167,8 @@ public sealed class FighterDefinition
         bool preserveGuardEntryMomentum = false,
         int projectileGuardRecoveryFrames = 0,
         bool protectGroundHitstunExit = false,
-        bool useOrderedGroundHitstunExit = false)
+        bool useOrderedGroundHitstunExit = false,
+        bool protectGroundBlockstunExit = false)
     {
         if (string.IsNullOrWhiteSpace(fighterId))
             throw new ArgumentException("角色 ID 不能为空。", nameof(fighterId));
@@ -186,6 +187,7 @@ public sealed class FighterDefinition
         ProjectileGuardRecoveryFrames = projectileGuardRecoveryFrames;
         ProtectGroundHitstunExit = protectGroundHitstunExit;
         UseOrderedGroundHitstunExit = useOrderedGroundHitstunExit;
+        ProtectGroundBlockstunExit = protectGroundBlockstunExit;
         if (forwardGuardDistance is { } guardDistance &&
             (guardDistance <= FixedPoint.Zero || guardDistance > FixedPoint.FromInt(GroundHurtboxes.MaxLocalCoordinate)))
             throw new ArgumentOutOfRangeException(nameof(forwardGuardDistance));
@@ -317,6 +319,7 @@ public sealed class FighterDefinition
     public int ProjectileGuardRecoveryFrames { get; }
     public bool ProtectGroundHitstunExit { get; }
     public bool UseOrderedGroundHitstunExit { get; }
+    public bool ProtectGroundBlockstunExit { get; }
 
     /// <summary>该角色的专属招式表（只读）。</summary>
     public IReadOnlyList<MoveDefinition> Moves { get; }

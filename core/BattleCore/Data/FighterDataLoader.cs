@@ -142,7 +142,7 @@ public static class FighterDataLoader
                 airBodyWidths, neutralAirHurtboxes, damageRules, dto.UseCommandPriority, dto.AllowStrikeClash,
                 dto.ForwardGuardDistance is { } guard ? Fraction(guard, sourceName, "forwardGuardDistance") : null,
                 dto.RetainProjectileGuard, dto.PreserveGuardEntryMomentum, dto.ProjectileGuardRecoveryFrames,
-                dto.ProtectGroundHitstunExit, dto.UseOrderedGroundHitstunExit),
+                dto.ProtectGroundHitstunExit, dto.UseOrderedGroundHitstunExit, dto.ProtectGroundBlockstunExit),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }
