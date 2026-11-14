@@ -31,14 +31,21 @@
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage25 -Prepare -LastFrame 85 -RunDirectory local-mugen/stage25-native-repro
 py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-repro/results
 
-# Extend the hit → natural Wave case through the target's full recovery.
-& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage25 -LastFrame 145 `
-  -RunDirectory local-mugen/stage25-native-wave-repro `
-  -PreparedEngineDirectory local-mugen/stage25-native-repro/engine `
-  -Cases default-crouch-light-kick-hit-wave-30
+# Extend each Wave case through the target's full recovery.
+$waveCases = [ordered]@{
+  'wave-reaction' = 'hit-wave-30'
+  'held-wave-reaction' = 'wave-forward-held-through-exit'
+  'crouch-jab-wave-reaction' = 'through-400-wave'
+}
+foreach ($case in $waveCases.GetEnumerator()) {
+  & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage25 -LastFrame 165 `
+    -RunDirectory "local-mugen/stage25-native-$($case.Key)-control-repro" `
+    -PreparedEngineDirectory local-mugen/stage25-native-repro/engine `
+    -Cases "default-crouch-light-kick-$($case.Value)"
+}
 ```
 
-实际采集为 `local-mugen/stage25-native-final-{primary,boundaries,controls,near,high,close,startup}/results` 七批，各批 33／24／48／12／10／4／1 场，共 132 场，全部 F0–85。对七个结果目录一起执行检查器，退出 0、132/132，通过日志为 `local-mugen/stage25-native-final-check.log`。原引擎可执行文件 SHA-256 为 `e63d55ca8a64f80cd044c0b3b28aadb2f53b4c8773124e15fc3c327669d50729`。独立 F145 补充取证位于 `local-mugen/stage25-native-wave-reaction/results`，只用于延长命中后自然 Wave 的图形对照，132 场检查未重复计数。
+实际采集为 `local-mugen/stage25-native-final-{primary,boundaries,controls,near,high,close,startup}/results` 七批，各批 33／24／48／12／10／4／1 场，共 132 场，全部 F0–85。对七个结果目录一起执行检查器，退出 0、132/132，通过日志为 `local-mugen/stage25-native-final-check-after-guard.log`。原引擎可执行文件 SHA-256 为 `e63d55ca8a64f80cd044c0b3b28aadb2f53b4c8773124e15fc3c327669d50729`。三个 F165 补充目录与命令中的名称一致，去掉 `-repro` 后缀。它们用于延长 Wave 命中后的图形对照，132 场检查未重复计数。
 
 
 ## 实测规则与边界
@@ -67,4 +74,14 @@ py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-repro/resul
   -PreparedEngineDirectory local-mugen/stage25-native-repro/engine
 py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-guard-controls-repro/results --guard-controls
 ```
-在输入语法层，`Terry.cmd:166–169` 的弱 Wave 为 `~D, DF, F, x`，窗口 16 tick。固定 IKEMEN `src/input.go:764–817` 严格匹配独立 F 步，`2588–2594`、`2638–2648`、`2670–2704` 则用此前已完成的 F 和当前 x 新边沿完成末步。末步没有附加前方向条件。原引擎 `wave-mixed-at-exit` 在 F18 完成 F，F19 前下＋x+a+b 仍选 1000。三个额外原引擎对照把末步分别改为提前一 tick 已按住的前下＋x、后下＋x、后＋x，均在 F19 由 `var(2)=1` 自然进入 1000。逐场输入及原始轨迹位于 `local-mugen/stage25-native-motion-final-button.ps1` 与 `local-mugen/stage25-native-motion-final-button`。
+
+## 已完成手势的末方向补测
+
+`Terry.cmd:166–169` 的弱 Wave 为 `~D, DF, F, x`，窗口 16 tick。固定 IKEMEN `src/input.go:764–817` 严格匹配独立 F 步，`2588–2594`、`2638–2648`、`2670–2704` 用此前已完成的 F 和当前 x 新边沿完成末步。原引擎 `wave-mixed-at-exit` 在 F18 完成 F，F19 前下＋x+a+b 仍选 1000。三个独立控制场分别使用提前一 tick 按住的前下＋x、后下＋x、后＋x，均在 F19 由 `var(2)=1` 自然进入 1000。逐场输入位于 `tools/Stage25Reference/MotionControls.json`。
+
+```powershell
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage25 -Stage25MotionControls -LastFrame 75 `
+  -RunDirectory local-mugen/stage25-native-motion-controls-repro `
+  -PreparedEngineDirectory local-mugen/stage25-native-repro/engine
+py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-motion-controls-repro/results --motion-controls
+```

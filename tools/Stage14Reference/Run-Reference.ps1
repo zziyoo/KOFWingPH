@@ -10,7 +10,8 @@ param(
     [int]$LastFrame = 75,
     [string[]]$Cases,
     [string]$PreparedEngineDirectory,
-    [switch]$Stage25GuardControls
+    [switch]$Stage25GuardControls,
+    [switch]$Stage25MotionControls
 )
 
 $ErrorActionPreference = 'Stop'
@@ -342,13 +343,17 @@ if ($CaptureProfile -eq 'Stage24') {
         }
     }
 }
-if ($Stage25GuardControls -and $CaptureProfile -ne 'Stage25') {
-    throw '-Stage25GuardControls requires -CaptureProfile Stage25'
+if (($Stage25GuardControls -or $Stage25MotionControls) -and $CaptureProfile -ne 'Stage25') {
+    throw 'Stage 25 supplemental cases require -CaptureProfile Stage25'
+}
+if ($Stage25GuardControls -and $Stage25MotionControls) {
+    throw 'Choose one Stage 25 supplemental case batch per run'
 }
 $physicalCases = $null
 if ($CaptureProfile -eq 'Stage25') {
     $captureDir = Join-Path $root 'tools/Stage15Reference'
-    $caseFile = if ($Stage25GuardControls) { 'GuardControls.json' } else { 'Cases.json' }
+    $caseFile = if ($Stage25GuardControls) { 'GuardControls.json' }
+        elseif ($Stage25MotionControls) { 'MotionControls.json' } else { 'Cases.json' }
     $physicalCases = Get-Content -LiteralPath (Join-Path $root "tools/Stage25Reference/$caseFile") -Raw |
         ConvertFrom-Json -AsHashtable
     $distances = [ordered]@{}

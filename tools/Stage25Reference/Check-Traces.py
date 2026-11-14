@@ -12,6 +12,7 @@ PREFIX = 'default-crouch-light-kick-'
 MODE2 = 'mode2-crouch-light-kick-'
 FIXTURES = json.loads((HERE / 'Cases.json').read_bytes())
 GUARD_CONTROLS = json.loads((HERE / 'GuardControls.json').read_bytes())
+MOTION_CONTROLS = json.loads((HERE / 'MotionControls.json').read_bytes())
 BODY = {'hit', 'crouch-hit', 'stand-guard', 'crouch-guard', 'whiff', 'mirror-hit', 'p2-hit', 'interrupt'}
 ATTACK_BOX = [0, -16, 63, -1]
 HURT_BOX = [-20, -72, 19, -1]
@@ -300,15 +301,25 @@ def verify_guard_controls(cases):
             49 if releases_down else 46), name
 
 
+def verify_motion_controls(cases):
+    assert cases.keys() == MOTION_CONTROLS.keys(), cases.keys()
+    for name, case in cases.items():
+        verify_case(name, case)
+        row, = outgoing(case, 430)
+        assert (row['frame'], row['to'], row['stateTime'], row['var2']) == (19, 1000, 14, 1), name
+        assert row['powerWaveCommand'], name
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directories', nargs='+', type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--body-only', action='store_true')
     mode.add_argument('--guard-controls', action='store_true')
+    mode.add_argument('--motion-controls', action='store_true')
     args = parser.parse_args()
     cases = {}
-    fixtures = GUARD_CONTROLS if args.guard_controls else FIXTURES
+    fixtures = GUARD_CONTROLS if args.guard_controls else MOTION_CONTROLS if args.motion_controls else FIXTURES
     for directory in args.directories:
         for name, case in read_cases(directory, fixtures=fixtures):
             assert name not in cases, name
@@ -316,6 +327,10 @@ def main():
     if args.guard_controls:
         verify_guard_controls(cases)
         print(f'PASS: {len(cases)} supplementary native State 430 guard controls')
+        return
+    if args.motion_controls:
+        verify_motion_controls(cases)
+        print(f'PASS: {len(cases)} supplementary native State 430 motion controls')
         return
     if not args.body_only:
         assert cases.keys() == FIXTURES.keys(), (FIXTURES.keys() - cases.keys(), cases.keys() - FIXTURES.keys())
