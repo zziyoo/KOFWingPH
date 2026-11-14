@@ -592,6 +592,10 @@ func researchCrouchKickWaveBits(pn int) InputBits {
 	}
 	if pn == 1 {
 		switch {
+		case scenario == "tech-split-56" && researchFrame >= button-2 && researchFrame < button:
+			return IB_X
+		case scenario == "tech-split-56" && researchFrame == button:
+			return IB_X | IB_A
 		case strings.HasPrefix(scenario, "tech-") && (researchFrame == button ||
 			strings.HasPrefix(scenario, "tech-held-") && researchFrame > button && researchFrame <= button+12):
 			return IB_X | IB_A
@@ -659,10 +663,16 @@ func researchCrouchKickWaveBits(pn int) InputBits {
 	if strings.Contains(scenario, "-held-") && researchFrame > button && researchFrame <= button+12 {
 		return IB_X
 	}
-	if strings.HasPrefix(scenario, "repeat-kick-") && researchFrame == button {
+	if strings.Contains(scenario, "repeat-kick-") && researchFrame == button {
 		return IB_PD | IB_B
 	}
-	if strings.HasPrefix(scenario, "repeat-kick-") {
+	if strings.Contains(scenario, "repeat-kick-walk-") && researchFrame >= button-2 && researchFrame < button {
+		return forward
+	}
+	if scenario == "repeat-kick-light-45" && researchFrame == button-1 {
+		return IB_PD | IB_A
+	}
+	if strings.Contains(scenario, "repeat-kick-") {
 		return 0
 	}
 	press := IB_X

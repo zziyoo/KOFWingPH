@@ -328,6 +328,10 @@ if ($CaptureProfile -eq 'Stage24') {
     $distances['default-crouch-kick-wave-edge-16'] = 116
     $distances['default-crouch-kick-wave-edge-0'] = 116
     $distances['default-crouch-kick-wave-incoming-wave-22'] = 180
+    $distances['default-crouch-kick-wave-hit-repeat-kick-56'] = 54
+    $distances['default-crouch-kick-wave-hit-repeat-kick-walk-58'] = 54
+    $distances['default-crouch-kick-wave-tech-split-56'] = 54
+    $distances['default-crouch-kick-wave-repeat-kick-light-45'] = 150
     $distances['mode2-crouch-kick-wave-hit-27'] = 54
     $distances['mode2-crouch-kick-wave-hit-0'] = 54
     foreach ($number in 30..72) {

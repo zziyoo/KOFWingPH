@@ -163,6 +163,13 @@ def verify_cases(cases):
                                  ('tech-60', True, False), ('tech-61', False, False), ('tech-held-55', False, True)):
         if PREFIX + name in cases:
             verify_ground_tech(default(name), int(name.rsplit('-', 1)[1]), success, held=held)
+    if PREFIX + 'tech-split-56' in cases:
+        case = default('tech-split-56')
+        assert case[2] == [(15, 2, 115, False)]
+        assert [c_at(case[0], f)['raw'] for f in range(54, 58)] == [128, 128, 144, 0]
+        assert all((char['commands']['recovery'], char['helperRecovery'], char['vars']['var4']) == ([0, 0], 0, 0)
+                   for f in range(54, 61) for char in [c_at(case[0], f)])
+        assert compressed_target(case) == compressed_target(default('hit-0'))
 
     for name, (raw, state) in PRIORITIES.items():
         if PREFIX + name in cases:
@@ -251,6 +258,32 @@ def verify_cases(cases):
                        ('repeat-kick-45', [(45, 440, 40), (85, 11, 40)])):
         if PREFIX + name in cases:
             assert kick_changes(default(name)) == want and not default(name)[2], name
+    for name, entry, expected in (
+        ('hit-repeat-kick-56', 56, [(56, 440, 40), (96, 11, 40)]),
+        ('hit-repeat-kick-walk-58', 58, [(56, 20, 40), (98, 11, 40)]),
+    ):
+        if PREFIX + name in cases:
+            case = default(name)
+            assert kick_changes(case) == expected and case[2] == [(15, 2, 115, False)], name
+            assert (c_at(case[0], entry, 0)['raw'], c_at(case[0], entry, 0)['state']) == (34, 440), name
+            source = c_at(case[0], entry + 10, 0, 'after-collision')
+            target = c_at(case[0], entry + 10, phase='after-collision')
+            assert (source['state'], source['vars']['var12'], source['hitDef']['attr']) == (440, 0, 66), name
+            assert (target['state'], target['stateType'], target['gethit']) == (5101, 8, False), name
+            # AIR 440 element 4 and Action 5160 overlap in both axes while the target is type L.
+            assert (source['facing'], target['facing']) == (1, -1), name
+            sx, sy = source['pos'][:2]
+            tx, ty = target['pos'][:2]
+            assert max(sx + 24, tx - 31) < min(sx + 95, tx + 32), name
+            assert max(sy - 52, ty - 32) < min(sy - 29, ty - 1), name
+            assert compressed_target(case) == compressed_target(default('hit-0')), name
+    if PREFIX + 'repeat-kick-light-45' in cases:
+        case = default('repeat-kick-light-45')
+        before = c_at(case[0], 44, 0)
+        compete = c_at(case[0], 45, 0, 'after-command')
+        assert (before['raw'], before['state'], before['commands']['a'][0]) == (18, 440, 1)
+        assert (compete['raw'], compete['commands']['a'][0], compete['commands']['b'][0]) == (34, 0, 1)
+        assert kick_changes(case) == [(45, 430, 40)] and not case[2]
     if PREFIX + 'mixed-27' in cases:
         case = default('mixed-27')
         assert [(row['frame'], row['seat'], row['from'], row['stateTime']) for row in case[1] if row['to'] == 1000] == [
@@ -258,6 +291,8 @@ def verify_cases(cases):
         assert case[2] == [(15, 2, 115, False), (138, 1, 84, False)]
         verify_wave_entity(case, 42)
         verify_wave_entity(case, 132, owner=1)
+        if len(case[0]['end']) > 244:
+            assert not c_at(case[0], 243, 0)['ctrl'] and c_at(case[0], 244, 0)['ctrl']
     for name, frame, dest, tick in (('incoming-wave-26', 25, 5000, 11), ('incoming-wave-34', 29, 5010, 7),
                                     ('incoming-wave-35', 29, 5010, 6)):
         if PREFIX + name in cases:
