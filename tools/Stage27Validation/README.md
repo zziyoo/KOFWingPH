@@ -74,6 +74,8 @@ py $driver --godot $godot @refs --output "$out/rt60" --fps 60 --realtime-render 
 
 冻结门禁按原阶段角色和输入在当前 Godot Debug 运行时重新执行，并核对实际权威日志。13C 直接调用既有 Vulkan 门禁。阶段 14–25 使用阶段 26 已对原始轨迹验证过的实际回放输出，断点归档按每个变体选齐。阶段 26 使用 55 组正式证据。`--headless-authority` 保留相同调用次序、60 固定帧、输入注入和两套视觉开关，检查全部物理输入注入日志与权威记录。历史 CPU 模式没有图像读回，仍可用串行 Vulkan 模式复跑。新配置共存门禁单独跑旧 Wave、430／235 和 440 已验收场景。跨配置比较只忽略角色 ID 和命令候选扩展，当前开关视觉的完整权威记录仍逐条相等。
 
+阶段 18 早期回放保存的文件名位于 `res://local-mugen/stage18-import-smoke-v2/`。CPU 门禁在核对两个 SHA-256 后从已封存的 `terry98-stage18-data` 读取同版配置。若用原命令逐场跑 Vulkan，先在空的旧路径下放入这两份冻结配置的副本。黄金日志与输入脚本无需修改。
+
 ```powershell
 py tools/Stage27Validation/frozen_replay.py --archive-only --archive D:/
 py -u tools/Stage27Validation/frozen_replay.py --godot $godot --archive D:/ `

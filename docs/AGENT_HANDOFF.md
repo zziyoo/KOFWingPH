@@ -8,6 +8,8 @@
 > 2026-11-13 更新：13C-B 真实 Godot 验收 9/9 PASS，专项 58 项、全量 1195 项、Debug 与 Vulkan 像素夹具通过。完整 13C 尚需 13C-C 与最终跨阶段门禁。
 >
 > 2026-11-13 最终更新：13C-C 和 13C 门禁已通过，专项 152 项，全量 1204 项，证据见 STAGE13C_C_ACCEPTANCE.md。
+>
+> 2026-11-14 最终更新：阶段 27 正式 PASS（27A–27G 7/7）。最终候选构建冻结回放阶段 14–26 共 542 对、65,069 逻辑帧、538,586 条权威记录逐条一致，13C Vulkan 复验通过，证据见 STAGE27_ACCEPTANCE.md 与 STAGE27_HANDOFF.md。
 
 ---
 
@@ -1668,3 +1670,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 235 的普通技衔接使用旧 tick 9–15，弱 Wave 显式许可使用 5–8。默认间接 Wave 使用后继 200／205／400 各自的许可。模式 2 的 1050、原版 300／310、720 保留输入。`FramePostDraw` 对照按 `S=L+1` 查实际图像，历史配置使用各自冻结命令。 [验收](STAGE26_ACCEPTANCE.md) · [取证命令](../tools/Stage26Validation/README.md)
 - 阶段 26 正式 PASS，7/7。阶段 13C–25 的冻结门禁已用真实对局回放，最终 Vulkan、同种子和两种视觉覆盖证据保存在 `D:/NewKOF-stage26-verified`。 [证据索引](../tools/Stage26Validation/EVIDENCE.md)
 - 后续静态候选为站重脚。当前 `Terry.cmd:1662–1684` 的默认地面入口用 `b`，身体距 48 及以内先试 245，再回落 240。两套模式的完整条件和运行轨迹仍待核对。通用空战与延期招式依赖见[阶段 26 原引擎参考](STAGE26_REFERENCE.md)。
+
+### 阶段 27 站重脚与扫倒恢复
+
+- 阶段 27 预设位于 `data/imported-characters/terry98-stage27-final`，视觉别名为 `terry98-stage27-default`／`terry98-stage27-mode2`。物理 `b` 对应 P1 `I`、P2 `KP5` 或 `;`。核对身体距边界时同时保留按键、消费、`MoveStarted` 和图像提交记录。 [生成与安装](MUGEN_IMPORT.md#阶段-27-站重脚与近远选招) · [图形复现](../tools/Stage27Validation/README.md)
+- 追踪 440 的自然步行时看 F56／L70。当帧合法新招式优先于步行。命令审计把角色 HitPause 的根命令和全局 Pause 中运行的按钮 Helper 分开。250、805、300／310、720、1050 仍属于保留候选。 [原版与范围](STAGE27_REFERENCE.md)
+- 阶段 27 正式 PASS，7/7。最终候选构建（`NewKOF.dll` 5a3970…、`NewKOF.BattleCore.dll` d59689…）以 `--headless-authority` 回放阶段 14–26 共 542 对、65,069 逻辑帧、538,586 条权威记录逐条一致，13C Vulkan 复验通过；Stage 18 初次失败为工具路径问题，已修复复验。逐阶段日志与执行记录见[阶段 27 收口交接](STAGE27_HANDOFF.md)与[阶段 27 验收](STAGE27_ACCEPTANCE.md)。

@@ -761,3 +761,10 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - `useOrderedGroundHitstunExit` 允许配置在地面受击恢复当帧保持自己的位置，并让恢复者读取先行动对手在该 tick 已计算的步行位置。恢复当帧仍可根据可控姿态出招。该选项只在已取证的配置启用。候选更新的调整仍早于原有边界、推挤、碰撞与原子结算，权威快照结构不变。
 - `protectGroundBlockstunExit` 复用接触阶段的一帧保护，表达原版地面格挡结束的 `NotHitBy`。235 在持续格挡硬直中的续防与 230 在结束后的新接触分别验证。该选项由阶段 26 新配置开启。
 - `reserveOnEdgeDirection` 分别保存根方向和按键时钟。HitPause 内读到的前、下方向可与冻结中或解冻时的按键组合，方向锁存纳入指令快照。实际同帧组合才建立单独衰减的 Helper 时钟。阶段 26 用于延期的 300／310 和 235 的对应显式窗口。回避 720 使用现有的消费时方向保留项，只有可控或自然恢复时参与选招。 [原版依据](STAGE26_REFERENCE.md)
+
+### 阶段 27 站重脚与动作位移
+
+- `positionSteps` 保存以有效动作 tick 索引的水平位移。位移沿招式朝向，在状态机提交当帧招式后、场地边界与接触结算前应用。只在该 tick 生效，速度不累积。HitPause 和全局 Pause 停止动作时钟，打断清除原实例，新动作从自己的 tick 0 开始。默认 240 与模式 2 Action 241 共用该能力。
+- `groundReservationTarget` 让配置中的延期地面候选在消费时核对身体距与对手状态。候选失去资格时可回落同一物理边沿的合法普通技。带独立根／Helper 时钟的保留候选只消费匹配边沿，其他边沿继续按各自时钟衰减。`helperRunsDuringGlobalPause` 独立控制 Helper 是否可在全局 Pause 锁存和衰减，默认关闭。角色 HitPause 仍由根命令的自身策略处理。
+- 阶段 27 的 440 通过既有 `walkOnCrouchRecovery` 在自然退出时响应前后方向。新招式优先，持下或中立可回蹲。复用现有运动和阶段 26 的身体距离选招，物理位置与视觉仍从同一提交状态读取。 [阶段 27 原版](STAGE27_REFERENCE.md)
+- `holdGroundBlockstunExitPosition` 保留 Blockstun 自然退到站立当帧的位置，下一帧恢复步行。只影响地面位移，模式 2 用它表达原版 State 140 的过渡，不启用独立的飞行道具防御续期。
