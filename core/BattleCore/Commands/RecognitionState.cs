@@ -611,18 +611,31 @@ public sealed class RecognitionState
             return false;
 
         var matched = new int[sequence.Count];
-        int cursor = directions.Count - 1;
-        if (definition.MatchCompletedMotion)
+        for (int end = directions.Count - 1; end >= 0; end--)
         {
-            // The final button is its own step. Once the final direction is entered,
-            // later direction changes do not revoke it before the motion deadline.
-            while (cursor >= 0 && directions[cursor].Direction != sequence[^1])
-                cursor--;
+            if (frame - directions[end].Frame > definition.MaxSequenceFrames)
+                break;
+            if (directions[end].Direction == sequence[^1] &&
+                MatchHeldDirections(directions, sequence, end, matched))
+            {
+                // The newest completed motion owns the button, including when it was already used.
+                if (frame - matched[0] > definition.MaxSequenceFrames || consumedEndFrames.Contains(matched[^1]))
+                    return false;
+                matchedEndFrame = matched[^1];
+                match = new CommandMatch(definition.CommandId, playerIndex, frame, matched[0], matchedEndFrame, frame,
+                    definition.Priority, matched.Length, checked(frame + definition.BufferLifetimeFrames), matched);
+                return true;
+            }
+            // A separate button step can finish a prior motion after intervening directions.
+            if (!definition.MatchCompletedMotion)
+                break;
         }
-        if (cursor < 0 || directions[cursor].Direction != sequence[^1] ||
-            consumedEndFrames.Contains(directions[cursor].Frame))
-            return false;
+        return false;
+    }
 
+    private static bool MatchHeldDirections(List<DirectionEntry> directions, IReadOnlyList<CommandDirection> sequence,
+        int cursor, int[] matched)
+    {
         for (int element = sequence.Count - 1; element >= 0; element--)
         {
             while (cursor >= 0 && directions[cursor].Direction == CommandDirection.Neutral)
@@ -633,12 +646,6 @@ public sealed class RecognitionState
             // The first source step is a release. Its timer starts when the held interval ends.
             matched[element] = element == 0 ? direction.EndFrame + 1 : direction.Frame;
         }
-
-        if (frame - matched[0] > definition.MaxSequenceFrames)
-            return false;
-        matchedEndFrame = matched[^1];
-        match = new CommandMatch(definition.CommandId, playerIndex, frame, matched[0], matchedEndFrame, frame,
-            definition.Priority, matched.Length, checked(frame + definition.BufferLifetimeFrames), matched);
         return true;
     }
 

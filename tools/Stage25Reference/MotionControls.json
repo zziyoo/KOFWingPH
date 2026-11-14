@@ -1,5 +1,6 @@
 {
   "default-crouch-light-kick-wave-df-hold-before-button": {"distance": 150, "p1": [[5, 5, "D+a"], [15, 15, "D"], [16, 16, "D+F"], [17, 17, "F"], [18, 19, "D+F"], [19, 19, "x"]], "p2": []},
   "default-crouch-light-kick-wave-db-on-button": {"distance": 150, "p1": [[5, 5, "D+a"], [16, 16, "D"], [17, 17, "D+F"], [18, 18, "F"], [19, 19, "D+B+x"]], "p2": []},
-  "default-crouch-light-kick-wave-back-on-button": {"distance": 150, "p1": [[5, 5, "D+a"], [16, 16, "D"], [17, 17, "D+F"], [18, 18, "F"], [19, 19, "B+x"]], "p2": []}
+  "default-crouch-light-kick-wave-back-on-button": {"distance": 150, "p1": [[5, 5, "D+a"], [16, 16, "D"], [17, 17, "D+F"], [18, 18, "F"], [19, 19, "B+x"]], "p2": []},
+  "default-crouch-light-kick-wave-extra-forward-before-button": {"distance": 150, "p1": [[5, 5, "D+a"], [14, 14, "D"], [15, 15, "D+F"], [16, 16, "F"], [17, 17, "B"], [18, 18, "F"], [19, 19, "B+x"]], "p2": []}
 }

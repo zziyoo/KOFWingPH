@@ -77,10 +77,10 @@ py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-guard-contr
 
 ## 已完成手势的末方向补测
 
-`Terry.cmd:166–169` 的弱 Wave 为 `~D, DF, F, x`，窗口 16 tick。固定 IKEMEN `src/input.go:764–817` 严格匹配独立 F 步，`2588–2594`、`2638–2648`、`2670–2704` 用此前已完成的 F 和当前 x 新边沿完成末步。原引擎 `wave-mixed-at-exit` 在 F18 完成 F，F19 前下＋x+a+b 仍选 1000。三个独立控制场分别使用提前一 tick 按住的前下＋x、后下＋x、后＋x，均在 F19 由 `var(2)=1` 自然进入 1000。逐场输入位于 `tools/Stage25Reference/MotionControls.json`。
+`Terry.cmd:166–169` 的弱 Wave 为 `~D, DF, F, x`，窗口 16 tick。固定 IKEMEN `src/input.go:764–817` 严格匹配独立 F 步，`2588–2594`、`2638–2648`、`2670–2704` 用此前已完成的 F 和当前 x 新边沿完成末步。原引擎 `wave-mixed-at-exit` 在 F18 完成 F，F19 前下＋x+a+b 仍选 1000。四个独立控制场覆盖提前一 tick 按住的前下＋x、后下＋x、后＋x，以及完成手势后再次单按前再转后＋x。四场均在 F19 由 `var(2)=1` 自然进入 1000，Wave 在 F43 命中。逐场输入位于 `tools/Stage25Reference/MotionControls.json`，检查输出为 `local-mugen/stage25-native-motion-controls-final.log`。
 
 ```powershell
-& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage25 -Stage25MotionControls -LastFrame 75 `
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage25 -Stage25MotionControls -LastFrame 100 `
   -RunDirectory local-mugen/stage25-native-motion-controls-repro `
   -PreparedEngineDirectory local-mugen/stage25-native-repro/engine
 py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-motion-controls-repro/results --motion-controls

@@ -213,6 +213,19 @@ public sealed class CommandPriorityTests
     }
 
     [Fact]
+    public void IncompleteLaterDirectionDoesNotReplaceACompletedMotion()
+    {
+        FighterDefinition fighter = Fighter(matchCompletedMotion: true);
+        RecognitionState recognized = Advance(fighter,
+            [InputBits.Down, InputBits.Down | InputBits.Right, InputBits.Right, InputBits.Left,
+                InputBits.Right, InputBits.Left | InputBits.LightPunch]);
+
+        CommandMatch special = Assert.Single(recognized.Buffer, entry => entry.Match.CommandId == "236A").Match;
+        Assert.Equal(2, special.SequenceEndFrame);
+        Assert.Equal(5, special.ButtonFrame);
+    }
+
+    [Fact]
     public void DownInsideLightWindowDiscardsBothRoutesFromTheSameEdge()
     {
         FighterDefinition fighter = Fighter();
