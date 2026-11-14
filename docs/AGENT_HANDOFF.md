@@ -1648,3 +1648,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 
 - 默认 `TerryCrouchHeavyWave` 与模式 2 本体对照从阶段 22 的六份冻结 JSON 生成。使用 `--p1-fighter-file`／`--p2-fighter-file` 和各席 `terry98-stage23-default`／`terry98-stage23-mode2` 视觉别名。State 410、受击和防御按权威时钟推进。前下＋重拳只保留 310 的地面 CMD 优先级，原版 310／1050 的运行时仍独立。 [导入命令](MUGEN_IMPORT.md#阶段-23-蹲重拳与弱-power-wave) · [范围与门禁](STAGE23_ACCEPTANCE.md)
 - 阶段 23 正式 PASS。对照原版用固定 Vulkan，实时用 `FramePostDraw` 稀疏采样。早段 Wave 的击飞和晚段 Wave 的地面反应分别验证。定点舍入与原版画面边缘差保留了具体轨迹及断言。阶段 13C–22 冻结回归逐条对齐，用户提交中的 `project.godot` 保持原哈希。 [Vulkan 复现](../tools/Stage23Validation/README.md) · [证据索引](../tools/Stage23Validation/EVIDENCE.md)
+
+### 阶段 24 蹲重脚与弱 Power Wave
+
+- 最终配置位于 `data/imported-characters/terry98-stage24-final`，独立本体位于 `terry98-stage24-body-final-verified`。两套预设均从阶段 23 冻结哈希和本地原版生成，使用视觉别名 `terry98-stage24-default`／`terry98-stage24-mode2`。逐帧诊断可用 `--command-audit`、`--scripted-pause-audit` 和 `--sprite-frame-audit`。 [生成命令](MUGEN_IMPORT.md#阶段-24-蹲重脚与弱-power-wave) · [对局复现](../tools/Stage24Validation/README.md)
+- 440 在默认模式的旧 tick 11–17 使用共享取消。查看命中后 Wave 落空时同时检查原版 `var(12)`、Helper 的 HitDef 和 `WaveRestrictionAudit`。接地受身要求 `x+a` 两键同帧新按。倒地反弹仍属于原版 L，旧动作攻击框和有效接触应分别核对。下一候选 430 仅完成静态准备。 [验收与证据](STAGE24_ACCEPTANCE.md)
+- 阶段 24 正式 PASS。阶段 13C–23 黄金日志逐条核对。早期试跑配置的兼容副本、实时读回开销、已知坐标偏差以及三个独立项目的构建诊断均记在验收文档。 [复现说明](../tools/Stage24Validation/README.md)

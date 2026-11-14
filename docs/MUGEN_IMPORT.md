@@ -252,3 +252,36 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_heavy_
 以上命令保留已有数据和别名。要复核已有文件，使用新输出目录生成后比对 SHA-256。 [候选哈希与验收](STAGE23_ACCEPTANCE.md)
 
 前下＋重拳占用原版 State 310 的 CMD 候选优先级。`ReservedRisingUpper` 只保留合法地面输入的占用顺序，不分配招式。完整默认预设仍优先选择合规的弱 Power Wave。
+
+## 阶段 24 蹲重脚与弱 Power Wave
+
+转换校验阶段 23 正式预设、原始 State 440 的控制器与 Action 440，并从接收方资源读取 Action 5070 的受击框和 Action 5200 的受身素材。完整配置和独立本体分别生成。模式 2 输出共用本体，保留原版 1050 的隔离边界。原版素材和生成数据留在本地。 [原版采集](STAGE24_REFERENCE.md)
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+$env:NEWKOF_TERRY_AUDIT = (Get-Location).Path
+$base = 'data/imported-characters/terry98-stage23-reserved'
+$profile = 'data/imported-characters/terry98-stage24-final'
+$body = 'data/imported-characters/terry98-stage24-body-final-verified'
+$assets = @('local-mugen/terry.zip','data/imported-characters/terry98/manifest.json')
+$references = @('--reference','local-mugen/stage24-reference/results',
+  '--reference','local-mugen/stage24-reference-controls/results',
+  '--reference','local-mugen/stage24-reference-routes-final/results',
+  '--reference','local-mugen/stage24-reference-boundaries/results',
+  '--reference','local-mugen/stage24-reference-repeat/results',
+  '--reference','local-mugen/stage24-reference-priority/results')
+py -m mugen_importer.state_sweep_wave @assets --base $base @references --output $profile
+if ($LASTEXITCODE) { throw 'Stage 24 conversion failed' }
+py -m mugen_importer.state_sweep_wave @assets --base $base --body-only `
+  --reference local-mugen/stage24-reference-body/results `
+  --reference local-mugen/stage24-reference-controls/results --output $body
+if ($LASTEXITCODE) { throw 'Stage 24 body conversion failed' }
+foreach ($mode in 'default','mode2') {
+  py tools/Stage14Validation/stage_assets.py --binding "$profile/$mode.binding.json" `
+    --destination "data/imported-characters/terry98-stage24-$mode"
+  if ($LASTEXITCODE) { throw "Stage 24 $mode visual staging failed" }
+}
+py -m unittest discover -s tools/MugenImporter/tests -p test_state_sweep_wave.py
+```
+
+完整配置的新增取消使用既有 `CancelDefinition`，保留阶段 23 的五个来源和 State 1000／Helper 1020。两个预设均启用 State 440 的扫倒反应和输入优先级。本体预设使用独立轨迹并省略 440 的取消项。 [阶段 24 验收](STAGE24_ACCEPTANCE.md)

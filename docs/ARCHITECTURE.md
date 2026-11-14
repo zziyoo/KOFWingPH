@@ -736,3 +736,10 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - `groundHitReaction` 为近战命中选择接收方数据。原有 `lightGroundReaction` 仍能读取，`Heavy` 使用 `heavyHitstun`，目标命中时为蹲姿且配置了 `crouchingHeavyHitstun` 时选择蹲姿分支。分支和受击时钟锁存在权威快照，独立 HitPause 和全局 Pause 冻结。新命中替换反应，退出硬直或 KO 时清除。
 - 蹲姿重击反应使用接收方的 `crouchHitVelocityRetention` 及现有末步比例，并经可控蹲伏恢复。该受击姿态由接触决定，松下可影响恢复后的动作。Godot 通过同一权威时钟选择站姿或蹲姿的初始和滑动受击动画。
 - 阶段 23 用同一受击时钟处理 205 打断蹲姿时的轻击和 Helper 晚段落地重击。仅晚段不击飞的 Wave HitDef 选择 `HeavyLow`。可选的站／蹲守势框按格挡时锁存的姿态查询，续防期间的可控守势按当前姿态查询。全局 Pause 与 HitPause 保持权威快照。
+
+### 阶段 24 蹲重脚与扫倒反应
+
+- 近战 `launchGravity`／`launchReaction` 沿用实体击飞的反应快照。`startInFall` 在震停结束后的第一个有效 tick 直接进入 Fall 并积分。接收方可配置 `groundHurtboxes.tripFall`，由同一权威时钟选择 Action 5070 的受击框及画面。撞地、反弹、倒地与起身继续由 `ScriptedLaunchLanding` 推进。可选 GroundTech 读取物理按键边沿，在接地时消费有效缓冲并进入独立受身阶段，受身持续期间保护接触并关闭推挤。HitPause 冻结各自角色时钟，全局 Pause 同时冻结世界和实体。反应阶段、本地时间、受身输入年龄和施放席位由不可变状态保存。
+- 发射者的扫倒标记和实体的 `respectsAirFollowupRestriction` 同时启用时，实体从帧开始快照读取同一席位的追击限制。落地转换当帧仍读取空中受击，下一 tick 解锁。限制只作用于接触，实体出生、动画、移动和到期照常。旧预设继续使用各自的碰撞和反应定义。
+- `rejectsLyingTargets` 让配置了该规则的攻击跳过倒地、反弹和起身的 L 类型目标，攻击框仍可用于绘制和观察。State 440 与 Stage 24 的弱 Wave 从原版 HitDef 读取此限制。两套预设均绑定完整的扫倒反应 Action，模式 2 的倒地画面使用同样的权威阶段。
+- `reserveGroundInput` 可表达多个相对方向。即时占位沿用当帧边沿，带缓冲的占位在消费时读取方向，并抑制同帧落败的输入边沿。阶段 24 用它保留蹲轻脚和站重脚的 CMD 优先级，前下＋重拳的 310 保留项仍参与同一排序。State 440 的显式取消使用原版旧 tick 11–17，和前五个来源共用 `CancelDefinition`、优先级缓冲、State 1000 以及 Helper 1020。 [阶段 24 原版与门禁](STAGE24_ACCEPTANCE.md)

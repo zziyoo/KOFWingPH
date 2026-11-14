@@ -50,19 +50,22 @@ $routes = @('held-down-0','stand-0','air-0','light-kick-0','down-forward-kick-0'
   'compete-heavy-16','approach-0','approach-16','incoming-wave-26','incoming-wave-34','incoming-wave-35') |
   ForEach-Object { "default-crouch-kick-wave-$_" }
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage24 -LastFrame 185 `
-  -RunDirectory local-mugen/stage24-reference-routes -PreparedEngineDirectory local-mugen/stage24-reference/engine `
+  -RunDirectory local-mugen/stage24-reference-routes-final -PreparedEngineDirectory local-mugen/stage24-reference/engine `
   -Cases $routes
 $bounds = @('stand-to-down-0','jump-and-kick-0','edge-0','edge-16','incoming-wave-16','incoming-wave-22') |
   ForEach-Object { "default-crouch-kick-wave-$_" }
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage24 -LastFrame 185 `
   -RunDirectory local-mugen/stage24-reference-boundaries -PreparedEngineDirectory local-mugen/stage24-reference/engine `
   -Cases $bounds
-$repeat = @('mixed-27','hit-repeat-kick-56','hit-repeat-kick-walk-58','tech-split-56','repeat-kick-light-45') |
+$repeat = @('mixed-27','hit-repeat-kick-56','hit-repeat-kick-walk-58','tech-split-56') |
   ForEach-Object { "default-crouch-kick-wave-$_" }
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage24 -LastFrame 260 `
   -RunDirectory local-mugen/stage24-reference-repeat -PreparedEngineDirectory local-mugen/stage24-reference/engine `
   -Cases $repeat
-py tools/Stage24Reference/Check-Traces.py local-mugen/stage24-reference/results local-mugen/stage24-reference-controls/results local-mugen/stage24-reference-routes/results local-mugen/stage24-reference-boundaries/results local-mugen/stage24-reference-repeat/results
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage24 -LastFrame 100 `
+  -RunDirectory local-mugen/stage24-reference-priority -PreparedEngineDirectory local-mugen/stage24-reference/engine `
+  -Cases default-crouch-kick-wave-repeat-kick-light-45
+py tools/Stage24Reference/Check-Traces.py local-mugen/stage24-reference/results local-mugen/stage24-reference-controls/results local-mugen/stage24-reference-routes-final/results local-mugen/stage24-reference-boundaries/results local-mugen/stage24-reference-repeat/results local-mugen/stage24-reference-priority/results
 py tools/Stage24Reference/Check-Traces.py local-mugen/stage24-reference/results --extract-body local-mugen/stage24-reference-body/results
 ```
 

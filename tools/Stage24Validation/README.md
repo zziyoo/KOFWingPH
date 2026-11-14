@@ -6,7 +6,6 @@
 $godot = 'C:/Users/32360/Desktop/Godot_v4.7.2-stable_mono_win64/Godot_v4.7.2-stable_mono_win64_console.exe'
 $native = 'local-mugen/stage24-reference/results'
 $controls = 'local-mugen/stage24-reference-controls/results'
-$routes = 'local-mugen/stage24-reference-routes/results'
 $routesFinal = 'local-mugen/stage24-reference-routes-final/results'
 $boundaries = 'local-mugen/stage24-reference-boundaries/results'
 $repeat = 'local-mugen/stage24-reference-repeat/results'
@@ -16,10 +15,12 @@ $body = 'data/imported-characters/terry98-stage24-body-final-verified'
 $run = 'D:/NewKOF-stage24-vulkan-replay'
 $driver = 'tools/Stage24Validation/crouch_kick_duel.py'
 $common = @('--godot',$godot,'--reference',$repeat,'--reference',$priority,'--reference',$routesFinal,
-  '--reference',$native,'--reference',$controls,'--reference',$routes,'--reference',$boundaries)
+  '--reference',$native,'--reference',$controls,'--reference',$boundaries)
 
 & $godot --headless --path . --editor --import
+$env:DefaultItemExcludes = 'local-mugen/**;data/imported-characters/**;shots/**;**/.git/**'
 dotnet build NewKOF.csproj -c Debug --no-restore
+Remove-Item Env:DefaultItemExcludes
 $fixed = @('--compare-plain','--fixed-resolution','640x360')
 py $driver @common @fixed --profile-dir $body --output "$run/body" `
   --scene hit-0 --scene crouch-hit-0 --scene guard-0 --scene crouch-guard-0 `
@@ -28,6 +29,8 @@ py $driver @common @fixed --profile-dir $body --output "$run/body" `
   --scene down-heavy-and-kick-0 --scene down-forward-heavy-and-kick-0 `
   --scene stand-to-down-0 --scene jump-and-kick-0 `
   --scene tech-55 --scene tech-56 --scene tech-57 --scene tech-60 --scene tech-61 --scene tech-held-55
+py $driver @common --profile-dir $body --fixed-resolution 640x360 --output "$run/tech-landing" `
+  --scene tech-56 --fixed-window 78 115 --repeat-from "$run/body"
 py $driver @common @fixed --profile-dir $profile --output "$run/routes" `
   --scene hit-27 --scene hit-33 --scene hit-34 --scene hit-held-19 --scene hit-19 `
   --scene crouch-hit-27 --scene crouch-guard-27 --scene mirror-hit-27 `
@@ -75,5 +78,17 @@ py $driver --godot $godot --reference $routesFinal --profile-dir $profile --outp
 ```powershell
 py tools/Stage24Validation/stage23_authority.py --archive D:/ --archive-only
 py tools/Stage24Validation/stage23_authority.py --archive D:/ --godot $godot --output "$run/stage23-frozen"
-py tools/Stage24Validation/stage19_22_authority.py --archive D:/ --godot $godot --output "$run/stage19-22-frozen"
 ```
+
+## 阶段 19–22 冻结门禁
+
+对照阶段 23 已核实的冻结复跑归档。脚本沿用各阶段的权威字段、配对数量和实际注入命令。阶段 22 归档用 `duel.log` 定位与原门禁相同的配对场景。阶段 22 回放降低渲染分辨率，脚本仍检查两种视觉覆盖、真实 Vulkan 启动和结束截图。原始归档保持只读。
+
+```powershell
+$history = 'tools/Stage24Validation/stage19_22_authority.py'
+py $history --archive D:/ --archive-only
+py $history --archive D:/ --godot $godot --output "$run/history" --stage 19 --stage 20 --stage 21
+py $history --archive D:/ --godot $godot --output "$run/history" --stage 22 --resolution 320x180
+```
+
+阶段 13C–18 使用[既有权威日志回放命令](../Stage19Validation/README.md)，逐场保留已封存的角色数据和物理输入。
