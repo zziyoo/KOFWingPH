@@ -4,7 +4,7 @@
 
 ## 固定输入与源定义
 
-- 原包 `local-mugen/terry.zip` SHA-256 为 `299203338248952735fd33b4951aba84b39580123290abd8ac70387580ff4698`。运行元数据记录固定引擎版本、可执行文件、配置及 `Terry.cmd`、`Terry-N.cns`、`Terry.air`、`Terry-2-3.cns`、`Helper.cns`、`Terry-S.cns`、`Constants.cns`、`common_kof.cns` 的 SHA-256。每场元数据另存初距、输入排程及轨迹哈希。P1/P2 在 F0 居于 X ± 初距/2，镜像场交换朝向，双方初速为零。模式 2 由原版入场 `Grant` 输入进入。
+- 原包 `local-mugen/terry.zip` SHA-256 为 `299203338248952735fd33b4951aba84b39580123290abd8ac70387580ff4698`。运行元数据记录固定引擎版本、可执行文件、配置及 `Terry.cmd`、`Terry-N.cns`、`Terry.air`、`Terry-2-3.cns`、`Helper.cns`、`Terry-S.cns`、`Constants.cns`、`common_kof.cns` 的 SHA-256。每场元数据另存初距、输入排程及轨迹哈希。P1/P2 在 F0 居于 X ± 初距/2，镜像场交换朝向，双方初速为零。模式 2 由原版入场 `Grant` 输入进入。 [固定版本和源哈希](../local-mugen/stage25-native-final-primary/results/run-metadata.json)
 - `Terry.cmd:297–319` 将 a／b／x／y 定义为 1 tick 独立边沿命令。固定原引擎配置，P1 x／y／a／b 是 A／S／Z／X，P2 是 R／T／F／G。NewKOF `scripts/KeyboardInputMap.cs` 复用 J／K／U／I，以及小键盘 1／2／4／5 或逗号／句点／斜杠／分号。
 - `Helper.cns:1911` 的 Helper 99999 用于命令缓冲。`Terry-2-3.cns:186–198` 以 `keyctrl=1`、无限 `pausemovetime`／`supermovetime` 创建它。`Helper.cns:2314–2322` 每次 a 命令设置 `var(1)=3`，随后减一。`2325–2332` 对 x 执行同样的 `var(0)` 规则。`Terry.cmd:1724–1725` 读取根 a 或 Helper `var(1)>0`，再独立读取当前下方向。
 - `Terry-N.cns:1138–1231` 绑定 Action 430，类型 C，MoveType 初为 A、第四元素改 I，物理 N，速度清零、朝向对手，AnimTime=0 回到可控 State 11。原版挥动／命中声音和量表控制器位于同一段。`Terry.air:1168–1190` 六元素时长 1／2／3／3／2／3、图号 0／1／2／3／1／0，所有偏移为零。第三元素的攻击框 X0–63、Y1–16。各元素基础受击框 X−20–19、Y1–72，第三元素另有 X−12–51、Y1–24，第四元素另有 X12–43、Y1–32。
@@ -77,7 +77,7 @@ py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-guard-contr
 
 ## 已完成手势的末方向补测
 
-`Terry.cmd:166–169` 的弱 Wave 为 `~D, DF, F, x`，窗口 16 tick。固定 IKEMEN `src/input.go:764–817` 严格匹配独立 F 步，`2588–2594`、`2638–2648`、`2670–2704` 用此前已完成的 F 和当前 x 新边沿完成末步。原引擎 `wave-mixed-at-exit` 在 F18 完成 F，F19 前下＋x+a+b 仍选 1000。四个独立控制场覆盖提前一 tick 按住的前下＋x、后下＋x、后＋x，以及完成手势后再次单按前再转后＋x。四场均在 F19 由 `var(2)=1` 自然进入 1000，Wave 在 F43 命中。逐场输入位于 `tools/Stage25Reference/MotionControls.json`，检查输出为 `local-mugen/stage25-native-motion-controls-final.log`。
+`Terry.cmd:166–169` 的弱 Wave 为 `~D, DF, F, x`，窗口 16 tick。固定 IKEMEN `src/input.go:764–817` 严格匹配独立 F 步，`2588–2594`、`2638–2648`、`2670–2704` 用此前已完成的 F 和当前 x 新边沿完成末步。原引擎 `wave-mixed-at-exit` 在 F18 完成 F，F19 前下＋x+a+b 仍选 1000。四个独立控制场覆盖提前一 tick 按住的前下＋x、后下＋x、后＋x，以及完成手势后再次单按前再转后＋x。四场均在 F19 由 `var(2)=1` 自然进入 1000，Wave 在 F43 命中。逐场输入位于 `tools/Stage25Reference/MotionControls.json`，检查输出为 `local-mugen/stage25-native-motion-controls-through-recovery.log`。
 
 ```powershell
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage25 -Stage25MotionControls -LastFrame 100 `

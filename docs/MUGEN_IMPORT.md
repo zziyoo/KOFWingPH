@@ -303,6 +303,10 @@ $references = @('--reference','local-mugen/stage25-native-final-primary/results'
   '--reference','local-mugen/stage25-native-final-high/results',
   '--reference','local-mugen/stage25-native-final-close/results',
   '--reference','local-mugen/stage25-native-final-startup/results')
+# A fresh capture can place all 132 cases in a single directory.
+if (Test-Path 'local-mugen/stage25-native-repro/results/run-metadata.json') {
+  $references = @('--reference','local-mugen/stage25-native-repro/results')
+}
 py -m mugen_importer.state_crouch_light_kick @assets --base $base @references --output $profile
 if ($LASTEXITCODE) { throw 'Stage 25 conversion failed' }
 foreach ($mode in 'default','mode2') {

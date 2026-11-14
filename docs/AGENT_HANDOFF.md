@@ -1654,3 +1654,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 最终配置位于 `data/imported-characters/terry98-stage24-final`，独立本体位于 `terry98-stage24-body-final-verified`。两套预设均从阶段 23 冻结哈希和本地原版生成，使用视觉别名 `terry98-stage24-default`／`terry98-stage24-mode2`。逐帧诊断可用 `--command-audit`、`--scripted-pause-audit` 和 `--sprite-frame-audit`。 [生成命令](MUGEN_IMPORT.md#阶段-24-蹲重脚与弱-power-wave) · [对局复现](../tools/Stage24Validation/README.md)
 - 440 在默认模式的旧 tick 11–17 使用共享取消。查看命中后 Wave 落空时同时检查原版 `var(12)`、Helper 的 HitDef 和 `WaveRestrictionAudit`。接地受身要求 `x+a` 两键同帧新按。倒地反弹仍属于原版 L，旧动作攻击框和有效接触应分别核对。下一候选 430 仅完成静态准备。 [验收与证据](STAGE24_ACCEPTANCE.md)
 - 阶段 24 正式 PASS。阶段 13C–23 黄金日志逐条核对。早期试跑配置的兼容副本、实时读回开销、已知坐标偏差以及三个独立项目的构建诊断均记在验收文档。 [复现说明](../tools/Stage24Validation/README.md)
+
+### 阶段 25 蹲轻脚与普通技衔接
+
+- 阶段 25 生成目录 `data/imported-characters/terry98-stage25-final`，别名 `terry98-stage25-default`／`terry98-stage25-mode2`。六份 JSON 可从阶段 24 冻结数据、固定 Terry 原包和七批原引擎参考独立重建。实际键位为 P1 `U`、P2 `KP4` 或 `/`，同物理方向下用 `I`、`KP5` 或 `;` 仍是重脚。 [生成命令](MUGEN_IMPORT.md#阶段-25-蹲轻脚与普通技衔接) · [逐帧复现](../tools/Stage25Validation/README.md)
+- 比对 430 先看实际 `MoveStarted`、旧动作有效 tick 和 `CommandAudit`。430 的直接 Wave 候选在动作中拒绝，可回落普通技。经新普通技许可进入 Wave 与旧 tick 14 的自然 Wave 是独立路径。留意阶段 25 对弱 Wave 配置启用的 `matchCompletedMotion`，以及 430／400 在连续格挡时按新接触方向判定低段。 [时序与兼容边界](STAGE25_ACCEPTANCE.md)
+- 固定回放位于 `D:/NewKOF-stage25-verified`。图像与轨迹索引同时标出实际提交帧和场景输入。阶段 13C–24 各用自己的冻结命令和资料回放，旧阶段配置与黄金日志保留原哈希。 [图形证据](../tools/Stage25Validation/EVIDENCE.md) · [冻结命令](../tools/Stage25Validation/README.md)
+- 阶段 25 正式 PASS，7/7。下一候选可先核对站轻脚 230／235 的近远选招和已取证的 430 出边、235 入边。阶段 25 仅保留其输入优先级。 [验收矩阵](STAGE25_ACCEPTANCE.md)
