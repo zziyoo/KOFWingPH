@@ -304,5 +304,21 @@
       "near-to-close-jab-wave-apex-early-held",
       "near-to-close-jab-wave-apex-early-release"
     ]
+  },
+  "split-probe": {
+    "lastFrame": 95,
+    "cases": [
+      "near-frozen-direction-split-button-first",
+      "near-frozen-direction-split-direction-first",
+      "near-frozen-direction-split-button-neutral-first",
+      "near-frozen-direction-split-diagonal-first"
+    ]
+  },
+  "grounded-205-final": {
+    "lastFrame": 240,
+    "cases": [
+      "near-to-close-jab-wave-grounded-held",
+      "near-to-close-jab-wave-grounded-release"
+    ]
   }
 }

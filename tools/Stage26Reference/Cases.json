@@ -234,5 +234,17 @@
   "default-standing-light-kick-near-wave-buffer-age-late": {"distance": 36,"p1": [[15,15,"a"],[18,18,"D"],[19,19,"D+F"],[20,20,"F"],[21,21,"F+x"]],"p2": [[0,0,"U"]]},
   "default-standing-light-kick-near-wave-buffer-age-last": {"distance": 36,"p1": [[15,15,"a"],[19,19,"D"],[20,20,"D+F"],[21,21,"F"],[22,22,"F+x"]],"p2": [[0,0,"U"]]},
   "default-standing-light-kick-near-to-close-jab-wave-apex-early-held": {"distance": 36,"p1": [[8,8,"a"],[14,14,"D"],[15,15,"D+F"],[16,16,"F"],[17,21,"F+x"]],"p2": [[0,0,"U"]]},
-  "default-standing-light-kick-near-to-close-jab-wave-apex-early-release": {"distance": 36,"p1": [[8,8,"a"],[14,14,"D"],[15,15,"D+F"],[16,16,"F"],[17,17,"F+x"]],"p2": [[0,0,"U"]]}
+  "default-standing-light-kick-near-to-close-jab-wave-apex-early-release": {"distance": 36,"p1": [[8,8,"a"],[14,14,"D"],[15,15,"D+F"],[16,16,"F"],[17,17,"F+x"]],"p2": [[0,0,"U"]]},
+  "default-standing-light-kick-near-frozen-direction-split-button-first": {"distance": 50,"p1": [[5,5,"a"],[11,11,"x"],[21,21,"F"]],"p2": []},
+  "default-standing-light-kick-near-frozen-direction-split-direction-first": {"distance": 50,"p1": [[5,5,"a"],[11,11,"F"],[21,21,"x"]],"p2": []},
+  "default-standing-light-kick-near-frozen-direction-split-button-neutral-first": {"distance": 50,"p1": [[5,5,"a"],[11,11,"y"],[21,21,"D+F"]],"p2": []},
+  "default-standing-light-kick-near-frozen-direction-split-diagonal-first": {"distance": 50,"p1": [[5,5,"a"],[11,11,"D+F"],[21,21,"y"]],"p2": []},
+  "default-standing-light-kick-near-to-close-jab-wave-grounded-held": {"distance": 44,"p1": [[5,5,"D+b"],[56,79,"F"],[86,86,"a"],[92,92,"D"],[93,93,"D+F"],[94,94,"F"],[95,99,"F+x"]],"p2": []},
+  "default-standing-light-kick-near-to-close-jab-wave-grounded-release": {"distance": 44,"p1": [[5,5,"D+b"],[56,79,"F"],[86,86,"a"],[92,92,"D"],[93,93,"D+F"],[94,94,"F"],[95,95,"F+x"]],"p2": []},
+  "default-standing-light-kick-near-to-close-jab-wave-grounded-margin-held": {"distance": 44,"p1": [[5,5,"D+b"],[56,80,"F"],[87,87,"a"],[93,93,"D"],[94,94,"D+F"],[95,95,"F"],[96,100,"F+x"]],"p2": []},
+  "default-standing-light-kick-near-to-close-jab-wave-grounded-margin-release": {"distance": 44,"p1": [[5,5,"D+b"],[56,80,"F"],[87,87,"a"],[93,93,"D"],[94,94,"D+F"],[95,95,"F"],[96,96,"F+x"]],"p2": []},
+  "default-standing-light-kick-near-to-close-jab-wave-grounded-aligned-held": {"distance": 44,"p1": [[5,5,"D+b"],[57,80,"F"],[87,87,"a"],[93,93,"D"],[94,94,"D+F"],[95,95,"F"],[96,100,"F+x"]],"p2": []},
+  "default-standing-light-kick-near-to-close-jab-wave-grounded-aligned-release": {"distance": 44,"p1": [[5,5,"D+b"],[57,80,"F"],[87,87,"a"],[93,93,"D"],[94,94,"D+F"],[95,95,"F"],[96,96,"F+x"]],"p2": []},
+  "default-standing-light-kick-near-frozen-direction-contact-first": {"distance": 50,"p1": [[5,5,"a"],[9,9,"F"],[21,21,"x"]],"p2": []},
+  "default-standing-light-kick-near-to-crouch-kick-grounded-last": {"distance": 34,"p1": [[5,5,"a"],[31,31,"D+a"]],"p2": []}
 }

@@ -24,14 +24,16 @@
 ## 特殊技与格挡连续性
 
 - 235 的默认弱 Wave 显式窗口允许命中、格挡和空挥。有效手势可在接触冻结期间进入 Helper，恢复到旧 tick 5 时提交。模式 2 也在此窗口由同一物理手势进入原版 1050，NewKOF 保留该候选，阶段范围只运行默认 State 1000 与 Helper 1020。
-- 235 的窗口结束后，有效 x 可按 235 的普通技窗口转入 200／205／400。格挡样本在 F25 旧 tick 9 转 200，保持 x 在 F29 由 200 自身旧 tick 4 进入 1000。近身空挥样本在 F17 旧 tick 9 转 205，F21 由 205 自身旧 tick 4 进入 1000，目标 F37 被命中。对应松键样本保留 205，稍后 F23 击中空中目标。前下＋x 对照在 F24 转 400，F28 由 400 自身旧 tick 4 进入 1000。三条松键对照均无后继 Wave。230 的早期手势可过期，F23 手势的 Helper 能在 F24 的旧 tick 19 自然许可提交。F25 新手势属于恢复后的正常启动。 [200 对照](../local-mugen/stage26-native-ground/results) · [205 对照](../local-mugen/stage26-native-close-apex-early/results) · [400 对照](../local-mugen/stage26-native-ground-routes/results)
-- `Terry.cmd:1543–1561` 在特殊技之后、普通技之前检查 300 和 310。235 旧 tick 5–8 的显式许可同样适用。前＋x、前下＋y 在按键边沿记录方向，`Helper.cns` 的 `var(40)／var(41)` 锁存 4 并以每 tick 1 衰减。原版样本在旧 tick 4 输入后松开方向，旧 tick 5 分别进入 300／310。F11 的 HitPause 内输入同样可在 F21 解冻时提交。此时物理方向和 Helper 已清空，根命令仍由冻结的 `curbuftime` 保留。230 没有这两个动作中的许可。阶段 26 保留输入，不执行延期招式。 [原版冻结输入轨迹](../local-mugen/stage26-native-frozen/results)
+- 235 的窗口结束后，有效 x 可按 235 的普通技窗口转入 200／205／400。格挡样本在 F25 旧 tick 9 转 200，保持 x 在 F29 由 200 自身旧 tick 4 进入 1000。地面对照先由 440 在 F15 扫倒对手，F86 开始 235，F95 在旧 tick 9 以实际身体距 13.46875 转 205。目标持续为接地倒地，235 与 205 都未接触。保持 x 的样本 F99 由 205 自身旧 tick 4、Helper Wave 计数 8 进入 1000，Wave F115 命中。松键样本的 205 于 F107 自然退出。前下＋x 对照在 F24 转 400，F28 由 400 自身旧 tick 4 进入 1000。三条松键对照均无后继 Wave。230 的早期手势可过期，F23 手势的 Helper 能在 F24 的旧 tick 19 自然许可提交。F25 新手势属于恢复后的正常启动。 [200 对照](../local-mugen/stage26-native-ground/results) · [205 地面对照](../local-mugen/stage26-native-grounded-205-final/results) · [400 对照](../local-mugen/stage26-native-ground-routes/results)
+- 上述 205 地面样本中，NewKOF 在 440 自然恢复边界少走一步。F95 身体距为 16.636719，因而选 200，原版身体距 13.46875 选 205。这处差异针对 205 的阈值 16，单列保留。补充对照把前行输入延至 F80，并把 235 和 236 手势各移后一帧。两边在 F96 都选 205，原版身体距 10.300781，NewKOF 为 13.46875。Wave 出生位置仍相差同一个步长 3.16796875。随后用同一组 F57–80 物理输入在两边等待 440 恢复后再前行。原版 F96 身体距 13.46875 选 205，持 x 在 F100 进入 1000、F116 命中，松键在 F108 自然退出。 [阈值余量对照](../local-mugen/stage26-native-grounded-205-margin-final/results) · [恢复后同步前行对照](../local-mugen/stage26-native-grounded-205-aligned/results) · [两场断言结果](../local-mugen/stage26-native-grounded-205-aligned-check.log)
+- `Terry.cmd:1538–1560` 在特殊技之后、普通技之前检查 300 和 310。235 旧 tick 5–8 的显式许可同样适用。前＋x、前下＋y 的组合可由 `Helper.cns:2204–2222` 的 `var(40)／var(41)` 锁存 4，并以每 tick 1 衰减。旧 tick 4 输入后松开方向，旧 tick 5 可使用 Helper 进入 300／310。F11 的 HitPause 内输入也可在 F21 解冻时提交，届时物理方向与 Helper 已清空，根命令仍由冻结的 `curbuftime` 保留。四个额外样本将方向和按键分别安排在 F11 与 F21，两种输入顺序都在 F21 进入对应的 300／310。原版根命令独立缓冲按键与持方向，并在消费时组合。230 没有这两个动作中的许可。阶段 26 保留输入，不执行延期招式。 [同帧冻结输入](../local-mugen/stage26-native-frozen/results) · [分离输入](../local-mugen/stage26-native-split-probe/results)
+- 接触当帧的单独前方向不会进入冻结缓冲。中心距 50、P1 在 F5 按 a、F9 只按前、F21 只按 x 的补充对照中，F9 命令阶段尚未进入 HitPause，F10–20 均为中立。F21 解冻后仍维持 235，F32 自然退出。 [接触边界对照](../local-mugen/stage26-native-contact-direction/results)
 - `Terry.cmd:246–249,1392–1402` 的默认移动预设把同帧站姿 a+x 解释为回避 720。可控地面与 `var(2)` 自然恢复具有该许可，235 旧 tick 9 的普通技提前衔接没有这项许可。后一情况下站立 x 胜过 a。合法 Wave 优先于回避。720 本体延期，阶段 26 保留其命令占用。 [原版混合输入轨迹](../local-mugen/stage26-native-competition/results)
 - 235 在蹲防硬直中重进，第二个实例在 F29 独立格挡且零削血。只松后仍按下，F30 回到 Action 151。松下保留后，F30 回到站防 Action 150。起始中心距 40.25 的地面对照在 F25 从 235 改出 230。F30 的目标已恢复控制，`common_kof.cns:1105–1111,1212–1218` 的 `NotHitBy` 在受击方站／蹲格挡退出时给出一 tick 的 `SCA` 保护。230 在 F31 才接触。保持后仍格挡，松后改为命中 30 HP。两招分别按接触时的状态判定。 [235 连挡](../local-mugen/stage26-native-controls/results) · [230 与格挡退出](../local-mugen/stage26-native-ground-routes/results)
 
 ## 实测复现
 
-`Cases.json` 保留实际物理输入，各项是 `[首帧, 末帧, 按键]` 闭区间，重叠项取并集。`Batches.json` 记录本轮各批的场次顺序和采集上限，基础与补测合计 **236/236**。上限按批为 F90–140，模式 2 后继或复杂空中表现超出本阶段时，Godot 比较在相应范围边界结束。补充的早期 205 探针和不够区分阈值的站立尝试只用于调整输入排程，最终批次均列在清单里。阶段 25 的 `near-high-target-jab-to-kick-12` 仍作为旧 205 空中接触兼容差异单列。
+`Cases.json` 保留实际物理输入，各项是 `[首帧, 末帧, 按键]` 闭区间，重叠项取并集。`Batches.json` 记录本轮各批的场次顺序和采集上限，基础与补测合计 **242/242**。主体上限按批为 F90–140，205 地面对照采集至 F240。模式 2 后继或复杂空中表现超出本阶段时，Godot 比较在相应范围边界结束。阶段 25 的 `near-high-target-jab-to-kick-12` 仍作为旧 205 空中接触兼容差异单列。
 
 ```powershell
 $batches = Get-Content tools/Stage26Reference/Batches.json -Raw | ConvertFrom-Json -AsHashtable
@@ -49,6 +51,32 @@ foreach ($entry in $batches.GetEnumerator()) {
   $refs += "$destination/results"
 }
 py tools/Stage26Reference/Check-Traces.py @refs
+
+$waveRecovery = @('near-wave-whiff-9', 'near-wave-whiff-13', `
+  'near-to-close-jab-wave-apex-early-held', 'near-to-crouch-jab-wave-free-held') |
+  ForEach-Object { "default-standing-light-kick-$_" }
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage26 -LastFrame 190 `
+  -PreparedEngineDirectory local-mugen/stage26-native-repro-body/engine `
+  -RunDirectory local-mugen/stage26-native-repro-wave-extended -Cases $waveRecovery
+
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage26 -LastFrame 95 `
+  -PreparedEngineDirectory local-mugen/stage26-native-repro-body/engine `
+  -RunDirectory local-mugen/stage26-native-repro-contact-direction `
+  -Cases default-standing-light-kick-near-frozen-direction-contact-first
+
+$groundedMargin = @('held', 'release') | ForEach-Object {
+  "default-standing-light-kick-near-to-close-jab-wave-grounded-margin-$_"
+}
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage26 -LastFrame 240 `
+  -PreparedEngineDirectory local-mugen/stage26-native-repro-body/engine `
+  -RunDirectory local-mugen/stage26-native-repro-grounded-205-margin -Cases $groundedMargin
+
+$groundedAligned = @('held', 'release') | ForEach-Object {
+  "default-standing-light-kick-near-to-close-jab-wave-grounded-aligned-$_"
+}
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage26 -LastFrame 240 `
+  -PreparedEngineDirectory local-mugen/stage26-native-repro-body/engine `
+  -RunDirectory local-mugen/stage26-native-repro-grounded-205-aligned -Cases $groundedAligned
 ```
 
-最终实际目录用 `local-mugen/stage26-native-` 加同名批次，检查输出位于 `local-mugen/stage26-native-final-236.log`。 [逐场状态与断言结果](../local-mugen/stage26-native-final-236.log)
+最终实际目录用 `local-mugen/stage26-native-` 加同名批次。四条 F190 延伸轨迹用于 Vulkan 的完整 Wave 恢复对照，在 242 场原版门禁中按原有身份计数一次。 [逐场状态与断言结果](../local-mugen/stage26-native-final-242.log) · [Wave 延伸轨迹](../local-mugen/stage26-native-wave-extended/results)

@@ -131,7 +131,8 @@ def verify_cases(cases):
     return {'moves': moves, 'bodyVerified': body_verified, **routes,
             'completeVerified': body_verified and routes['boundariesVerified'] and routes['chainsVerified'] and
             routes['waveVerified'] and routes['forwardReserveVerified'] and routes['risingReserveVerified'] and
-            routes['groundRecoveryReserveVerified'] and routes['farGuardControlVerified'] and
+            routes['splitRootDirectionsVerified'] and routes['groundRecoveryReserveVerified'] and routes['farGuardControlVerified'] and
+            routes['groundedCloseJabWaveVerified'] and
             routes['guardFollowupVerified'] == [235] and set(routes['retainHelperTargets']) == {200, 205, 400}}
 
 
@@ -219,6 +220,17 @@ def verify_routes(cases):
     if rising_reject is not None:
         assert not starts(rising_reject, {310}), '235 unexpectedly entered 310 after the window'
 
+    split_checks = []
+    for name, target, raw in (('button-first', 300, 8), ('direction-first', 300, 128),
+                              ('button-neutral-first', 310, 10), ('diagonal-first', 310, 256)):
+        name = f'near-frozen-direction-split-{name}'
+        valid = route(name, 235, target, 21, 5, permissions=(1, 0))
+        if valid:
+            row, = starts(fixture(name), {target})
+            assert row['raw'] == raw and row['helperForwardX'] == 0
+            assert row['xBuffer' if target == 300 else 'yBuffer']
+        split_checks.append(valid)
+
     retain_helper = []
     for target, pattern, start, wave in ((200, 'near-to-jab-wave-clean-{}-58', 25, 29),
                                          (205, 'near-to-close-jab-wave-apex-early-{}', 17, 21),
@@ -230,6 +242,23 @@ def verify_routes(cases):
             assert route(pattern.format('release'), 235, target, start, 9)
             assert not starts(released, {1000})
             retain_helper.append(target)
+
+    grounded_close = []
+    for label in ('held', 'release'):
+        name = f'near-to-close-jab-wave-grounded-{label}'
+        case = fixture(name)
+        if case is None:
+            continue
+        assert route(name, 235, 205, 95, 9)
+        assert all(char_at(case[0], frame, 1)['stateType'] == 8 and char_at(case[0], frame, 1)['pos'][1] == 0
+                   for frame in range(86, 100)), name
+        if label == 'held':
+            assert route(name, 205, 1000, 99, 4, permissions=(1, 0))
+            assert case[2] == [(15, 2, 115, False), (115, 2, 92, False)], case[2]
+        else:
+            assert not starts(case, {1000})
+            assert case[2] == [(15, 2, 115, False)], case[2]
+        grounded_close.append(label)
 
     guard_followup = []
     for state, pattern, frame in ((235, 'near-reenter-guard-release-{}-23', 29),):
@@ -315,8 +344,10 @@ def verify_routes(cases):
     return {'chainsVerified': all(chain_checks), 'waveVerified': all(wave_checks) and far_reject is not None,
             'forwardReserveVerified': all(forward_checks),
             'risingReserveVerified': all(rising_checks) and rising_reject is not None,
+            'splitRootDirectionsVerified': all(split_checks),
             'groundRecoveryReserveVerified': ground_recovery is not None and far_no_chain is not None and all(dodge_checks),
             'guardFollowupVerified': guard_followup, 'retainHelperTargets': retain_helper,
+            'groundedCloseJabWaveVerified': len(grounded_close) == 2,
             'farGuardControlVerified': len(far_guard_controls) == 3, 'boundariesVerified': all(boundaries)}
 
 
