@@ -1739,6 +1739,36 @@ public class FighterDataTests
     }
 
     [Fact]
+    public void AuthoredPositionStepFollowsTheCommittedInstanceAfterGlobalPause()
+    {
+        var normal = new Commands.CommandDefinition("Normal", [], InputBits.LightPunch);
+        var cancel = new Commands.CommandDefinition("Followup", [], InputBits.HeavyKick);
+        var source = new MoveDefinition("Source", normal.CommandId, 1, 2, 3,
+            positionSteps: [new MovePositionStep(2, 32)],
+            cancels: [new CancelDefinition("Followup", 2, 2, MoveCancelPhases.Active, allowWhiff: true)]);
+        var target = new MoveDefinition("Followup", cancel.CommandId, 2, 1, 2,
+            positionSteps: [new MovePositionStep(0, 4)]);
+        var fighter = new FighterDefinition("Test", [normal, cancel], [source, target], useCommandPriority: true);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState started = simulation.Step(BattleState.CreateDefault(), F(0, InputBits.LightPunch)).State;
+        started = simulation.Step(started, FrameInput.Empty(started.Frame)).State;
+        FixedPoint x = started.Fighter(0).PositionX;
+        var paused = new BattleState(started.Frame, started.Fighters, started.StateVersion,
+            scriptedPause: new ScriptedPauseState(1, 0, true));
+
+        BattleState frozen = simulation.Step(paused, F(paused.Frame, InputBits.HeavyKick)).State;
+        Assert.Equal(x, frozen.Fighter(0).PositionX);
+        Assert.Equal(1, frozen.Fighter(0).MoveElapsedFrames);
+        FrameInput thaw = FrameInput.Empty(frozen.Frame);
+        BattleStepResult resumed = simulation.Step(frozen, thaw);
+
+        Assert.Equal(resumed.State.Fighters, simulation.Step(frozen, thaw).State.Fighters);
+        Assert.Equal("Followup", resumed.State.Fighter(0).MoveId);
+        Assert.Equal(x + FixedPoint.FromInt(4), resumed.State.Fighter(0).PositionX);
+        Assert.Equal(0, resumed.State.Fighter(0).MoveElapsedFrames);
+    }
+
+    [Fact]
     public void MissingFighterId_AndNullArrays_AreRejected()
     {
         ExpectFailure(Mutate(Json("Kai"), o => o["fighterId"] = ""));

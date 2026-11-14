@@ -460,7 +460,7 @@ public sealed class BattleSimulation
                 // 地面步行（D65）：仅站立待机响应前后输入。
                 bool guardThreat = resolved.Back && HasForwardGuardThreat(state, i);
                 bool enteringGuardRecovery = fighter.LogicState == FighterLogicState.Blockstun &&
-                    definition.ProjectileGuardRecoveryFrames > 0;
+                    (definition.HoldGroundBlockstunExitPosition || definition.ProjectileGuardRecoveryFrames > 0);
                 if (!guardThreat && !enteringGuardRecovery && !orderedGroundHitstunExit)
                     x = GroundMovement.StepX(tick.State, fighter.PositionX, fighter.Facing, resolved, definition.Movement);
                 if (definition.PreserveGuardEntryMomentum && resolved.Back)

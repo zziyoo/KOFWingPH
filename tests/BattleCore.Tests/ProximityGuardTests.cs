@@ -82,6 +82,41 @@ public sealed class ProximityGuardTests
     }
 
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void GroundBlockstunExitCanHoldPositionForOnlyTheTransitionTick(bool hold, bool mirrored)
+    {
+        var (legacy, initial) = Setup(mirrored, targetX: 60);
+        string json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", "fighters", "Kai.json"));
+        JsonNode configuration = JsonNode.Parse(json)!;
+        if (hold)
+            configuration["holdGroundBlockstunExitPosition"] = true;
+        FighterDefinition target = FighterDataLoader.Load(configuration.ToJsonString());
+        var simulation = new BattleSimulation(new FightRoster(legacy.Roster.Player1, target));
+        FighterState guarding = initial.Fighter(1) with
+        {
+            LogicState = FighterLogicState.Blockstun,
+            StunRemainingFrames = 1,
+            HitstopRemainingFrames = 1,
+        };
+        var duringStop = new BattleState(0, [initial.Fighter(0), guarding], initial.StateVersion);
+        InputBits back = mirrored ? InputBits.Left : InputBits.Right;
+        FixedPoint step = target.Movement.WalkBackwardSpeed * (mirrored ? -1 : 1);
+
+        BattleState frozen = Step(simulation, duringStop, back);
+        Assert.Equal(guarding.PositionX, frozen.Fighter(1).PositionX);
+        Assert.Equal(FighterLogicState.Blockstun, frozen.Fighter(1).LogicState);
+
+        BattleState exit = Step(simulation, frozen, back);
+        FixedPoint exitX = guarding.PositionX + (hold ? FixedPoint.Zero : step);
+        Assert.Equal(FighterLogicState.Standing, exit.Fighter(1).LogicState);
+        Assert.Equal(exitX, exit.Fighter(1).PositionX);
+        Assert.Equal(0, exit.Fighter(1).ProjectileGuardRecoveryRemaining);
+        Assert.Equal(exitX + step, Step(simulation, exit, back).Fighter(1).PositionX);
+    }
+
+    [Theory]
     [InlineData(229, true, true, true)]
     [InlineData(230, true, true, false)]
     [InlineData(231, true, true, false)]
