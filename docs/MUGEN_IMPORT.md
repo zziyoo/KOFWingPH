@@ -285,3 +285,34 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_sweep_wave.py
 ```
 
 完整配置的新增取消使用既有 `CancelDefinition`，保留阶段 23 的五个来源和 State 1000／Helper 1020。两个预设均启用 State 440 的扫倒反应和输入优先级。本体预设使用独立轨迹并省略 440 的取消项。 [阶段 24 验收](STAGE24_ACCEPTANCE.md)
+
+## 阶段 25 蹲轻脚与普通技衔接
+
+转换校验阶段 24 完整预设的 SHA-256，并从原包读取 State 430、Action 430、CMD、Helper 输入时钟和伤害变量。输入占位由真实 `2C` 接替。普通技衔接使用各来源的有效动作 tick。站立轻脚和自然恢复当帧的前＋x 仍只占用对应候选。弱 Power Wave 在 430 动作中没有直接许可，默认配置复用自然恢复入口。模式 2 保留已取证的自然手势占用。 [原版轨迹和采集命令](STAGE25_REFERENCE.md)
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+$env:NEWKOF_TERRY_AUDIT = (Get-Location).Path
+$base = 'data/imported-characters/terry98-stage24-final'
+$profile = 'data/imported-characters/terry98-stage25-final'
+$assets = @('local-mugen/terry.zip','data/imported-characters/terry98/manifest.json')
+$references = @('--reference','local-mugen/stage25-native-final-primary/results',
+  '--reference','local-mugen/stage25-native-final-boundaries/results',
+  '--reference','local-mugen/stage25-native-final-controls/results',
+  '--reference','local-mugen/stage25-native-final-near/results',
+  '--reference','local-mugen/stage25-native-final-high/results',
+  '--reference','local-mugen/stage25-native-final-close/results',
+  '--reference','local-mugen/stage25-native-final-startup/results')
+py -m mugen_importer.state_crouch_light_kick @assets --base $base @references --output $profile
+if ($LASTEXITCODE) { throw 'Stage 25 conversion failed' }
+foreach ($mode in 'default','mode2') {
+  $visual = "data/imported-characters/terry98-stage25-$mode"
+  if (-not (Test-Path -LiteralPath $visual)) {
+    py tools/Stage14Validation/stage_assets.py --binding "$profile/$mode.binding.json" --destination $visual
+    if ($LASTEXITCODE) { throw "Stage 25 $mode visual staging failed" }
+  }
+}
+py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_light_kick.py
+```
+
+站姿反应绑定 5010／5015，蹲姿反应绑定 5020／5025。两个预设复用各自冻结的地面反应框。要核对转换结果，在新目录生成后逐一比较输出与现有视觉别名的 SHA-256。

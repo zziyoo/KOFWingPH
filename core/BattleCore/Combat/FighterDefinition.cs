@@ -254,6 +254,8 @@ public sealed class FighterDefinition
                     throw new ArgumentException(
                         $"角色 {fighterId} 的招式 {move.MoveId} 取消了不存在的招式 " +
                         $"{cancel.TargetMoveId}。", nameof(moves));
+                if (cancel.RetainBufferedMotionHelper && !useCommandPriority)
+                    throw new ArgumentException("Retaining a motion helper requires priority-based command selection.", nameof(moves));
             }
         }
 

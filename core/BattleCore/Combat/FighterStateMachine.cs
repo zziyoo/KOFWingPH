@@ -482,8 +482,11 @@ public static class FighterStateMachine
 
                 if (rejectedStandingInputs is not null)
                     ConsumeRejected(ref recognition, rejectedStandingInputs, match.RecognizedFrame);
+                RecognitionState consumed = cancel.RetainBufferedMotionHelper
+                    ? recognition.WithMotionHelperRetained(match)
+                    : recognition.WithResultConsumed(match.RecognizedFrame);
                 return new FighterActionTick(FighterLogicState.Startup, target.MoveId, target.StartupFrames,
-                    recognition.WithResultConsumed(match.RecognizedFrame), match, MoveStartedFrame: frame, MoveElapsedFrames: 0);
+                    consumed, match, MoveStartedFrame: frame, MoveElapsedFrames: 0);
             }
         }
 

@@ -358,7 +358,8 @@ public static class FighterDataLoader
             allowWhiff: RequiredBool(dto.AllowWhiff, source, path + ".allowWhiff"),
             allowSameMove: dto.AllowSameMove,
             standingInputOnly: dto.StandingInputOnly,
-            maximumInputAge: dto.MaximumInputAge),
+            maximumInputAge: dto.MaximumInputAge,
+            retainBufferedMotionHelper: dto.RetainBufferedMotionHelper),
         source, path);
 
     private static ReservedCancelDefinition BuildReservedCancel(ReservedCancelDto dto, string source, string path) => Guard(

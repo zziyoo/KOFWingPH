@@ -494,6 +494,9 @@ public sealed class CancelDto
 
     [JsonPropertyName("maximumInputAge")]
     public int? MaximumInputAge { get; set; }
+
+    [JsonPropertyName("retainBufferedMotionHelper")]
+    public bool RetainBufferedMotionHelper { get; set; }
 }
 
 public sealed class ReservedCancelDto

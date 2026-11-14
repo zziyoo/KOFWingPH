@@ -71,6 +71,9 @@ public readonly struct BufferedResult
     internal bool IsExpiredAt(int frame) => Policy is null ? Match.IsExpiredAt(frame) : RootTicks == 0 && !HelperActive;
 
     internal BufferedResult WithoutRootClock() => new(Match, Consumed, Policy, 0, HelperTicks, Buttons, HelperActive);
+    internal BufferedResult RetainHelperOrConsume() => Policy is { HelperTicks: > 0 } && HelperTicks > 0
+        ? new(Match, Consumed, Policy, 0, HelperTicks, Buttons, helperActive: true)
+        : Consume();
     internal BufferedResult Consume() => new(Match, true, Policy, RootTicks, HelperTicks, Buttons, HelperActive);
 
     public bool Equals(BufferedResult other) =>
@@ -345,7 +348,12 @@ public sealed class RecognitionState
     /// 把缓冲中指定识别帧的所有<b>未消费</b>候选标记为已消费，返回全新状态（D60）。
     /// 结果不存在或已被消费时抛出——消费请求必须显式失败，不得静默重复。
     /// </summary>
-    public RecognitionState WithResultConsumed(int recognizedFrame)
+    public RecognitionState WithResultConsumed(int recognizedFrame) => ConsumeResults(recognizedFrame, null);
+
+    internal RecognitionState WithMotionHelperRetained(CommandMatch chosen) =>
+        ConsumeResults(chosen.RecognizedFrame, chosen);
+
+    private RecognitionState ConsumeResults(int recognizedFrame, CommandMatch? retainSiblingHelpers)
     {
         int index = -1;
         for (int i = 0; i < Buffer.Count; i++)
@@ -368,7 +376,9 @@ public sealed class RecognitionState
             buffer[i] = Buffer[i];
         for (int i = index; i < buffer.Length; i++)
             if (!buffer[i].Consumed && buffer[i].Match.RecognizedFrame == recognizedFrame)
-                buffer[i] = buffer[i].Consume();
+                buffer[i] = retainSiblingHelpers is { } chosen && buffer[i].Match.CommandId != chosen.CommandId &&
+                    buffer[i].Match.ButtonFrame == chosen.ButtonFrame && buffer[i].Match.DirectionFrames.Count > 0
+                    ? buffer[i].RetainHelperOrConsume() : buffer[i].Consume();
 
         // 其余四个集合复用旧状态的只读包装（只读实例可安全共享）；Buffer 换新包装。
         return new RecognitionState(LastObservedFrame, HeldAttacks, Directions, Presses,

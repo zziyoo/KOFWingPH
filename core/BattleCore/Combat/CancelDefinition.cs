@@ -58,7 +58,8 @@ public sealed class CancelDefinition
         bool allowWhiff = false,
         bool allowSameMove = false,
         bool standingInputOnly = false,
-        int? maximumInputAge = null)
+        int? maximumInputAge = null,
+        bool retainBufferedMotionHelper = false)
     {
         if (string.IsNullOrWhiteSpace(targetMoveId))
             throw new ArgumentException("取消目标招式 ID 不能为空。", nameof(targetMoveId));
@@ -87,6 +88,7 @@ public sealed class CancelDefinition
         AllowSameMove = allowSameMove;
         StandingInputOnly = standingInputOnly;
         MaximumInputAge = maximumInputAge;
+        RetainBufferedMotionHelper = retainBufferedMotionHelper;
     }
 
     /// <summary>目标招式 ID（同角色配置内）。</summary>
@@ -112,6 +114,7 @@ public sealed class CancelDefinition
     public bool AllowSameMove { get; }
     public bool StandingInputOnly { get; }
     public int? MaximumInputAge { get; }
+    public bool RetainBufferedMotionHelper { get; }
 
     /// <summary>阶段是否允许（纯函数，供状态机与测试共用）。</summary>
     public bool AllowsPhase(FighterLogicState state) => AllowsPhase(Phases, state);

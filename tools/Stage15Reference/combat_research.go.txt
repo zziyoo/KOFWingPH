@@ -31,17 +31,60 @@ var researchStage21 = strings.HasPrefix(researchScenario, "heavy-wave-")
 var researchStage22 = strings.HasPrefix(researchScenario, "crouch-wave-")
 var researchStage23 = strings.HasPrefix(researchScenario, "crouch-heavy-wave-")
 var researchStage24 = strings.HasPrefix(researchScenario, "crouch-kick-wave-")
-var researchWaveTrace = researchStage19 || researchStage20 || researchStage21 || researchStage22 || researchStage23 || researchStage24
+var researchStage25 = strings.HasPrefix(researchScenario, "crouch-light-kick-")
+var researchKickTrace = researchStage24 || researchStage25
+var researchWaveTrace = researchStage19 || researchStage20 || researchStage21 || researchStage22 || researchStage23 || researchKickTrace
 var researchSpecialMirror = researchStage19 && strings.HasPrefix(researchSpecialScenario, "mirror-") ||
 	researchStage20 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "near-wave-"), "mirror-") ||
 	researchStage21 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "heavy-wave-"), "mirror-") ||
 	researchStage22 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-wave-"), "mirror-") ||
 	researchStage23 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-heavy-wave-"), "mirror-") ||
-	researchStage24 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-kick-wave-"), "mirror-")
+	researchStage24 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-kick-wave-"), "mirror-") ||
+	researchStage25 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-light-kick-"), "mirror-")
 const researchPowerWaveCommand = "\x8e\xe3\x83\x70\x83\x8f\x81\x5b\x83\x45\x83\x46\x83\x43\x83\x75"
 var researchStage16 = !researchStage21 && (strings.HasPrefix(researchScenario, "light-") || strings.HasPrefix(researchScenario, "heavy-"))
 var researchTraceFile *os.File
 var researchEncoder *json.Encoder
+var researchPhysicalInputs [2]map[int]InputBits
+
+func researchLoadPhysicalInputs() {
+	var schedule struct {
+		P1 [][]json.RawMessage
+		P2 [][]json.RawMessage
+	}
+	if err := json.Unmarshal([]byte(os.Getenv("RESEARCH_PHYSICAL_INPUTS")), &schedule); err != nil {
+		panic(err)
+	}
+	for seat, ranges := range [2][][]json.RawMessage{schedule.P1, schedule.P2} {
+		researchPhysicalInputs[seat] = map[int]InputBits{}
+		for _, entry := range ranges {
+			if len(entry) != 3 {
+				panic("physical input range requires first frame, last frame and buttons")
+			}
+			var first, last int
+			var buttons string
+			if json.Unmarshal(entry[0], &first) != nil || json.Unmarshal(entry[1], &last) != nil ||
+				json.Unmarshal(entry[2], &buttons) != nil || first < 0 || last < first || last > 600 {
+				panic("invalid physical input range")
+			}
+			forward, back := IB_PR, IB_PL
+			if (seat == 1) != researchSpecialMirror {
+				forward, back = back, forward
+			}
+			bits := map[string]InputBits{"D": IB_PD, "U": IB_PU, "F": forward, "B": back,
+				"a": IB_A, "b": IB_B, "x": IB_X, "y": IB_Y}
+			for _, token := range strings.Split(buttons, "+") {
+				value, ok := bits[token]
+				if !ok {
+					panic("unknown physical input: " + token)
+				}
+				for frame := first; frame <= last; frame++ {
+					researchPhysicalInputs[seat][frame] |= value
+				}
+			}
+		}
+	}
+}
 
 func researchBegin() {
 	if researchCase == "" {
@@ -65,6 +108,9 @@ func researchBegin() {
 
 	if researchBaseTick < 0 {
 		researchBaseTick = sys.tickCount
+		if researchStage25 {
+			researchLoadPhysicalInputs()
+		}
 		researchIntroFrame = -1
 		if researchModeFile != nil {
 			if err := researchModeFile.Close(); err != nil {
@@ -143,6 +189,9 @@ func researchBits(pn int) InputBits {
 	}
 	if researchStage24 {
 		return researchCrouchKickWaveBits(pn)
+	}
+	if researchStage25 {
+		return researchPhysicalInputs[pn][researchFrame]
 	}
 	if pn == 0 && researchFrame == 5 {
 		return IB_Y
@@ -1014,7 +1063,7 @@ func researchTraceWithOwner(phase string, owner int) {
 			char["helperX"], char["helperY"] = researchCommandHelper(c)
 			char["vars"].(map[string]interface{})["var28"] = c.varGet(28).ToI()
 		}
-		if researchStage24 {
+		if researchKickTrace {
 			for _, name := range []string{"a", "b", "recovery"} {
 				if idx, ok := cl.Names[name]; ok {
 					for _, command := range cl.Commands[idx] {
@@ -1024,6 +1073,9 @@ func researchTraceWithOwner(phase string, owner int) {
 			}
 			char["helperX"], char["helperY"] = researchCommandHelper(c)
 			char["helperB"], char["helperRecovery"] = researchKickHelper(c)
+			if researchStage25 {
+				char["helperA"], char["helperForwardX"] = researchLightKickHelper(c)
+			}
 			char["hitId"], char["hitOwner"] = c.ghv.hitid, c.ghv.playerno+1
 			char["id"], char["hitPlayerId"] = c.id, c.ghv.playerid
 			char["fallTime"], char["fallRecover"], char["fallRecoverTime"] = c.ghv.fall_time, c.ghv.fall_recover, c.ghv.fall_recovertime
@@ -1039,7 +1091,7 @@ func researchTraceWithOwner(phase string, owner int) {
 		"tick": sys.tickCount, "matchTime": sys.matchTime, "roundState": sys.roundState(),
 		"chars": chars,
 	}
-	if researchStage17 || researchStage20 || researchStage21 || researchStage22 || researchStage23 || researchStage24 {
+	if researchStage17 || researchStage20 || researchStage21 || researchStage22 || researchStage23 || researchKickTrace {
 		row["rng"] = sys.randseed
 	}
 	if researchWaveTrace {
@@ -1068,6 +1120,15 @@ func researchKickHelper(c *Char) (int32, int32) {
 	return -1, -1
 }
 
+func researchLightKickHelper(c *Char) (int32, int32) {
+	for _, helper := range sys.chars[c.playerNo][1:] {
+		if helper.helperId == 99999 {
+			return helper.varGet(1).ToI(), helper.varGet(40).ToI()
+		}
+	}
+	return -1, -1
+}
+
 func researchStateChange(c *Char, next int32) {
 	if !(researchStage18 || researchWaveTrace) || researchEncoder == nil || c.helperIndex != 0 {
 		return
@@ -1085,7 +1146,7 @@ func researchStateChange(c *Char, next int32) {
 	if researchWaveTrace {
 		relevant = relevant || c.ss.no == 1000 || c.ss.no == 1050 || next == 1000 || next == 1050 || next == 300
 	}
-	if !relevant {
+	if !relevant && !researchStage25 {
 		return
 	}
 	helperX, helperY := researchCommandHelper(c)
@@ -1104,10 +1165,14 @@ func researchStateChange(c *Char, next int32) {
 		row["powerWaveCommand"] = c.commandByName(researchPowerWaveCommand)
 		row["helperWave"] = researchPowerWaveHelper(c)
 	}
-	if researchStage24 {
+	if researchKickTrace {
 		row["bBuffer"], row["recoveryBuffer"] = c.commandByName("b"), c.commandByName("recovery")
 		row["helperB"], row["helperRecovery"] = researchKickHelper(c)
 		row["var4"] = c.varGet(4).ToI()
+		if researchStage25 {
+			row["aBuffer"] = c.commandByName("a")
+			row["helperA"], row["helperForwardX"] = researchLightKickHelper(c)
+		}
 	}
 	if err := researchEncoder.Encode(row); err != nil {
 		panic(err)
@@ -1156,7 +1221,7 @@ func researchPowerWaveEntities(c *Char) []map[string]interface{} {
 }
 
 func researchStage17Event(kind string, values map[string]interface{}) {
-	if !(researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchStage24) || researchEncoder == nil {
+	if !(researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchKickTrace) || researchEncoder == nil {
 		return
 	}
 	values["case"], values["frame"], values["tick"], values["phase"] = researchCase, researchFrame, sys.tickCount, kind
@@ -1166,13 +1231,13 @@ func researchStage17Event(kind string, values map[string]interface{}) {
 }
 
 func researchRandom(before, after int32) {
-	if (researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchStage24) && researchEncoder != nil {
+	if (researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchKickTrace) && researchEncoder != nil {
 		researchStage17Event("rng-draw", map[string]interface{}{"before": before, "after": after})
 	}
 }
 
 func researchVarRandom(c *Char, variable, minimum, maximum, value int32) {
-	if (researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchStage24) && researchEncoder != nil && c.helperIndex == 0 && variable == 21 {
+	if (researchStage17 || researchStage21 || researchStage22 || researchStage23 || researchKickTrace) && researchEncoder != nil && c.helperIndex == 0 && variable == 21 {
 		researchStage17Event("var21-draw", map[string]interface{}{
 			"seat": c.playerNo + 1, "state": c.ss.no, "min": minimum, "max": maximum, "value": value, "rng": sys.randseed,
 		})
@@ -1193,7 +1258,7 @@ func researchDamageVariable(c *Char, operation string, index, before, after int3
 }
 
 func researchHitDef(c *Char) {
-	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || researchStage22 && c.ss.no == 400 || researchStage23 && c.ss.no == 410 || researchStage24 && c.ss.no == 440 || (researchStage16 || researchStage17 || researchStage18 || researchWaveTrace) && c.ss.no == 205) {
+	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || researchStage22 && c.ss.no == 400 || researchStage23 && c.ss.no == 410 || researchStage24 && c.ss.no == 440 || researchStage25 && c.ss.no == 430 || (researchStage16 || researchStage17 || researchStage18 || researchWaveTrace) && c.ss.no == 205) {
 		researchTraceWithOwner("hitdef", c.playerNo+1)
 	}
 }

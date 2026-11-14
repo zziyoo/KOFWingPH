@@ -201,6 +201,41 @@ public sealed class CrouchRouteTests
     }
 
     [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void NormalFallbackRetainsOnlyTheHelperMotionAndHoldingTheButtonControlsItsLifetime(
+        bool held, bool entersWave)
+    {
+        FighterDefinition fighter = KickFighter(retainHelper: true);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = BattleState.CreateDefault();
+        var starts = new List<(int, string?)>();
+        for (int frame = 0; frame <= 20; frame++)
+        {
+            InputBits bits = frame switch
+            {
+                0 => InputBits.Down | InputBits.LightKick,
+                9 => InputBits.Down,
+                10 => InputBits.Down | InputBits.Right,
+                11 => InputBits.Right,
+                12 => InputBits.Right | InputBits.LightPunch,
+                _ => held && frame > 12 ? InputBits.LightPunch : InputBits.None,
+            };
+            BattleStepResult step = simulation.Step(state, new FrameInput(frame, bits, 0));
+            if (step.Events.Any(evt => evt.Type == BattleEventType.MoveStarted))
+                starts.Add((frame, step.State.Fighter(0).MoveId));
+            if (frame == 12)
+            {
+                var candidates = step.State.Fighter(0).RecognitionState.Buffer;
+                Assert.Contains(candidates, candidate => candidate.Match.CommandId == "5A" && candidate.Consumed);
+                Assert.Contains(candidates, candidate => candidate.Match.CommandId == "236A" && !candidate.Consumed);
+            }
+            state = step.State;
+        }
+        Assert.Equal(entersWave ? [(0, Kick), (12, Stand), (16, Wave)] : [(0, Kick), (12, Stand)], starts);
+    }
+
+    [Theory]
     [InlineData(14, false)]
     [InlineData(17, true)]
     [InlineData(19, true)]
@@ -257,7 +292,7 @@ public sealed class CrouchRouteTests
         Assert.Equal(started.FrameBefore, actual[^1].State.Fighter(1).LastHitAttackStartFrame);
     }
 
-    private static FighterDefinition KickFighter()
+    private static FighterDefinition KickFighter(bool retainHelper = false)
     {
         var light = new CommandDefinition("5A", [], InputBits.LightPunch, 1, 0, priority: 1, bufferLifetimeFrames: 2);
         var kick = new CommandDefinition("2C", [], InputBits.LightKick, 1, 0, bufferLifetimeFrames: 2);
@@ -266,12 +301,14 @@ public sealed class CrouchRouteTests
             bufferPolicy: new CommandBufferPolicy(true, 12, 1, 4));
         var moves = new MoveDefinition[]
         {
-            new(Stand, "5A", 3, 4, 5, MoveAllowedStates.Standing),
+            new(Stand, "5A", 3, 4, 5, MoveAllowedStates.Standing,
+                cancels: [new CancelDefinition(Wave, 4, 6, MoveCancelPhases.Active, allowWhiff: true)]),
             new(Wave, "236A", 15, 2, 35),
             new(Kick, "2C", 3, 3, 8, MoveAllowedStates.Crouching,
                 attacks: [new AttackDefinition(45, 8, 20, 7, height: AttackHeight.Low, hitstunFrames: 11,
                     hitstopByOutcome: new(new(11, 13), new(11, 11)), dynamicDamage: new(7, 8, false))],
-                cancels: [new CancelDefinition(Stand, 6, 13, allowWhiff: true, standingInputOnly: true, maximumInputAge: 2),
+                cancels: [new CancelDefinition(Stand, 6, 13, allowWhiff: true, standingInputOnly: true, maximumInputAge: 2,
+                    retainBufferedMotionHelper: retainHelper),
                     new CancelDefinition(Kick, 6, 13, allowWhiff: true, allowSameMove: true, maximumInputAge: 2)],
                 returnsToCrouch: true),
         };
