@@ -38,6 +38,34 @@ public sealed class CrouchRouteTests
     }
 
     [Theory]
+    [InlineData(39, InputBits.Down, InputBits.Down, false)]
+    [InlineData(38, InputBits.None, InputBits.Down, false)]
+    [InlineData(37, InputBits.Down, InputBits.Down, true)]
+    [InlineData(39, InputBits.Down, InputBits.None, false)]
+    public void BufferedReservationUsesCurrentDirectionAndSuppressesTheNewLosingEdge(int lightEdge,
+        InputBits lightDirection, InputBits exitDirection, bool startsSweep)
+    {
+        var light = new CommandDefinition("LightKick", [CommandDirection.Down, CommandDirection.DownBack, CommandDirection.DownForward],
+            InputBits.LightKick, 1, 0, priority: 1, bufferLifetimeFrames: 2, reserveGroundInput: true);
+        var kick = new CommandDefinition("HeavyKick", [], InputBits.HeavyKick, 1, 0, bufferLifetimeFrames: 2);
+        var sweep = new MoveDefinition("Sweep", "HeavyKick", 10, 8, 22, MoveAllowedStates.Crouching, returnsToCrouch: true);
+        var fighter = new FighterDefinition("Test", [light, kick], [sweep], useCommandPriority: true);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = BattleState.CreateDefault();
+        for (int frame = 0; frame <= 41; frame++)
+        {
+            InputBits bits = frame == 0 ? InputBits.Down | InputBits.HeavyKick
+                : frame == lightEdge ? lightDirection | InputBits.LightKick
+                : frame == 40 ? exitDirection | InputBits.HeavyKick : exitDirection;
+            state = simulation.Step(state, new FrameInput(frame, bits, 0)).State;
+        }
+
+        Assert.Equal(startsSweep ? "Sweep" : null, state.Fighter(0).MoveId);
+        if (exitDirection == InputBits.Down && !startsSweep)
+            Assert.All(state.Fighter(0).RecognitionState.Buffer, result => Assert.True(result.Consumed));
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]

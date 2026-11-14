@@ -19,6 +19,8 @@ MOVE = 'TerryCrouchHeavyKick440'
 COMMAND = '2D'
 RESERVED_LIGHT_KICK = 'ReservedCrouchLightKick'
 RESERVED_STANDING_HEAVY_KICK = 'ReservedStandHeavyKick'
+TRIP_LANDING_ACTIONS = {phase: wave.LAUNCH_ACTIONS[phase]
+                        for phase in ('Impact', 'Bounce', 'LyingImpact', 'Lying', 'Wakeup')}
 PRESETS = {'default': ('TerrySweepWave', 'terry98-stage24-default'),
            'mode2': ('TerrySweepWaveMode2', 'terry98-stage24-mode2')}
 FROZEN_BASE = {
@@ -103,7 +105,13 @@ def source_entry(contents, default_wave_line):
     require_fields(decay, {'type': 'varadd', 'trigger1': 'var(3)>0', 'var(3)': '-1'}, 'unsupported State 440 Helper decay')
     require(latch.line < decay.line and not latch.values('ignorehitpause') and not decay.values('ignorehitpause'),
             'unsupported State 440 Helper clock')
+    light_latch, light_decay = [c for c in helper if c.values('var(1)')]
+    require_fields(light_latch, {'type': 'varset', 'trigger1': 'command="a"'}, 'unsupported light kick Helper latch')
+    require_fields(light_decay, {'type': 'varadd', 'trigger1': 'var(1)>0', 'var(1)': '-1'}, 'unsupported light kick Helper decay')
+    require(light_latch.line < light_decay.line and not light_latch.values('ignorehitpause')
+            and not light_decay.values('ignorehitpause'), 'unsupported light kick Helper clock')
     return entry, {'time': int(single.one('time')), 'bufferFrames': int(latch.one('var(3)')) - 1,
+                   'lightKickBufferFrames': int(light_latch.one('var(1)')) - 1,
                    'helperLatchLine': latch.line, 'helperDecayLine': decay.line}
 
 
@@ -188,6 +196,7 @@ def source_juggle_limit(negative, helper_script, attack):
                  normalized(c.one('attr', '')) == 's,sp' and 'var(1)=1' in map(normalized, c.values('trigger1'))]
     require(len(weak_hits) == 2 and all({'root,var(12)=0', 'root,var(13)=0||root,var(13)>=10'} <=
                 set(map(normalized, c.values('triggerall'))) for c in weak_hits), 'unsupported weak Wave juggle permission')
+    require(all(normalized(c.one('hitflag')) == 'mafp' for c in weak_hits), 'unsupported weak Wave target eligibility')
     return {'hitId': hit_id, 'resetLine': reset.line, 'capLine': cap.line, 'registrationLine': registration.line,
             'helperHitDefs': [c.line for c in weak_hits]}
 
@@ -202,10 +211,11 @@ def inspect_source(archive, manifest):
     definition, controls, hit, bounds, damage = source_attack(contents['st1'])
     entry, command = source_entry(contents, prior['sourceLines']['defaultWaveEntry'])
     actions, diagnostics = parse_air(contents['anim'].decode('latin-1'))
-    wanted = (440, 5070, 5100, 5035, 5120, 5170, 5200)
+    wanted = (440, 5070, 5035, 5200, *TRIP_LANDING_ACTIONS.values())
     require(not any(f'duplicate action {number} ' in warning for warning in diagnostics for number in wanted),
             'duplicate Stage 24 AIR action')
-    selected = {number: wave.source_action(actions, number, hold_last=number == 5070) for number in wanted}
+    held_actions = (5070, TRIP_LANDING_ACTIONS['Bounce'])
+    selected = {number: wave.source_action(actions, number, hold_last=number in held_actions) for number in wanted}
     source_hashes = state200.manifest_hashes(prior['zipSha256'], members)
     sprite_indices = {number: state200.validate_manifest(manifest, source_hashes, action)
                       for number, (action, _) in selected.items()}
@@ -259,7 +269,8 @@ def build_profile(audit, native, fighter, binding, mode, *, with_cancel=True):
                       'chargeHoldFrames': 0, 'chargeReleaseToleranceFrames': 0}
     fighter['commands'].extend([
         {**common_command, 'commandId': RESERVED_LIGHT_KICK, 'directions': ['Down', 'DownForward', 'DownBack'],
-         'buttons': ['LightKick'], 'bufferLifetimeFrames': 0, 'priority': last_priority - 1, 'reserveGroundInput': True},
+         'buttons': ['LightKick'], 'bufferLifetimeFrames': command['lightKickBufferFrames'],
+         'priority': last_priority - 1, 'reserveGroundInput': True},
         {**common_command, 'commandId': RESERVED_STANDING_HEAVY_KICK, 'directions': ['Neutral', 'Back', 'Forward'],
          'buttons': ['HeavyKick'], 'bufferLifetimeFrames': 0, 'priority': last_priority - 2, 'reserveGroundInput': True},
         {**common_command, 'commandId': COMMAND, 'directions': [], 'buttons': ['HeavyKick'],
@@ -289,6 +300,7 @@ def build_profile(audit, native, fighter, binding, mode, *, with_cancel=True):
                                'duration': tech['durationFrames'], 'action': audit['techAction'],
                                'stopTick': tech['slideFrames']}, 'State 440 native tech differs from authored reaction')
     attack.update(height='Low', damage=0, dynamicDamage=audit['damage'], groundKnockback=fraction(0),
+                  rejectsLyingTargets=True,
                   launchVelocityX=defaults['launchX'], launchVelocityY=defaults['launchY'], launchGravity=defaults['gravity'],
                   launchReaction=launch, knockdownFrames=launch['impactFrames'] + launch['lieDownFrames'],
                   wakeupFrames=launch['wakeupFrames'])
@@ -303,6 +315,8 @@ def build_profile(audit, native, fighter, binding, mode, *, with_cancel=True):
     binding['clips']['state440'] = {'action': action['id'], 'clock': 'move', 'loop': False}
     binding['clips']['launch_trip'] = {'action': trip['action'], 'clock': 'phase', 'loop': False}
     binding['clips']['launch_Tech'] = {'action': audit['techAction'], 'clock': 'phase', 'loop': False}
+    for phase, reaction_action in TRIP_LANDING_ACTIONS.items():
+        binding['clips'][f'launch_{phase}'] = {'action': reaction_action, 'clock': 'phase', 'loop': False}
     binding['moves'][MOVE] = {phase: 'state440' for phase in ('Startup', 'Active', 'Recovery')}
     if mode == 'mode2':
         require(wave.COMMAND_ID not in commands and not any(m['moveId'] == wave.MOVE_ID for m in fighter['moves']),
@@ -314,6 +328,8 @@ def build_profile(audit, native, fighter, binding, mode, *, with_cancel=True):
     require(target['commandId'] == wave.COMMAND_ID and projectile['projectileTypeId'] == wave.ENTITY_ID,
             'frozen State 1000 lacks its weak Wave command or Helper')
     projectile['timeline']['respectsAirFollowupRestriction'] = True
+    for span in projectile['timeline']['hitSpans']:
+        span['hit']['rejectsLyingTargets'] = True
     if with_cancel:
         require(native['cancelVerified'], 'State 440 requires a verified native cancel window')
         first, last = audit['cancelWindow']

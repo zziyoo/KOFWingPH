@@ -375,6 +375,13 @@ public sealed class RecognitionState
             new ReadOnlyCollection<BufferedResult>(buffer), ConsumedEndFrames, ChargePendings, Last);
     }
 
+    internal RecognitionState WithReservedGroundInputConsumed(int recognizedFrame, int frame)
+    {
+        RecognitionState chosen = WithResultConsumed(recognizedFrame);
+        return frame != recognizedFrame && Buffer.Any(result => !result.Consumed && result.Match.RecognizedFrame == frame)
+            ? chosen.WithResultConsumed(frame) : chosen;
+    }
+
     /// <summary>
     /// 更新每条蓄力指令的「释放挂起」状态（D51/D52/D54，规则与 03B 一致）：
     /// 1) 当前方向 == 蓄力方向 → 挂起作废、重新计数；
@@ -473,7 +480,7 @@ public sealed class RecognitionState
 
         if (definition.ReserveGroundInput)
         {
-            if (!sequence.Contains(directions[^1].Direction))
+            if (definition.BufferLifetimeFrames == 0 && !sequence.Contains(directions[^1].Direction))
                 return false;
             pressIndex = FindPressIndex(presses, definition.RequiredButtons, frame, tolerance: 0);
             if (pressIndex < 0)

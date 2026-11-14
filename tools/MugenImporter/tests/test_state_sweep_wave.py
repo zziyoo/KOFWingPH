@@ -17,7 +17,7 @@ GUARD_PAUSE = {'attackerFrames': 11, 'defenderFrames': 11}
 AUDIT = {
     'action': {'id': 440, 'strikes': [{'box': BOX}], 'startup': 10, 'active': 8, 'recovery': 22,
                'durations': [2, 4, 4, 8, 8, 7, 7], 'clsn2': [[BOX]] * 7},
-    'command': {'time': 1, 'bufferFrames': 2},
+    'command': {'time': 1, 'bufferFrames': 2, 'lightKickBufferFrames': 2},
     'damage': {'normalBase': 16, 'counterBase': 18, 'useContactDivisor': False},
     'guardThreatFrames': 18,
     'cancelWindow': [11, 17],
@@ -59,7 +59,8 @@ def baseline(mode):
     if mode == 'default':
         fighter['commands'].append({'commandId': WAVE_COMMAND, 'priority': 3})
         fighter['moves'].append({'moveId': WAVE_MOVE, 'commandId': WAVE_COMMAND,
-                                 'projectiles': [{'projectileTypeId': 'TerryPowerWave1020', 'timeline': {}}]})
+                                 'projectiles': [{'projectileTypeId': 'TerryPowerWave1020',
+                                                  'timeline': {'hitSpans': [{'hit': {}}, {'hit': {}}]}}]})
     return fighter, {'clips': {'idle': {'action': 0}}, 'moves': {}}
 
 
@@ -78,6 +79,7 @@ class StateSweepWaveTests(unittest.TestCase):
                 self.assertEqual((['LightKick'], ['Down', 'DownForward', 'DownBack'], True),
                                  (reserved['buttons'], reserved['directions'], reserved['reserveGroundInput']))
                 self.assertLess(reserved['priority'], 0)
+                self.assertEqual(2, reserved['bufferLifetimeFrames'])
                 self.assertGreater(reserved['priority'], command['priority'])
                 standing = next(c for c in fighter['commands'] if c['commandId'] == 'ReservedStandHeavyKick')
                 self.assertEqual((['HeavyKick'], ['Neutral', 'Back', 'Forward'], True),
@@ -102,6 +104,7 @@ class StateSweepWaveTests(unittest.TestCase):
         self.assertEqual(AUDIT['damage'], attack['dynamicDamage'])
         self.assertTrue(attack['launchReaction']['startInFall'])
         self.assertTrue(attack['launchReaction']['suppressOwnerProjectilesDuringFall'])
+        self.assertTrue(attack['rejectsLyingTargets'])
         self.assertEqual(AUDIT['groundTech'], attack['launchReaction']['groundTech'])
         self.assertEqual(5070, binding['clips']['launch_trip']['action'])
         self.assertEqual(5200, binding['clips']['launch_Tech']['action'])
@@ -118,6 +121,16 @@ class StateSweepWaveTests(unittest.TestCase):
         mode2, _ = sweep.build_profile(AUDIT, {**NATIVE, 'cancelVerified': False}, *baseline('mode2'), 'mode2')
         self.assertEqual([], mode2['moves'][-1]['cancels'])
         self.assertFalse(any(move['moveId'] == WAVE_MOVE for move in mode2['moves']))
+
+    def test_both_presets_bind_the_complete_trip_reaction(self):
+        for mode in ('default', 'mode2'):
+            with self.subTest(mode=mode):
+                _, binding = sweep.build_profile(AUDIT, NATIVE, *baseline(mode), mode)
+                expected = {'trip': 5070, 'Impact': 5100, 'Bounce': 5160, 'LyingImpact': 5170,
+                            'Lying': 5110, 'Wakeup': 5120, 'Tech': 5200}
+                actual = {phase: binding['clips'].get(f'launch_{phase}') for phase in expected}
+                self.assertEqual({phase: {'action': action, 'clock': 'phase', 'loop': False}
+                                  for phase, action in expected.items()}, actual)
 
     def test_reference_from_incompatible_launch_or_guard_is_rejected(self):
         for key, change, message in [('hit', {'launchY': 9}, 'launch'),
@@ -147,8 +160,9 @@ class StateSweepWaveTests(unittest.TestCase):
                 converted, _ = sweep.build_profile(AUDIT, NATIVE, fighter, binding, 'default', with_cancel=enable_cancel)
                 old = next(item for item in fighter['moves'] if item['moveId'] == WAVE_MOVE)
                 new = next(item for item in converted['moves'] if item['moveId'] == WAVE_MOVE)
-                self.assertEqual({}, old['projectiles'][0]['timeline'])
+                self.assertEqual({'hitSpans': [{'hit': {}}, {'hit': {}}]}, old['projectiles'][0]['timeline'])
                 self.assertTrue(new['projectiles'][0]['timeline'].get('respectsAirFollowupRestriction'))
+                self.assertTrue(all(span['hit']['rejectsLyingTargets'] for span in new['projectiles'][0]['timeline']['hitSpans']))
 
     @unittest.skipUnless(os.environ.get('NEWKOF_TERRY_AUDIT'), 'requires the local original Terry archive and manifest')
     def test_original_audit_preserves_ground_tech_reaction_and_input(self):

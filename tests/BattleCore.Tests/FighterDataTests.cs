@@ -33,11 +33,12 @@ public class FighterDataTests
     private static FrameInput F(int frame, InputBits p1, InputBits p2 = InputBits.None) => new(frame, p1, p2);
 
     [Theory]
-    [InlineData(-1, false)]
-    [InlineData(26, false)]
-    [InlineData(27, true)]
-    [InlineData(31, true)]
-    public void AuthoredMeleeTripPreservesReactionAndGroundTechWindow(int techAtFallTick, bool groundTech)
+    [InlineData(-1, false, false)]
+    [InlineData(26, false, false)]
+    [InlineData(27, false, true)]
+    [InlineData(31, false, true)]
+    [InlineData(27, true, false)]
+    public void AuthoredMeleeTripPreservesReactionAndGroundTechWindow(int techAtFallTick, bool splitChord, bool groundTech)
     {
         string json = Mutate(Json("Kai"), fighter =>
         {
@@ -104,8 +105,14 @@ public class FighterDataTests
         while (state.Fighter(1).LaunchReaction is { } reaction)
         {
             Assert.InRange(state.Frame, 1, 100);
-            InputBits defense = reaction.Phase == LaunchReactionPhase.Fall && reaction.Ticks == techAtFallTick
-                ? InputBits.LightPunch | InputBits.LightKick : InputBits.None;
+            InputBits defense = InputBits.None;
+            if (reaction.Phase == LaunchReactionPhase.Fall)
+            {
+                if (reaction.Ticks == techAtFallTick)
+                    defense = InputBits.LightPunch | InputBits.LightKick;
+                else if (splitChord && reaction.Ticks == techAtFallTick - 1)
+                    defense = InputBits.LightPunch;
+            }
             FrameInput input = F(state.Frame, InputBits.None, defense);
             BattleStepResult next = sim.Step(state, input);
             Assert.Equal(next.State.Fighters, sim.Step(state, input).State.Fighters);

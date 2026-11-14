@@ -95,6 +95,73 @@ public sealed class MultiHitCancelTests
         Replay(simulation, results, inputs, cancelFrame + 1);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SweepCancelReplaysAcrossShakeAndRecoveryWithoutRearmingWave(bool mirrored)
+    {
+        BattleSimulation simulation = Simulation(withSweep: true);
+        BattleState state = Duel(62, mirrored);
+        InputBits forward = mirrored ? InputBits.Left : InputBits.Right;
+        FrameInput[] inputs = Enumerable.Range(0, 118)
+            .Select(frame => new FrameInput(frame, frame == 0 ? InputBits.Down | InputBits.HeavyKick
+                : Motion(frame, 14, forward), InputBits.None)).ToArray();
+        var results = new List<BattleStepResult>();
+        foreach (FrameInput input in inputs)
+        {
+            BattleStepResult result = simulation.Step(state, input);
+            results.Add(result);
+            state = result.State;
+        }
+
+        Assert.Equal((11, 13), (results[10].State.Fighter(0).HitstopRemainingFrames,
+            results[10].State.Fighter(1).HitstopRemainingFrames));
+        Assert.Equal(LaunchReactionPhase.Shake, results[17].State.Fighter(1).LaunchReaction!.Value.Phase);
+        BattleStepResult cancel = results[22];
+        Assert.Equal((Wave, 22, 0, -1, -1), (cancel.State.Fighter(0).MoveId,
+            cancel.State.Fighter(0).MoveStartedFrame, cancel.State.Fighter(0).MoveElapsedFrames,
+            cancel.State.Fighter(0).HitConfirmFrame, cancel.State.Fighter(0).BlockConfirmFrame));
+        Assert.Equal(results[21].State.Fighter(1).Health, cancel.State.Fighter(1).Health);
+        Assert.Empty(cancel.Contacts);
+        Assert.Empty(results[36].State.Projectiles);
+        Assert.Equal((1, 25, false), (Assert.Single(results[37].State.Projectiles).ProjectileId,
+            results[37].State.Projectiles[0].RemainingLifetime, results[37].State.Projectiles[0].HasContact));
+        Assert.Empty(results[62].State.Projectiles);
+        Assert.Equal(LaunchReactionPhase.Impact, results[55].State.Fighter(1).LaunchReaction!.Value.Phase);
+        Assert.Equal(FighterLogicState.Standing, results[107].State.Fighter(1).LogicState);
+        Assert.All(results.Skip(10), result => Assert.Equal(results[10].State.Fighter(1).Health,
+            result.State.Fighter(1).Health));
+        Assert.DoesNotContain(results.SelectMany(result => result.Events), e => e.Type == BattleEventType.ProjectileHit);
+        foreach (int snapshot in new[] { 10, 18, 22, 55, 107 })
+            Replay(simulation, results, inputs, snapshot);
+    }
+
+    [Fact]
+    public void RepeatedSweepKeepsItsAttackBoxWithoutHittingTheLyingBounce()
+    {
+        BattleSimulation simulation = Simulation(withSweep: true);
+        BattleState state = Duel(54);
+        var hits = new List<int>();
+        for (int frame = 0; frame <= 107; frame++)
+        {
+            InputBits sweep = frame is 0 or 53 ? InputBits.Down | InputBits.HeavyKick
+                : frame is 51 or 52 ? InputBits.Right : InputBits.None;
+            BattleStepResult result = simulation.Step(state, new FrameInput(frame, sweep, 0));
+            state = result.State;
+            if (frame == 53)
+                Assert.Equal(("Sweep", 53, 0), (state.Fighter(0).MoveId, state.Fighter(0).MoveStartedFrame,
+                    state.Fighter(0).MoveElapsedFrames));
+            if (frame == 60)
+                Assert.Equal(LaunchReactionPhase.Bounce, state.Fighter(1).LaunchReaction!.Value.Phase);
+            if (frame == 63)
+                Assert.Single(FighterBoxes.GetActiveHitboxes(state.Fighter(0), simulation.Roster.Player1));
+            hits.AddRange(result.Events.Where(e => e.Type == BattleEventType.Hit).Select(e => e.Frame));
+        }
+
+        Assert.Equal(new[] { 10 }, hits);
+        Assert.Equal(FighterLogicState.Standing, state.Fighter(1).LogicState);
+    }
+
     [Fact]
     public void BothSourcesCanCancelWithoutReusingTheFirstEntityWhileItIsAlive()
     {
@@ -241,7 +308,7 @@ public sealed class MultiHitCancelTests
     }
 
     // Match the audited 215 clocks and group windows. Narrower synthetic hurtboxes isolate first-group whiff.
-    private static BattleSimulation Simulation(bool cancelEnabled = true)
+    private static BattleSimulation Simulation(bool cancelEnabled = true, bool withSweep = false)
     {
         AttackDefinition Group(FixedPoint forward, FixedPoint halfWidth, int first, int last, int group) =>
             new(forward, 53, halfWidth, 27, first, last, hitstunFrames: 19, blockstunFrames: 18,
@@ -256,19 +323,37 @@ public sealed class MultiHitCancelTests
             cancels: [new(Wave, 4, 6, MoveCancelPhases.Active, allowWhiff: true)]);
         var hit = new AttackDefinition(0, 0, 1, 1, hitstopByOutcome: new(new(0, 13), new(0, 11)));
         var timeline = new ProjectileTimeline(11, [new ProjectileHitSpan(1, 12, new FixedRect(16, 79, 1, 48), hit,
-            guardDamage: 9, dynamicDamage: new DynamicAttackDamage(12, 14, false))]);
+            guardDamage: 9, dynamicDamage: new DynamicAttackDamage(12, 14, false))],
+            respectsAirFollowupRestriction: withSweep);
         var wave = new MoveDefinition(Wave, "236A", 15, 2, 35, projectiles:
             [new ProjectileDefinition(Helper, new AttackDefinition(0, 0, 1, 1), FixedPoint.FromFraction(5, 2),
                 lifetimeFrames: 25, timeline: timeline)]);
         var rules = new DynamicDamageRules(new DamageRatio(1923, 200), new DamageRatio(4, 5), DamageRatio.One,
             new DamageRatio(97, 100), varianceMaximum: 2, counterGraceTicks: 2);
-        var fighter = new FighterDefinition("TwoContactRoutes",
-            [new("5A", [], InputBits.LightPunch, priority: 1, bufferLifetimeFrames: 2),
+        var commands = new List<CommandDefinition> {
+             new("5A", [], InputBits.LightPunch, priority: 1, bufferLifetimeFrames: 2),
              new("5B", [], InputBits.HeavyPunch, priority: 0, bufferLifetimeFrames: 1),
              new("236A", [CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward],
                  InputBits.LightPunch, maxSequenceFrames: 16, buttonToleranceFrames: 0, priority: 2,
-                 bufferLifetimeFrames: 0, matchHeldMotion: true, bufferPolicy: new CommandBufferPolicy(true, 12, 1, 4))],
-            [heavy, light, wave], groundHurtboxes: new GroundHurtboxes([new FixedRect(-19, 19, 1, 88)],
+                 bufferLifetimeFrames: 0, matchHeldMotion: true, bufferPolicy: new CommandBufferPolicy(true, 12, 1, 4)) };
+        var moves = new List<MoveDefinition> { heavy, light, wave };
+        if (withSweep)
+        {
+            var reaction = new LaunchReactionProfile(4, FixedPoint.FromFraction(3, 4), 3,
+                FixedPoint.FromFraction(1, 2), 13, 25, 8, 3, 2, startInFall: true,
+                suppressOwnerProjectilesDuringFall: true);
+            var sweepHit = new AttackDefinition(FixedPoint.FromFraction(119, 2), FixedPoint.FromFraction(81, 2),
+                FixedPoint.FromFraction(71, 2), FixedPoint.FromFraction(23, 2), 0, 7, AttackHeight.Low,
+                hitstopByOutcome: new(new(11, 13), new(11, 11)),
+                launchVelocityX: 2, launchVelocityY: 8, knockdownFrames: 17, wakeupFrames: 25,
+                launchGravity: FixedPoint.FromFraction(1, 2), launchReaction: reaction,
+                dynamicDamage: new DynamicAttackDamage(16, 18, false), rejectsLyingTargets: true);
+            commands.Add(new CommandDefinition("2D", [], InputBits.HeavyKick, bufferLifetimeFrames: 2));
+            moves.Add(new MoveDefinition("Sweep", "2D", 10, 8, 22, MoveAllowedStates.Crouching,
+                attacks: [sweepHit], cancels: [new(Wave, 11, 17, MoveCancelPhases.Active, allowWhiff: true)]));
+        }
+        var fighter = new FighterDefinition("TwoContactRoutes", commands, moves,
+            groundHurtboxes: new GroundHurtboxes([new FixedRect(-19, 19, 1, 88)],
                 [new FixedRect(-19, 19, 1, 72)]), damageRules: rules, useCommandPriority: true, forwardGuardDistance: 120);
         return new BattleSimulation(new FightRoster(fighter, fighter));
     }

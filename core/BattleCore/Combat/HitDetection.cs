@@ -250,6 +250,10 @@ public static class HitDetection
     /// <summary>共享空列表（避免每帧分配；调用方不得修改）。</summary>
     private static readonly AttackContact[] EmptyContacts = Array.Empty<AttackContact>();
 
+    internal static bool CanHitTarget(AttackDefinition attack, FighterState target) =>
+        !attack.RejectsLyingTargets || (target.LaunchReaction is { } reaction
+            ? !reaction.IsLying : target.LogicState is not (FighterLogicState.Knockdown or FighterLogicState.Wakeup));
+
     /// <summary>
     /// 检测本帧全部「攻击框 ∩ 受击框」接触候选（几何层；不结算）。
     /// 攻击框不检测攻击者自己；空中角色的 Hurtbox 同样参与几何检测
@@ -300,8 +304,9 @@ public static class HitDetection
         for (int i = 0; i < hitboxes.Count; i++)
         {
             ActiveHitbox hitbox = hitboxes[i];
-            bool inclusive = move.Attacks[hitbox.AttackIndex].ContactOnEdge;
-            if (hurtboxes.Any(hurt => inclusive ? hitbox.Box.IntersectsOrTouches(hurt) : hitbox.Box.Overlaps(hurt)))
+            AttackDefinition attack = move.Attacks[hitbox.AttackIndex];
+            if (CanHitTarget(attack, target) && hurtboxes.Any(hurt => attack.ContactOnEdge
+                    ? hitbox.Box.IntersectsOrTouches(hurt) : hitbox.Box.Overlaps(hurt)))
             {
                 contacts ??= new List<AttackContact>(4);
 

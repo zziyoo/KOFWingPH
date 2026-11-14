@@ -193,17 +193,17 @@ public sealed class FighterDefinition
         var moveCopy = moves.ToArray();
 
         var commandIds = new HashSet<string>(StringComparer.Ordinal);
-        var reserved = new HashSet<string>(StringComparer.Ordinal);
+        var reserved = new Dictionary<string, CommandDefinition>(StringComparer.Ordinal);
         foreach (CommandDefinition command in commandCopy)
         {
             if (command.ReserveGroundInput)
-                reserved.Add(command.CommandId);
+                reserved.TryAdd(command.CommandId, command);
             if (!commandIds.Add(command.CommandId))
                 throw new ArgumentException(
                     $"角色 {fighterId} 的指令 ID 重复：{command.CommandId}（同一角色内同一指令" +
                     "映射到多个招式会产生歧义）。", nameof(commands));
         }
-        if (reserved.Count > 0 && (!useCommandPriority || moveCopy.Any(move => reserved.Contains(move.CommandId))))
+        if (reserved.Count > 0 && (!useCommandPriority || moveCopy.Any(move => reserved.ContainsKey(move.CommandId))))
             throw new ArgumentException("保留的地面指令需要优先级选招且不可绑定招式。", nameof(commands));
         ReservedGroundCommands = reserved;
 
@@ -294,8 +294,8 @@ public sealed class FighterDefinition
 
     /// <summary>该角色的专属指令表（只读，识别器按此匹配）。</summary>
     public IReadOnlyList<CommandDefinition> Commands { get; }
-    private HashSet<string> ReservedGroundCommands { get; }
-    internal bool ReservesGroundCommand(string commandId) => ReservedGroundCommands.Contains(commandId);
+    private Dictionary<string, CommandDefinition> ReservedGroundCommands { get; }
+    internal CommandDefinition? ReservedGroundCommand(string commandId) => ReservedGroundCommands.GetValueOrDefault(commandId);
 
     public bool UseCommandPriority { get; }
 

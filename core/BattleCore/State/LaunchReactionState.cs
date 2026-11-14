@@ -22,6 +22,9 @@ public readonly record struct LaunchReactionState(LaunchReactionProfile Profile,
     int Ticks, bool GroundCrossed = false, FixedPoint ImpactHorizontalVelocity = default, int TechInputTicks = 0,
     int LaunchOwner = -1)
 {
+    public bool IsLying => Phase is LaunchReactionPhase.Impact or LaunchReactionPhase.Bounce or
+        LaunchReactionPhase.LyingImpact or LaunchReactionPhase.Lying or LaunchReactionPhase.Wakeup;
+
     public bool RestrictsAirFollowupFrom(int owner) => Profile.SuppressOwnerProjectilesDuringFall &&
         LaunchOwner == owner && Phase is LaunchReactionPhase.Shake or LaunchReactionPhase.Fall;
 

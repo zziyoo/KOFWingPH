@@ -347,6 +347,9 @@ public sealed class MoveHurtboxSpanDto
 
 public sealed class AttackDto
 {
+    [JsonPropertyName("rejectsLyingTargets")]
+    public bool RejectsLyingTargets { get; set; }
+
     [JsonPropertyName("launchGravity")]
     public FractionDto? LaunchGravity { get; set; }
 

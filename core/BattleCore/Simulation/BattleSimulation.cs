@@ -262,8 +262,7 @@ public sealed class BattleSimulation
             {
                 // The source recovery controller owns movement until control returns on the next tick.
                 const InputBits groundTech = InputBits.LightPunch | InputBits.LightKick;
-                bool techPressed = (bits & groundTech) == groundTech &&
-                    (fighter.RecognitionState.HeldAttacks & groundTech) != groundTech;
+                bool techPressed = (bits & ~fighter.RecognitionState.HeldAttacks & groundTech) == groundTech;
                 FighterState reaction = ScriptedLaunchLanding.Advance(fighter, techPressed);
                 candidates[i] = new FighterCandidate
                 {
@@ -1482,7 +1481,8 @@ public sealed class BattleSimulation
 
             FixedRect projectileBox = span is null ? ProjectileBox(projectile, definition) : EntityHitbox(projectile, span);
             FighterState defender = span is null ? fighters[target] : waveInputs![target];
-            if (!FighterBoxes.GetHurtboxes(defender, _roster.Fighter(target)).Any(
+            if (!HitDetection.CanHitTarget(span?.Hit ?? definition.Hit, defender) ||
+                !FighterBoxes.GetHurtboxes(defender, _roster.Fighter(target)).Any(
                     span is { ContactOnEdge: true } ? projectileBox.IntersectsOrTouches : projectileBox.Overlaps))
             {
                 survivors.Add(projectile);

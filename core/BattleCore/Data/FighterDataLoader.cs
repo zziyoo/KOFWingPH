@@ -312,7 +312,8 @@ public static class FighterDataLoader
             groundHitReaction: dto.GroundHitReaction is { } reaction
                 ? ParseEnum<GroundHitReaction>(reaction, source, path + ".groundHitReaction") : GroundHitReaction.Standard,
             launchGravity: dto.LaunchGravity is { } gravity ? Fraction(gravity, source, path + ".launchGravity") : null,
-            launchReaction: dto.LaunchReaction is { } launch ? BuildLaunchReaction(launch, source, path + ".launchReaction") : null),
+            launchReaction: dto.LaunchReaction is { } launch ? BuildLaunchReaction(launch, source, path + ".launchReaction") : null,
+            rejectsLyingTargets: dto.RejectsLyingTargets),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>

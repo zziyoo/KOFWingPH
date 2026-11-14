@@ -254,9 +254,11 @@ public static class FighterStateMachine
                 continue;
 
             CommandMatch match = result.Match;
-            if (definition.ReservesGroundCommand(match.CommandId))
+            if (definition.ReservedGroundCommand(match.CommandId) is { } reservation)
             {
-                recognition = recognition.WithResultConsumed(match.RecognizedFrame);
+                if (!reservation.DirectionSequence.Contains(recognition.Directions[^1].Direction))
+                    continue;
+                recognition = recognition.WithReservedGroundInputConsumed(match.RecognizedFrame, frame);
                 break;
             }
             MoveAllowedStates required = idle == FighterLogicState.Crouching
