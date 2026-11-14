@@ -84,12 +84,12 @@ def check_rng(profile, damage, lines):
                          int(row['variance']), f'seat {seat} variance at L{frame}')
 
 
-def native_damage(profile, phases, attack, frame, seat, blocked):
+def native_damage(profile, phases, attack, frame, seat, blocked, *, state=410):
     rows = phases['damage-rows']
     definition = next((row for row in reversed(rows) if row['phase'] == 'hitdef' and row['frame'] <= frame
-                       and row['hitDefOwner'] == seat + 1 and row['chars'][seat]['state'] == 410), None)
+                       and row['hitDefOwner'] == seat + 1 and row['chars'][seat]['state'] == state), None)
     if definition is None:
-        raise ValueError(f'missing native State 410 HitDef at F{frame}, seat {seat + 1}')
+        raise ValueError(f'missing native State {state} HitDef at F{frame}, seat {seat + 1}')
     source = definition['chars'][seat]
     stats = source['vars']
     draw = next((row for row in reversed(rows) if row['phase'] == 'var21-draw'
@@ -100,7 +100,7 @@ def native_damage(profile, phases, attack, frame, seat, blocked):
                  f'native variance at F{frame}')
     raw = raw_damage(attack['dynamicDamage'], stats['var21'], stats['var6'],
                      max(1, stats['var23']), stats['fvar7'])
-    assert_equal(raw, source['hitDef']['damage'], f'native State 410 raw damage at F{frame}')
+    assert_equal(raw, source['hitDef']['damage'], f'native State {state} raw damage at F{frame}')
     target = seat ^ 1
     collision = phases['after-collision'][frame]['chars'][target]
     hp = phases['before-command'][frame]['chars'][target]['life']
@@ -257,7 +257,7 @@ def check_recovery(scene, phases, moves):
     return results
 
 
-def check_wave_launch(name, scene, phases, moves, lines):
+def check_wave_launch(name, scene, phases, moves, lines, *, camera_clip=None):
     """Pair every post-Wave launch tick to its original phase and position."""
     active = indexed(audit_rows(lines, 'LaunchReactionAudit'))
     mirror = phases['before-command'][0]['chars'][0]['facing'] < 0
@@ -273,7 +273,7 @@ def check_wave_launch(name, scene, phases, moves, lines):
                             max(phases['end']) + 1)
         stages = {}
         boundary_delta = []
-        first_camera_clip = {'incoming-wave-22': 87, 'incoming-wave-28': 91}.get(name)
+        first_camera_clip = camera_clip or {'incoming-wave-22': 87, 'incoming-wave-28': 91}.get(name)
         ballistics_x = None
         for tick in range(frame, next_contact):
             original = phases['end'][tick]['chars'][seat ^ mirror]
@@ -318,6 +318,8 @@ def check_wave_launch(name, scene, phases, moves, lines):
         if boundary_delta:
             comparison['nativeStageCameraClamp'] = [row for row in boundary_delta
                                                    if row['frame'] <= first_camera_clip + 2]
+            if camera_clip is not None:
+                comparison['nativeStageCameraClamp'].append(boundary_delta[-1])
         paired.append(comparison)
     return paired
 

@@ -28,11 +28,12 @@ Q16 = 65536
 VISUAL_FRAME = re.compile(r"^\[VisualAudit\] scope=1 frame=(\d+)\b")
 
 
-def native_case(reference, name, *, recovery=False, last_frame=None, native_moves=NATIVE_MOVES):
+def native_case(reference, name, *, recovery=False, last_frame=None, native_moves=NATIVE_MOVES,
+                raw_keys=RAW_KEYS, contact_is_wave=None):
     phases = defaultdict(dict)
     changes = []
     for row in map(json.loads, reference.read_text(encoding="utf-8").splitlines()):
-        if row["phase"] in ("before-command", "after-collision", "end"):
+        if row["phase"] in ("before-command", "after-command", "after-collision", "end"):
             phases[row["phase"]][row["frame"]] = row
         elif row["phase"] == "state-change":
             changes.append(row)
@@ -46,7 +47,7 @@ def native_case(reference, name, *, recovery=False, last_frame=None, native_move
     for frame, state in before.items():
         for native_seat, fighter in enumerate(state["chars"]):
             seat = native_seat ^ mirror
-            for bit, *key_names in RAW_KEYS:
+            for bit, *key_names in raw_keys:
                 if (fighter["raw"] ^ raw[seat]) & bit:
                     keys.append(f"{frame + 23}:{'down' if fighter['raw'] & bit else 'up'}:{key_names[seat]}")
             raw[seat] = fighter["raw"]
@@ -57,7 +58,8 @@ def native_case(reference, name, *, recovery=False, last_frame=None, native_move
             if not fighter["gethit"]:
                 continue
             owner = row["chars"][1 - native_seat]
-            wave = any(h["anim"] == 1020 for h in owner["helpers"] or [])
+            wave = (contact_is_wave(fighter, owner) if contact_is_wave is not None else
+                    any(h["anim"] == 1020 for h in owner["helpers"] or []))
             prefix = "Projectile" if wave else ""
             contacts.append({"frame": frame, "target": native_seat ^ mirror, "source": (1 - native_seat) ^ mirror,
                              "kind": prefix + ("Blocked" if fighter["guarded"] else "Hit"),
@@ -77,7 +79,7 @@ def native_case(reference, name, *, recovery=False, last_frame=None, native_move
 def runtime_capture(options, scene, output, sprites, *, mode="default", alias=ALIAS, minimum_render_frames=0):
     fixed = options.fps == "fixed"
     args, capture = runtime_args(options, scene, output, sprites, (mode, mode),
-                                 visual_alias=lambda _: alias, realtime_tail=72)
+                                 visual_alias=lambda _: alias, realtime_tail=getattr(options, "realtime_tail_frames", 72))
     if not fixed:
         args.insert(args.index("--"), "--print-fps")
         if options.disable_vsync:
@@ -88,10 +90,11 @@ def runtime_capture(options, scene, output, sprites, *, mode="default", alias=AL
         warmup = ("4:down:F2", "9:down:F1", "10:up:F1", f"{warmup_end}:down:F1", f"{warmup_end + 1}:up:F1")
         keys = (*BOOT_KEYS, *warmup)
         first_input = min(int(step.split(":", 1)[0]) for step in scene.keys)
+        settle = getattr(options, "realtime_settle_frames", 0)
         for step in scene.keys:
             frame, event, key = step.split(":")
             render = first_input + (int(frame) - first_input) * options.realtime_input_spacing
-            keys += (f"{render + 20 + options.realtime_warmup_frames}:{event}:{key}",)
+            keys += (f"{render + 20 + options.realtime_warmup_frames + settle}:{event}:{key}",)
         args.extend(f"--renderkey={key}" for key in keys)
     if fixed:
         args += ["--damage-audit", "--reentry-audit", "--scripted-pause-audit"]
@@ -404,7 +407,8 @@ def verify_recovery(phases, lines, moves, captures, *, mirrored):
 def run_case(options, name, reference, timelines, profile, *, mode="default", alias=ALIAS,
              prepared_scene=None, fixed_checks=None, contact_check=verify_contacts,
              recovery_check=verify_grounded_wave_recovery, minimum_render_frames=0, partial_capture=False,
-             pose_check=fighter_poses, allow_interrupted_spawn=False, entity_position_tolerance=0.005):
+             pose_check=fighter_poses, allow_interrupted_spawn=False, entity_position_tolerance=0.005,
+             extra_arguments=(), extra_authority=()):
     scene, phases, changes = prepared_scene or native_case(reference, name, recovery=options.recovery)
     fixed = options.fps == "fixed"
     logs = []
@@ -414,6 +418,7 @@ def run_case(options, name, reference, timelines, profile, *, mode="default", al
         sprites = variant == "sprite"
         args, capture = runtime_capture(options, scene, output, sprites, mode=mode, alias=alias,
                                         minimum_render_frames=minimum_render_frames)
+        args.extend(extra_arguments)
         log = run_godot(options.godot, args, output / "duel.log", output / "end.png")
         lines = log.decode("utf-8").splitlines()
         events = battle_events(lines)
@@ -476,7 +481,7 @@ def run_case(options, name, reference, timelines, profile, *, mode="default", al
             if scene.differences:
                 result["sourceDifferences"] = scene.differences
             (output / "trace.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-        logs.append([line for line in log.splitlines() if line.startswith(AUTHORITY)])
+        logs.append([line for line in log.splitlines() if line.startswith((*AUTHORITY, *extra_authority))])
     if options.compare_plain:
         require_same(*logs, f"{name} visual/plain authority")
     if fixed:

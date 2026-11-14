@@ -1,6 +1,7 @@
 """Replay the native Terry State 205 Power Wave fixtures in real Godot Vulkan duels."""
 
 import argparse
+from collections import defaultdict
 from dataclasses import replace
 from functools import partial
 from hashlib import sha256
@@ -11,10 +12,10 @@ from subprocess import TimeoutExpired
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "Stage19Validation"))
-from power_wave_duel import (AUTHORITY, MOVE, NATIVE_MOVES, ROOT, assert_equal, battle_events, native_case,
+from power_wave_duel import (AUTHORITY, MOVE, NATIVE_MOVES, ROOT, assert_equal, battle_events, fighter_poses, native_case,
                              require_same, run_case, run_godot, runtime_capture, verify_contacts,
-                             verify_move_instances, visual_timeline)
-from state210_duel import CAPTURE
+                             verify_move_instances, verify_rendered_entities, visual_timeline, VISUAL_FRAME)
+from state210_duel import CAPTURE, validate_captures
 
 
 PROFILE_DIR = "data/imported-characters/terry98-stage20-data"
@@ -164,14 +165,15 @@ def verify_sparse_realtime(options, name, scene):
     capture_sparse_realtime(options, name, scene, "terry98-stage20-default", check_route)
 
 
-def capture_sparse_realtime(options, name, scene, alias, check_route):
+def capture_sparse_realtime(options, name, scene, alias, check_route, *, timelines=None, actions=None):
     output = options.output / name / "sprite"
     output.mkdir(parents=True)
     args, (first, last) = runtime_capture(options, scene, output, True, alias=alias)
-    args.remove("--sprite-frame-audit")
+    if timelines is None:
+        args.remove("--sprite-frame-audit")
     args.append("--entity-audit")
     lines = run_godot(options.godot, args, output / "duel.log", output / "end.png").decode("utf-8").splitlines()
-    if any(line.startswith("WARNING: [BattleScene] 帧积压") for line in lines):
+    if timelines is None and any(line.startswith("WARNING: [BattleScene] 帧积压") for line in lines):
         raise ValueError("sparse realtime run exceeded the battle time budget")
     events = battle_events(lines)
     starts = verify_move_instances(scene, events, {}, {}, fixed=False)
@@ -203,13 +205,39 @@ def capture_sparse_realtime(options, name, scene, alias, check_route):
         assert_equal(previous[:4], entity[:4], "sparse Wave identity and owner")
         if not 0 <= int(previous[-1]) - int(entity[-1]) <= state - previous_state:
             raise ValueError("sparse Wave lifetime advanced outside the committed state interval")
+    after_rates = [rate for count, rate in fps if count == len(captures)]
     near_capture = (next((rate for count, rate in reversed(fps) if count == 0), 0),
-                    next((rate for count, rate in fps if count == len(captures)), 0))
-    if min(near_capture) < int(options.fps) - 5:
-        raise ValueError(f"renderer reported {near_capture} FPS around the sparse {options.fps} FPS sample")
-    (output / "trace.json").write_text(json.dumps({"events": events, "captures": captures, "fpsAroundCapture": near_capture},
-                                                 indent=2) + "\n", encoding="utf-8")
-    print(f"sparse realtime {name}: {near_capture} FPS, Wave contact at {wave_hit['frame']}, sampled states {states}", flush=True)
+                    next(iter(after_rates), 0))
+    measured = near_capture if timelines is None else (near_capture[0], after_rates[-1] if len(after_rates) > 1 else 0)
+    if min(measured) < int(options.fps) - 5:
+        raise ValueError(f"renderer reported {measured} FPS before and after the sparse {options.fps} FPS sample")
+    backlog = []
+    if timelines is not None:
+        logic = -1
+        for line in lines:
+            if match := VISUAL_FRAME.match(line):
+                logic = int(match[1])
+            elif line.startswith("WARNING: [BattleScene] 帧积压"):
+                backlog.append(logic)
+        if any(starts[0]["frame"] <= tick <= states[-1] for tick in backlog):
+            raise ValueError(f"sparse realtime route exceeded the battle time budget: {backlog}")
+        _, drawn = validate_captures(replace(scene, guard_action=None), events, lines, output, (first, last),
+                                    timelines, ("default", "default"), False,
+                                    move_validator=partial(fighter_poses, actions=actions), check_reactions=False)
+        authority = defaultdict(list)
+        for state, entity in waves:
+            identity, owner, _, _, x, y, vx, _, remaining = entity
+            authority[int(identity)].append({"logic": state - 1, "owner": owner, "x": x, "y": y,
+                                            "left": str(int(vx) < 0), "age": 25 - int(remaining)})
+        verify_rendered_entities(lines, drawn, authority, timelines[1020])
+        captures = drawn
+    trace = {"events": events, "captures": captures, "fpsAroundCapture": near_capture}
+    if timelines is not None:
+        trace["backlogAfterLogic"] = backlog
+        trace["fpsSettledAfterReadback"] = measured[1]
+    (output / "trace.json").write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
+    outcome = f"Wave contact at {wave_hit['frame']}" if wave_hit is not None else "Wave whiff"
+    print(f"sparse realtime {name}: {near_capture} FPS, settled {measured[1]} FPS, {outcome}, sampled states {states}", flush=True)
 
 
 def compare_repeat(output, scene, original):

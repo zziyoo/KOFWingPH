@@ -58,6 +58,7 @@ public partial class BattleScene : Node2D
     private readonly InputTrace _trace = new();
     private bool _diagnostics;
     private bool _moveAudit;
+    private bool _commandAudit;
     internal bool CaptureInputOnly { get; private set; }
 
     private Node2D? _fighter1Node;
@@ -113,6 +114,7 @@ public partial class BattleScene : Node2D
 
         _diagnostics = HasArg("--inputdiag");
         _moveAudit = HasArg("--move-audit");
+        _commandAudit = HasArg("--command-audit");
         CaptureInputOnly = HasArg("--capture-input-only") && ArgValue("--shot") is not null;
         _trace.Enabled = _diagnostics;
 
@@ -1412,6 +1414,8 @@ public partial class BattleScene
             _visual2?.ObserveFrame(frame, 1);
             if (_moveAudit && !TeamActive && _duelRoster is { } roster)
                 PrintMoveAudit(frame, roster);
+            if (_commandAudit && !TeamActive && _duelRoster is { } commandRoster)
+                PrintCommandAudit(frame, commandRoster);
             if (HasArg("--reentry-audit"))
                 for (int seat = 0; seat < 2; seat++)
                 {
@@ -1438,9 +1442,18 @@ public partial class BattleScene
                         GD.Print($"[LaunchReactionAudit] logic={frame.LogicFrame} fighter={seat} phase={launch.Phase} tick={launch.Ticks}");
                 foreach (ProjectileState entity in frame.StateAfter.Projectiles)
                     if (entity.SpawnFacing is { } facing)
+                    {
                         GD.Print($"[WaveEntityAudit] logic={frame.LogicFrame} id={entity.ProjectileId} owner={entity.OwnerFighterId} " +
                             $"x={entity.PositionX.RawValue} y={entity.PositionY.RawValue} vx={entity.VelocityX.RawValue} " +
                             $"vy={entity.VelocityY.RawValue} life={entity.RemainingLifetime} left={facing == Facing.Left} contact={entity.HasContact}");
+                        if (_commandAudit)
+                        {
+                            LaunchReactionState? reaction = frame.StateBefore.Fighter(1 - entity.OwnerFighterId).LaunchReaction;
+                            bool restricted = reaction?.RestrictsAirFollowupFrom(entity.OwnerFighterId) == true;
+                            GD.Print($"[WaveRestrictionAudit] logic={frame.LogicFrame} id={entity.ProjectileId} " +
+                                $"owner={entity.OwnerFighterId} airFollowupRestricted={restricted}");
+                        }
+                    }
             }
             if (HasArg("--visual-audit"))
             {
@@ -1488,6 +1501,36 @@ public partial class BattleScene
 
         static string Box(FixedRect rect) =>
             $"{rect.MinX.RawValue},{rect.MinY.RawValue},{rect.MaxX.RawValue},{rect.MaxY.RawValue}";
+    }
+
+    private static void PrintCommandAudit(in PresentationFrame frame, FightRoster roster)
+    {
+        for (int seat = 0; seat < 2; seat++)
+        {
+            FighterState before = frame.StateBefore.Fighter(seat);
+            FighterState after = frame.StateAfter.Fighter(seat);
+            IReadOnlyList<BufferedResult> buffer = after.RecognitionState.Buffer;
+            if (buffer.Count == 0 && before.RecognitionState.Buffer.Count == 0)
+                continue;
+
+            string committed = "-";
+            foreach (BattleEvent evt in frame.Events)
+                if (evt.Type == BattleEventType.MoveStarted && evt.SourceFighterId == seat)
+                    committed = evt.MoveId ?? "-";
+
+            FighterDefinition definition = roster.Fighter(seat);
+            string candidates = string.Join(";", buffer.Select(candidate =>
+            {
+                CommandMatch match = candidate.Match;
+                bool reserved = definition.Commands.Any(command => command.CommandId == match.CommandId && command.ReserveGroundInput);
+                return $"{match.CommandId},{match.RecognizedFrame},{match.ButtonFrame},{match.Priority},{reserved},{candidate.Consumed}";
+            }));
+            CommandDirection direction = after.RecognitionState.Directions.LastOrDefault().Direction;
+            GD.Print($"[CommandAudit] scope={frame.Scope} logic={frame.LogicFrame} fighter={seat} direction={direction} " +
+                $"before={before.LogicState} old={before.MoveId ?? "-"} tick={before.MoveElapsedFrames} " +
+                $"hitpause={before.HitstopRemainingFrames} globalpause={frame.StateBefore.ScriptedPause.IsActive} " +
+                $"after={after.LogicState} committed={committed} candidates={candidates}");
+        }
     }
 
     private void ApplyCue(FeedbackCue cue, in PresentationFrame frame)

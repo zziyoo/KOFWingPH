@@ -80,7 +80,7 @@ def runtime_args(options, scene, output, sprites, modes, visual_alias=alias, rea
     fixed = options.fps == "fixed"
     capture = scene.captures if fixed else tuple(options.realtime_window or (50, 55))
     args = ["--path", ".", "--rendering-method", "forward_plus", "--rendering-driver", "vulkan",
-            "--resolution", "960x540" if fixed else options.realtime_resolution]
+            "--resolution", getattr(options, "fixed_resolution", "960x540") if fixed else options.realtime_resolution]
     if fixed:
         args += ["--fixed-fps", "60"]
     tail = 18 if fixed else realtime_tail
