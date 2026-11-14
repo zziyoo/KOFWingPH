@@ -633,7 +633,7 @@ public partial class BattleScene : Node2D
             return;
         }
 
-        _inputMap.Handle(BuildKeyEvent(code));
+        HandleBattleKeyPress(code);
         if (_diagnostics) Trace("sample", DescribeHeldMasks());
         SyncViewFromState();
     }
@@ -679,18 +679,22 @@ public partial class BattleScene : Node2D
             return;
         }
 
-        _inputMap.Handle(BuildKeyEvent(code));
+        HandleBattleKeyPress(code);
         if (_diagnostics) Trace("sample", DescribeHeldMasks());
         SyncViewFromState();
     }
 
     /// <summary>把「已按下的键」重新包装成按键事件交给键盘映射（战斗阶段统一路径）。</summary>
-    private static InputEventKey BuildKeyEvent(Key code) => new()
+    private void HandleBattleKeyPress(Key code)
     {
-        Keycode = code,
-        PhysicalKeycode = code,
-        Pressed = true,
-    };
+        using var key = new InputEventKey
+        {
+            Keycode = code,
+            PhysicalKeycode = code,
+            Pressed = true,
+        };
+        _inputMap.Handle(key);
+    }
 
     private void Trace(string category, string detail)
     {

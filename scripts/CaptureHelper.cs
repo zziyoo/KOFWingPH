@@ -168,7 +168,7 @@ public partial class CaptureHelper : Node
             KeyStep step = _keyScript[i];
             if (step.RenderFrame != _renderFrame) continue;
 
-            var key = new InputEventKey
+            using var key = new InputEventKey
             {
                 Keycode = step.Keycode,
                 PhysicalKeycode = step.Keycode,
