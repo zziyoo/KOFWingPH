@@ -18,8 +18,17 @@
 
 ## 初始竞争与默认取消
 
-- F5 原始输入 Down＋`a+b` 进入 430，Down＋`x+b` 进入 400，Down＋`y+b` 进入 410，DownForward＋`y+b` 进入 310。上述样本均没有进入 440。复现的模式 2 对照同样使用 440 本体。
-- 默认 `hit-27` 在 F27 的旧 tick 11 从 440 进入 1000，`var(1)=1`，根手势有效且 HitPause 已解除。Helper 于 F42 出生，在 F67 销毁。目标在 Wave 可接触时仍处于 Trip 且位置和高度脱离 Wave 的有效矩形。唯一伤害为 F15 的 440 命中，目标仍在 F112 恢复控制。相同物理手势在模式 2 的 F27 进入 1050。
+- F5 原始输入 Down＋`a+b` 进入 430，Down＋`x+b` 进入 400，Down＋`y+b` 进入 410，DownForward＋`y+b` 进入 310。单独前下或后下加 `b` 均进入 440。站立单按 `b` 在中心距 54 进入 245。起跳后 Down＋`b` 进入空中 State 55，Down＋`a` 单独进入 430。模式 2 对照同样使用 440 本体。
+- 默认 `hit-27` 在 F27 的旧 tick 11 从 440 进入 1000，`var(1)=1`，根手势有效且 HitPause 已解除。F33 的旧 tick 17 手势也成立，F34 的旧 tick 18 手势拒绝且无普通技回落。F19 在冻结中完成手势，短按及持键版本都到 F27 才提交，根命令仍有效，Helper 值分别为 −1 和 4。相同物理手势在模式 2 的 F27 进入 1050。
+- 距离 150 空挥样本 F12 的旧 tick 7 短按过期，F13／14／15 的旧 tick 8／9／10 短按由 Helper 保留至 F16 旧 tick 11，计数为 3／7／11。F16／17／22 的直接手势有效，F23 的旧 tick 18 拒绝。F45 旧 tick 40 的新手势使用自然恢复许可 `var(2)=1`。旧 tick 18 重按 `b` 也拒绝。自然恢复当帧下＋`b` 会再次进入 440。F16 的前＋`x+b` 或前＋`x+y+b` 均由 Wave 优先。
+
+## Wave 后继接触
+
+- `Terry-2-3.cns:488–534` 在攻击确认且目标处于空中受击状态时，根据 `NumTarget(20)` 将 `var(13)` 设为 1。其后的控制器使 `var(12)=1`。规范 Trip 样本在 F18–60 持续锁存，目标 F60 进入地面 5100，F61 复位。弱 Wave 的早、晚段 HitDef 都要求 `Root,var(12)=0`。因此 440 命中取消后，Helper 仍出生、移动和消失，AIR 可有 Clsn1，活动期实际 `HitDef.attr=0`。`hit-27` Helper F42 出生、F67 消失，`hit-33` F48 出生、F73 消失。两者目标均只有 F15 的 440 命中并在 F112 恢复。
+- `crouch-guard-27` 先于 F15 蹲防，F27 取消，Helper F42 出生。F45 在目标 X83.33462 时再次蹲防，削血 9，F74 恢复控制。距离 150 的空挥 `whiff-16` 没有 Trip 锁存，Helper F31 出生，F40 晚段地面命中，F41 显示 5012，F54 开始滑动，F59 转 5017，F81 控制恢复。F55 首次全局 Pause 冻结实体本地年龄 24，F57 销毁。
+- 混合 `mixed-27` 的 P1 在 F27 从 440 取消，P2 恢复控制后在 F117 从 400 取消。两枚 Helper 各自出生、老化及销毁，后者在 F138 命中 P1。在场 Helper 可在 F25／29 打断 440，场景保留真正的远程接触及双方恢复。
+- 同帧对照从中心距 116 起步。两场对手都在 F16 前移至 X54.83203。`edge-0` 该帧被 440 命中并于 F113 恢复控制。`edge-16` 同帧进入 1000，旧 440 接触未结算，Wave F31 出生，F34 命中并使对方击飞，F140 恢复控制。
+- `incoming-wave-16` 中 P2 F5 施放，Helper F20 出生。P1 F16 合法取消，F28 在自己的 Helper 出生前被 P2 打断。中心距 180 的 `incoming-wave-22` 保留两枚同时存续的 Helper，P2 F20、P1 F37 出生，P1 的 Wave F46 晚段命中。初始站立 `b` 后接 Down，或同帧 Up＋`b`，原版均进入 State 245，之后没有补发 440。
 
 ## 复现
 
@@ -34,6 +43,21 @@ $controls += @('mode2-crouch-kick-wave-hit-0','mode2-crouch-kick-wave-hit-27')
 & tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage24 -LastFrame 185 `
   -RunDirectory local-mugen/stage24-reference-controls -PreparedEngineDirectory local-mugen/stage24-reference/engine `
   -Cases $controls
-py tools/Stage24Reference/Check-Traces.py local-mugen/stage24-reference/results local-mugen/stage24-reference-controls/results
+$routes = @('held-down-0','stand-0','air-0','light-kick-0','down-forward-kick-0','down-back-kick-0','hit-33','hit-34',
+  'hit-held-19','hit-19','crouch-guard-27','guard-27','crouch-hit-27','mirror-hit-27','whiff-12','whiff-13','whiff-14',
+  'whiff-15','whiff-16','whiff-17','whiff-22','whiff-23','whiff-45','repeat-kick-23','repeat-kick-45','compete-kick-16',
+  'compete-heavy-16','approach-0','approach-16','mixed-27','incoming-wave-26','incoming-wave-34','incoming-wave-35') |
+  ForEach-Object { "default-crouch-kick-wave-$_" }
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage24 -LastFrame 185 `
+  -RunDirectory local-mugen/stage24-reference-routes -PreparedEngineDirectory local-mugen/stage24-reference/engine `
+  -Cases $routes
+$bounds = @('stand-to-down-0','jump-and-kick-0','edge-0','edge-16','incoming-wave-16','incoming-wave-22') |
+  ForEach-Object { "default-crouch-kick-wave-$_" }
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage24 -LastFrame 185 `
+  -RunDirectory local-mugen/stage24-reference-boundaries -PreparedEngineDirectory local-mugen/stage24-reference/engine `
+  -Cases $bounds
+py tools/Stage24Reference/Check-Traces.py local-mugen/stage24-reference/results local-mugen/stage24-reference-controls/results local-mugen/stage24-reference-routes/results local-mugen/stage24-reference-boundaries/results
 py tools/Stage24Reference/Check-Traces.py local-mugen/stage24-reference/results --extract-body local-mugen/stage24-reference-body/results
 ```
+
+独立本体十条轨迹由主运行原样提取，保留逐场哈希。主、控制与取消三批共 53 条原版轨迹。另有六条补充边界取证使用独立目录，实际由增加物理边沿夹具的同一固定版本二进制采集。每批元数据保存其二进制哈希。上面的新运行统一采用包含全部夹具的版本。

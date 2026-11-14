@@ -605,6 +605,8 @@ func researchCrouchKickWaveBits(pn int) InputBits {
 			return IB_X
 		case strings.HasPrefix(scenario, "approach-") && researchFrame >= 15 && researchFrame <= 16:
 			return back
+		case strings.HasPrefix(scenario, "edge-") && researchFrame == 16:
+			return back
 		case strings.HasPrefix(scenario, "mixed-") && researchFrame == 112:
 			return IB_X
 		case strings.HasPrefix(scenario, "mixed-") && researchFrame >= 113 && researchFrame <= 116:
@@ -617,14 +619,19 @@ func researchCrouchKickWaveBits(pn int) InputBits {
 	if scenario == "air-0" && researchFrame == 0 {
 		return IB_PU
 	}
+	if scenario == "stand-to-down-0" && researchFrame == 6 {
+		return IB_PD
+	}
 	initial := 5
 	if strings.HasPrefix(scenario, "incoming-wave-") {
 		initial = button - 11
 	}
 	if researchFrame == initial {
 		switch scenario {
-		case "stand-0":
+		case "stand-0", "stand-to-down-0":
 			return IB_B
+		case "jump-and-kick-0":
+			return IB_PU | IB_B
 		case "light-kick-0":
 			return IB_PD | IB_A
 		case "down-light-kicks-0":

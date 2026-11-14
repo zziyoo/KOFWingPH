@@ -312,7 +312,7 @@ if ($CaptureProfile -eq 'Stage24') {
     $captureDir = Join-Path $root 'tools/Stage15Reference'
     $distances = [ordered]@{}
     foreach ($scenario in @('hit-0','crouch-hit-0','guard-0','crouch-guard-0','mirror-hit-0','held-down-0','stand-0',
-        'air-0','light-kick-0','down-light-kicks-0','down-light-and-kick-0','down-heavy-and-kick-0',
+        'air-0','stand-to-down-0','jump-and-kick-0','light-kick-0','down-light-kicks-0','down-light-and-kick-0','down-heavy-and-kick-0',
         'down-forward-heavy-and-kick-0','down-forward-kick-0','down-back-kick-0','hit-27','hit-33',
         'hit-34','hit-held-19','hit-19','crouch-guard-27','guard-27','crouch-hit-27','mirror-hit-27','mixed-27')) {
         $distances["default-crouch-kick-wave-$scenario"] = 54
@@ -320,11 +320,14 @@ if ($CaptureProfile -eq 'Stage24') {
     $distances['default-crouch-kick-wave-interrupt-0'] = 44
     foreach ($scenario in @('whiff-0','whiff-12','whiff-13','whiff-14','whiff-15','whiff-16','whiff-17','whiff-22',
         'whiff-23','whiff-45','repeat-kick-23','repeat-kick-45','compete-kick-16','compete-heavy-16',
-        'incoming-wave-26','incoming-wave-34','incoming-wave-35')) {
+        'incoming-wave-16','incoming-wave-26','incoming-wave-34','incoming-wave-35')) {
         $distances["default-crouch-kick-wave-$scenario"] = 150
     }
     $distances['default-crouch-kick-wave-approach-16'] = 110
     $distances['default-crouch-kick-wave-approach-0'] = 110
+    $distances['default-crouch-kick-wave-edge-16'] = 116
+    $distances['default-crouch-kick-wave-edge-0'] = 116
+    $distances['default-crouch-kick-wave-incoming-wave-22'] = 180
     $distances['mode2-crouch-kick-wave-hit-27'] = 54
     $distances['mode2-crouch-kick-wave-hit-0'] = 54
     foreach ($number in 30..72) {

@@ -121,6 +121,30 @@ def wave_cancel(case, frame, old_tick, *, destination=1000, source=440, natural=
     return row
 
 
+def kick_changes(case):
+    return [(row['frame'], row['to'], row['stateTime']) for row in case[1] if row['from'] == 440]
+
+
+def verify_wave_entity(case, birth, *, owner=0):
+    phases, _, _ = case
+    def live(frame):
+        return [h for h in c_at(phases, frame, owner)['helpers'] or [] if h['anim'] == 1020 and not h['destroyed']]
+
+    assert not live(birth - 1)
+    first, = live(birth)
+    assert first['time'] == 1 and abs(first['pos'][0] - c_at(phases, birth, owner)['pos'][0] - 2.5 * first['facing']) < 0.00002
+    age = 1
+    for frame in range(birth + 1, len(phases['end'])):
+        age += int(phases['end'][frame]['globalPause'] == 0)
+        if age == 26:
+            assert not live(frame), frame
+            return
+        helper, = live(frame)
+        assert helper['id'] == first['id'] and helper['time'] == age, (frame, helper)
+        assert abs(helper['pos'][0] - first['pos'][0] - 2.5 * first['facing'] * min(age - 1, 10)) < 0.00002, frame
+    raise AssertionError(f'Helper born at F{birth} did not reach disposal')
+
+
 def verify_cases(cases):
     def default(name):
         return cases[PREFIX + name]
@@ -154,13 +178,122 @@ def verify_cases(cases):
         wave_cancel(cases[MODE2 + 'hit-27'], 27, 11, destination=1050)
         assert cases[MODE2 + 'hit-27'][2] == [(15, 2, 115, False)]
 
-    if PREFIX + 'hit-27' in cases:
-        phases, _, contacts = default('hit-27')
-        assert contacts == [(15, 2, 115, False)]
-        row = wave_cancel(default('hit-27'), 27, 11)
-        assert row['powerWaveCommand']
-        assert any(h['anim'] == 1020 and h['time'] == 1 for h in c_at(phases, 42, 0)['helpers'])
-        assert compressed_target(default('hit-27')) == compressed_target(default('hit-0'))
+    for name, frame, old, control in (('hit-27', 27, 11, 'hit-0'), ('hit-33', 33, 17, 'hit-0'),
+                                      ('hit-19', 27, 11, 'hit-0'), ('hit-held-19', 27, 11, 'hit-0'),
+                                      ('guard-27', 27, 11, 'guard-0'), ('crouch-hit-27', 27, 11, 'crouch-hit-0'),
+                                      ('mirror-hit-27', 27, 11, 'mirror-hit-0')):
+        if PREFIX + name not in cases:
+            continue
+        case = default(name)
+        assert case[2] == [(15, 2, 115, False)], name
+        row = wave_cancel(case, frame, old)
+        assert row['powerWaveCommand'], row
+        verify_wave_entity(case, frame + 15)
+        assert compressed_target(case) == compressed_target(default(control)), name
+        phases = case[0]
+        assert [c_at(phases, f, 0)['vars']['var12'] for f in range(17, 62)] == [0] + [1] * 43 + [0], name
+        for f in range(frame + 15, frame + 28):
+            helper, = [h for h in c_at(phases, f, 0)['helpers'] or [] if h['anim'] == 1020 and not h['destroyed']]
+            assert helper['hitDef']['attr'] == 0, (name, f, helper)
+        if name in ('hit-19', 'hit-held-19'):
+            phases, _, _ = case
+            assert c_at(phases, 19, 0, 'before-command')['raw'] == 136
+            assert c_at(phases, 19, 0, 'after-command')['hitPause'] > 0
+            assert row['helperWave'] == (-1 if name == 'hit-19' else 4), row
+
+    if PREFIX + 'crouch-guard-27' in cases:
+        case = default('crouch-guard-27')
+        wave_cancel(case, 27, 11)
+        verify_wave_entity(case, 42)
+        assert case[2] == [(15, 2, 0, True), (45, 2, 9, True)]
+        guarded = c_at(case[0], 45, phase='after-collision')
+        assert (guarded['state'], guarded['hitId'], guarded['hitShake']) == (131, 0, 11)
+        assert abs(guarded['pos'][0] - 83.33462) < 0.0001
+
+    for name, opening, old, release, helper_count in (
+        ('whiff-13', 16, 11, 13, 3), ('whiff-14', 16, 11, 14, 7), ('whiff-15', 16, 11, 15, 11),
+        ('whiff-16', 16, 11, 16, 0), ('whiff-17', 17, 12, 17, 0), ('whiff-22', 22, 17, 22, 0),
+        ('whiff-45', 45, 40, 45, 0), ('compete-kick-16', 16, 11, 16, 0), ('compete-heavy-16', 16, 11, 16, 0),
+    ):
+        if PREFIX + name not in cases:
+            continue
+        case = default(name)
+        row = wave_cancel(case, opening, old, natural=name == 'whiff-45')
+        assert (row['powerWaveCommand'], row['helperWave']) == (release == opening, helper_count), row
+        verify_wave_entity(case, opening + 15)
+        (frame, seat, _, blocked), = case[2]
+        assert (frame, seat, blocked) == (opening + 24, 2, False), (name, case[2])
+        target = c_at(case[0], frame, phase='after-collision')
+        assert (target['hitId'], target['hitFall'], target['pos'][1]) == (0, False, 0), target
+        assert (c_at(case[0], frame + 1)['anim'], c_at(case[0], frame + 19)['anim'], c_at(case[0], frame + 41)['ctrl']) == (
+            5012, 5017, True), name
+        assert not c_at(case[0], frame + 40)['ctrl'], name
+
+    for name, edge, old, exit_ in (('hit-34', 34, 18, 56), ('whiff-12', 12, 7, 45), ('whiff-23', 23, 18, 45)):
+        if PREFIX + name not in cases:
+            continue
+        case = default(name)
+        assert kick_changes(case) == [(exit_, 11, 40)], (name, kick_changes(case))
+        source = c_at(case[0], edge, 0, 'after-command')
+        assert (source['state'], source['raw'], source['powerWaveCommand']) == (440, 136, True), (name, source)
+        assert source['time'] in (old, old + 1), (name, old, source['time'])
+        assert not any(r['to'] in (1000, 1050, 200, 205, 400) for r in case[1]), name
+
+    for name, raw, state in (('stand-0', 32, 245), ('air-0', 34, 55), ('light-kick-0', 18, 430),
+                              ('down-forward-kick-0', 42, 440), ('down-back-kick-0', 38, 440),
+                              ('held-down-0', 34, 440)):
+        if PREFIX + name in cases:
+            src = c_at(default(name)[0], 5, 0)
+            assert (src['raw'], src['state']) == (raw, state), (name, src)
+            if name == 'held-down-0':
+                assert all(c_at(default(name)[0], f, 0)['state'] == 11 for f in range(56, 70)), name
+    for name, want in (('repeat-kick-23', [(45, 11, 40)]),
+                       ('repeat-kick-45', [(45, 440, 40), (85, 11, 40)])):
+        if PREFIX + name in cases:
+            assert kick_changes(default(name)) == want and not default(name)[2], name
+    if PREFIX + 'mixed-27' in cases:
+        case = default('mixed-27')
+        assert [(row['frame'], row['seat'], row['from'], row['stateTime']) for row in case[1] if row['to'] == 1000] == [
+            (27, 1, 440, 11), (117, 2, 400, 4)]
+        assert case[2] == [(15, 2, 115, False), (138, 1, 84, False)]
+        verify_wave_entity(case, 42)
+        verify_wave_entity(case, 132, owner=1)
+    for name, frame, dest, tick in (('incoming-wave-26', 25, 5000, 11), ('incoming-wave-34', 29, 5010, 7),
+                                    ('incoming-wave-35', 29, 5010, 6)):
+        if PREFIX + name in cases:
+            case = default(name)
+            assert kick_changes(case) == [(frame, dest, tick)] and case[2] == [(frame, 1, 107, False)], name
+            assert c_at(case[0], frame, 0, 'after-collision')['hitId'] == 0
+            assert not any(row['seat'] == 1 and row['to'] == 1000 for row in case[1]), name
+            assert any(h['anim'] == 1020 and not h['destroyed'] for h in c_at(case[0], frame + 1)['helpers']), name
+    for name, raw in (('stand-to-down-0', 32), ('jump-and-kick-0', 33)):
+        if PREFIX + name in cases:
+            case = default(name)
+            assert (c_at(case[0], 5, 0)['raw'], c_at(case[0], 5, 0)['state']) == (raw, 245), name
+            assert not any(c_at(case[0], f, 0)['state'] == 440 for f in range(5, 12)), name
+    if PREFIX + 'edge-16' in cases:
+        control = default('edge-0')
+        canceled = default('edge-16')
+        assert all(c_at(control[0], f, phase='before-command')['raw'] == c_at(canceled[0], f, phase='before-command')['raw']
+                   for f in range(len(control[0]['end'])))
+        assert control[2] == [(16, 2, 122, False)] and canceled[2] == [(34, 2, 84, False)]
+        assert c_at(control[0], 16, phase='after-collision')['hitId'] == 20
+        assert c_at(canceled[0], 34, phase='after-collision')['hitFall']
+        assert c_at(canceled[0], 140)['ctrl'] and not c_at(canceled[0], 139)['ctrl']
+        wave_cancel(canceled, 16, 11)
+        verify_wave_entity(canceled, 31)
+    if PREFIX + 'incoming-wave-16' in cases:
+        case = default('incoming-wave-16')
+        assert kick_changes(case) == [(16, 1000, 11)] and case[2] == [(28, 1, 107, False)]
+        assert any(row['frame'] == 28 and row['seat'] == 1 and (row['from'], row['to']) == (1000, 5000) for row in case[1])
+        assert all(not c_at(case[0], f, 0)['helpers'] for f in range(len(case[0]['end'])))
+        verify_wave_entity(case, 20, owner=1)
+    if PREFIX + 'incoming-wave-22' in cases:
+        case = default('incoming-wave-22')
+        assert kick_changes(case) == [(22, 1000, 11)] and case[2] == [(46, 2, 76, False)]
+        assert all(any(h['anim'] == 1020 and not h['destroyed'] for h in c_at(case[0], 37, seat)['helpers']) for seat in (0, 1))
+        verify_wave_entity(case, 20, owner=1)
+        verify_wave_entity(case, 37)
     cancel_cases = {'hit-27', 'hit-33', 'hit-34', 'hit-held-19', 'hit-19', 'crouch-guard-27',
                     'whiff-16', 'whiff-22', 'whiff-23', 'whiff-45'}
     verify_cancel = {PREFIX + name for name in cancel_cases} <= cases.keys()
