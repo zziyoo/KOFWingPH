@@ -320,3 +320,27 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_crouch_light_
 ```
 
 站姿反应绑定 5010／5015，蹲姿反应绑定 5020／5025。两个预设复用各自冻结的地面反应框。430 衔接站轻拳时先匹配近身 205，再回落至远身 200。430、400 在本阶段预设中启用后续蹲防续接。原版松后仍按下时继续格挡，松下则失去这一资格。阶段 25 的两个 Wave 候选允许在 16 tick 手势时限内先完成 236，再按 x。补充轨迹见 [原版状态与输入对照](STAGE25_REFERENCE.md)。要核对转换结果，在新目录生成后逐一比较输出与现有视觉别名的 SHA-256。
+
+## 阶段 26 站轻脚与近远选招
+
+`state_standing_light_kicks` 校验两套阶段 25 的六份冻结文档，读取原包与真实 Manifest，再从固定原引擎轨迹核验本体、衔接、Wave、输入保留和防御。`5C` 替换站轻脚占位，235 的距离条件使用原版 28 身体距。新的绑定和角色生成物保存在独立的 `terry98-stage26-*` 路径。 [原引擎参考](STAGE26_REFERENCE.md)
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+$env:NEWKOF_TERRY_AUDIT = (Get-Location).Path
+$base = 'data/imported-characters/terry98-stage25-final'
+$profile = 'data/imported-characters/terry98-stage26-final'
+$source = @('local-mugen/terry.zip','data/imported-characters/terry98/manifest.json')
+$batches = Get-Content tools/Stage26Reference/Batches.json -Raw | ConvertFrom-Json -AsHashtable
+$refs = @($batches.Keys | ForEach-Object { '--reference'; "local-mugen/stage26-native-repro-$_/results" })
+py -m mugen_importer.state_standing_light_kicks @source --base $base @refs --output $profile
+if ($LASTEXITCODE) { throw 'Stage 26 conversion failed' }
+foreach ($mode in 'default','mode2') {
+  py tools/Stage14Validation/stage_assets.py --binding "$profile/$mode.binding.json" `
+    --destination "data/imported-characters/terry98-stage26-$mode"
+  if ($LASTEXITCODE) { throw "Stage 26 $mode visual staging failed" }
+}
+py -m unittest discover -s tools/MugenImporter/tests -p test_state_standing_light_kicks.py
+```
+
+固定轨迹可来自多个完整批次，每个 `results` 通过一个 `--reference` 传入。核对可重现性时在独立输出目录用同一批次重新生成，并比较六份 JSON SHA-256。 [本轮验收与证据](STAGE26_ACCEPTANCE.md)

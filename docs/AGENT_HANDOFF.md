@@ -1661,3 +1661,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 比对 430 先看实际 `MoveStarted`、旧动作有效 tick 和 `CommandAudit`。430 的直接 Wave 候选在动作中拒绝，可回落普通技。经新普通技许可进入 Wave 与旧 tick 14 的自然 Wave 是独立路径。留意阶段 25 对弱 Wave 配置启用的 `matchCompletedMotion`，以及 430／400 在连续格挡时按新接触方向判定低段。 [时序与兼容边界](STAGE25_ACCEPTANCE.md)
 - 固定回放位于 `D:/NewKOF-stage25-verified`。图像与轨迹索引同时标出实际提交帧和场景输入。阶段 13C–24 各用自己的冻结命令和资料回放，旧阶段配置与黄金日志保留原哈希。 [图形证据](../tools/Stage25Validation/EVIDENCE.md) · [冻结命令](../tools/Stage25Validation/README.md)
 - 阶段 25 正式 PASS，7/7。下一候选可先核对站轻脚 230／235 的近远选招和已取证的 430 出边、235 入边。阶段 25 仅保留其输入优先级。 [验收矩阵](STAGE25_ACCEPTANCE.md)
+
+### 阶段 26 站轻脚与近远选招
+
+- 实验配置在 `data/imported-characters/terry98-stage26-final`。默认和模式 2 对应 `terry98-stage26-default` 与 `terry98-stage26-mode2`。以 `U` 或 P2 `KP4`／`/` 输入站轻脚，查看 `CommandAudit` 中实际消费的按键年龄和 `MoveStarted`，再按双方身体宽度复算距离。 [导入命令](MUGEN_IMPORT.md#阶段-26-站轻脚与近远选招)
+- 235 的普通技衔接使用旧 tick 9–15，弱 Wave 显式许可使用 5–8。默认间接 Wave 使用后继 200／205／400 各自的许可。模式 2 的 1050、原版 300／310、720 保留输入。`FramePostDraw` 对照按 `S=L+1` 查实际图像，历史配置使用各自冻结命令。 [验收](STAGE26_ACCEPTANCE.md) · [取证命令](../tools/Stage26Validation/README.md)
+- 阶段 26 正式 PASS，7/7。阶段 13C–25 的冻结门禁已用真实对局回放，最终 Vulkan、同种子和两种视觉覆盖证据保存在 `D:/NewKOF-stage26-verified`。 [证据索引](../tools/Stage26Validation/EVIDENCE.md)
+- 后续静态候选为站重脚。当前 `Terry.cmd:1662–1684` 的默认地面入口用 `b`，身体距 48 及以内先试 245，再回落 240。两套模式的完整条件和运行轨迹仍待核对。通用空战与延期招式依赖见[阶段 26 原引擎参考](STAGE26_REFERENCE.md)。
