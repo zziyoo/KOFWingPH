@@ -33,7 +33,7 @@ public sealed record LaunchReactionProfile
     public LaunchReactionProfile(int impactFrames, FixedPoint bounceHorizontalRetention,
         FixedPoint bounceVerticalVelocity, FixedPoint bounceGravity, int lieDownFrames, int wakeupFrames,
         int riseFrames, int lieImpactFrames, int transitionGravitySteps, bool startInFall = false,
-        GroundTechProfile? groundTech = null)
+        GroundTechProfile? groundTech = null, bool suppressOwnerProjectilesDuringFall = false)
     {
         if (impactFrames < 1 || riseFrames < 1 || lieDownFrames < 2 || wakeupFrames < 1 ||
             lieImpactFrames < 1 || lieImpactFrames >= lieDownFrames)
@@ -46,6 +46,9 @@ public sealed record LaunchReactionProfile
             throw new ArgumentOutOfRangeException(nameof(bounceVerticalVelocity));
         if (transitionGravitySteps is < 1 or > 4)
             throw new ArgumentOutOfRangeException(nameof(transitionGravitySteps));
+        if (suppressOwnerProjectilesDuringFall && !startInFall)
+            throw new ArgumentException("The air follow-up restriction requires a reaction that starts in fall.",
+                nameof(suppressOwnerProjectilesDuringFall));
 
         ImpactFrames = impactFrames;
         BounceHorizontalRetention = bounceHorizontalRetention;
@@ -58,6 +61,7 @@ public sealed record LaunchReactionProfile
         TransitionGravitySteps = transitionGravitySteps;
         StartInFall = startInFall;
         GroundTech = groundTech;
+        SuppressOwnerProjectilesDuringFall = suppressOwnerProjectilesDuringFall;
     }
 
     public int ImpactFrames { get; }
@@ -71,4 +75,5 @@ public sealed record LaunchReactionProfile
     public int TransitionGravitySteps { get; }
     public bool StartInFall { get; }
     public GroundTechProfile? GroundTech { get; }
+    public bool SuppressOwnerProjectilesDuringFall { get; }
 }

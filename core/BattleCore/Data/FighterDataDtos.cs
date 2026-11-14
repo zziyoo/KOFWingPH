@@ -552,6 +552,9 @@ public sealed class ProjectileDto
 
 public sealed class ProjectileTimelineDto
 {
+    [JsonPropertyName("respectsAirFollowupRestriction")]
+    public bool RespectsAirFollowupRestriction { get; set; }
+
     [JsonPropertyName("movementFrames")]
     public int? MovementFrames { get; set; }
 
@@ -597,6 +600,9 @@ public sealed class ProjectileHitSpanDto
 
 public sealed class LaunchReactionDto
 {
+    [JsonPropertyName("suppressOwnerProjectilesDuringFall")]
+    public bool SuppressOwnerProjectilesDuringFall { get; set; }
+
     [JsonPropertyName("startInFall")]
     public bool StartInFall { get; set; }
 

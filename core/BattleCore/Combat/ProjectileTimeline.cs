@@ -53,7 +53,7 @@ public sealed class ProjectileHitSpan
 public sealed class ProjectileTimeline
 {
     public ProjectileTimeline(int movementFrames, IReadOnlyList<ProjectileHitSpan> hitSpans,
-        bool requestPauseOnHit = false, int? guardThreatFrames = null)
+        bool requestPauseOnHit = false, int? guardThreatFrames = null, bool respectsAirFollowupRestriction = false)
     {
         ArgumentNullException.ThrowIfNull(hitSpans);
         if (movementFrames < 1)
@@ -75,12 +75,14 @@ public sealed class ProjectileTimeline
         HitSpans = Array.AsReadOnly(spans);
         RequestPauseOnHit = requestPauseOnHit;
         GuardThreatFrames = guardThreatFrames;
+        RespectsAirFollowupRestriction = respectsAirFollowupRestriction;
     }
 
     public int MovementFrames { get; }
     public IReadOnlyList<ProjectileHitSpan> HitSpans { get; }
     public bool RequestPauseOnHit { get; }
     public int? GuardThreatFrames { get; }
+    public bool RespectsAirFollowupRestriction { get; }
 
     internal ProjectileHitSpan? HitAt(int age)
     {

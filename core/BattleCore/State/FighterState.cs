@@ -300,6 +300,7 @@ public readonly record struct FighterState(
             throw new InvalidOperationException($"角色 {Id} 的受击重力 {HitLaunchGravity} 与当前状态不符。");
         if (LaunchReaction is { } reaction && (reaction.Profile is null || !Enum.IsDefined(reaction.Phase) ||
             reaction.LogicState != LogicState || reaction.Ticks < 0 ||
+            (reaction.Profile.SuppressOwnerProjectilesDuringFall ? reaction.LaunchOwner != 1 - Id : reaction.LaunchOwner != -1) ||
             reaction.TechInputTicks < 0 || reaction.TechInputTicks > (reaction.Profile.GroundTech?.InputBufferFrames ?? 0) ||
             reaction.Phase == LaunchReactionPhase.Tech && reaction.Profile.GroundTech is null ||
             (reaction.Phase == LaunchReactionPhase.Shake) != (reaction.Ticks == 0) ||

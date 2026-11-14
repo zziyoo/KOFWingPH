@@ -390,7 +390,7 @@ public static class FighterDataLoader
             timeline: dto.Timeline is { } timeline ? new ProjectileTimeline(
                 RequiredInt(timeline.MovementFrames, source, path + ".timeline.movementFrames"),
                 BuildArray(timeline.HitSpans, source, path + ".timeline.hitSpans", BuildProjectileHitSpan),
-                timeline.RequestPauseOnHit, timeline.GuardThreatFrames) : null),
+                timeline.RequestPauseOnHit, timeline.GuardThreatFrames, timeline.RespectsAirFollowupRestriction) : null),
         source, path);
 
     private static ProjectileHitSpan BuildProjectileHitSpan(ProjectileHitSpanDto dto, string source, string path) => Guard(
@@ -417,7 +417,8 @@ public static class FighterDataLoader
             RequiredInt(dto.RiseFrames, source, path + ".riseFrames"),
             RequiredInt(dto.LieImpactFrames, source, path + ".lieImpactFrames"),
             RequiredInt(dto.TransitionGravitySteps, source, path + ".transitionGravitySteps"), dto.StartInFall,
-            dto.GroundTech is { } tech ? BuildGroundTech(tech, source, path + ".groundTech") : null),
+            dto.GroundTech is { } tech ? BuildGroundTech(tech, source, path + ".groundTech") : null,
+            dto.SuppressOwnerProjectilesDuringFall),
         source, path);
 
     private static GroundTechProfile BuildGroundTech(GroundTechDto dto, string source, string path) => Guard(

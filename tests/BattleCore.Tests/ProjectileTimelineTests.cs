@@ -168,6 +168,36 @@ public sealed class ProjectileTimelineTests
     }
 
     [Theory]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    public void FallRestrictionDisablesOnlyAnOptedInWave(bool mirrored, bool respectsRestriction, bool allowsHit)
+    {
+        var simulation = CreateSimulation(respectsRestriction: respectsRestriction);
+        BattleState cast = Cast(simulation, Duel(60, mirrored), both: false);
+        var trip = new LaunchReactionProfile(4, FixedPoint.FromFraction(3, 4),
+            FixedPoint.FromFraction(7, 2), FixedPoint.FromFraction(1, 2), 13, 25,
+            riseFrames: 8, lieImpactFrames: 3, transitionGravitySteps: 2, startInFall: true,
+            suppressOwnerProjectilesDuringFall: true);
+        FighterState target = cast.Fighter(1) with
+        {
+            LogicState = FighterLogicState.AirHitstun,
+            PositionY = FixedPoint.One,
+            VelocityY = FixedPoint.One,
+            HitLaunchGravity = FixedPoint.FromFraction(1, 2),
+            LaunchReaction = new LaunchReactionState(trip, LaunchReactionPhase.Fall, 4, LaunchOwner: 0),
+        };
+        var state = new BattleState(cast.Frame, [cast.Fighter(0), target], cast.StateVersion, cast.Round,
+            cast.Projectiles, cast.NextProjectileId);
+
+        BattleStepResult result = simulation.Step(state, FrameInput.Empty(state.Frame));
+        Assert.Equal(allowsHit, result.Events.Any(e => e.Type == BattleEventType.ProjectileHit));
+        ProjectileState wave = Assert.Single(result.State.Projectiles);
+        Assert.Equal(24, wave.RemainingLifetime);
+        Assert.Equal(allowsHit, wave.HasContact);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void ScriptedLaunchMatchesBothAirArcsAndRecovery(bool mirrored)
@@ -351,7 +381,8 @@ public sealed class ProjectileTimelineTests
         Assert.Equal(1, state.NextProjectileId);
     }
 
-    private static BattleSimulation CreateSimulation(bool varyDamage = false, bool scriptedLaunch = false, bool farJab = false)
+    private static BattleSimulation CreateSimulation(bool varyDamage = false, bool scriptedLaunch = false, bool farJab = false,
+        bool respectsRestriction = false)
     {
         AttackDefinition Hit(bool launch) => new(
             0, 0, 1, 1, height: AttackHeight.Mid, hitstunFrames: 18, blockstunFrames: 17,
@@ -370,7 +401,7 @@ public sealed class ProjectileTimelineTests
             new ProjectileHitSpan(1, 8, new FixedRect(16, 79, 1, 48), Hit(true), 9, damage,
                 launchGravity: FixedPoint.FromFraction(1, 2), launchReaction: reaction),
             new ProjectileHitSpan(9, 12, new FixedRect(80, 119, 1, 88), Hit(false), 9, damage),
-        });
+        }, respectsAirFollowupRestriction: respectsRestriction);
         var wave = new ProjectileDefinition(Wave, new AttackDefinition(0, 0, 1, 1), Speed,
             lifetimeFrames: 25, timeline: timeline);
         var move = new MoveDefinition(Wave, "5C", 15, 2, 35, projectiles: new[] { wave });

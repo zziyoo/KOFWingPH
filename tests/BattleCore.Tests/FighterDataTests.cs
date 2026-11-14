@@ -49,7 +49,8 @@ public class FighterDataTests
             hit["hitstopFrames"] = 3;
             hit["launchGravity"] = JsonNode.Parse("""{"numerator":1,"denominator":2}""");
             hit["launchReaction"] = JsonNode.Parse("""
-                {"startInFall":true,"impactFrames":4,"riseFrames":8,"lieImpactFrames":3,
+                {"startInFall":true,"suppressOwnerProjectilesDuringFall":true,
+                 "impactFrames":4,"riseFrames":8,"lieImpactFrames":3,
                  "lieDownFrames":13,"wakeupFrames":25,"transitionGravitySteps":2,
                  "bounceHorizontalRetention":{"numerator":3,"denominator":4},
                  "bounceVerticalVelocity":{"numerator":3,"denominator":1},
@@ -83,6 +84,8 @@ public class FighterDataTests
         {
             FighterState target = state.Fighter(1);
             Assert.Equal(LaunchReactionPhase.Shake, target.LaunchReaction!.Value.Phase);
+            Assert.True(target.LaunchReaction.Value.RestrictsAirFollowupFrom(0));
+            Assert.False(target.LaunchReaction.Value.RestrictsAirFollowupFrom(1));
             Assert.Equal(FixedPoint.Zero, target.PositionY);
             Assert.Equal(30, Assert.Single(FighterBoxes.GetHurtboxes(target, fighter)).MaxY);
             state = sim.Step(state, FrameInput.Empty(state.Frame)).State;
@@ -93,6 +96,7 @@ public class FighterDataTests
         Assert.Equal(state.Fighters, sim.Step(saved, FrameInput.Empty(saved.Frame)).State.Fighters);
         FighterState launched = state.Fighter(1);
         Assert.Equal(LaunchReactionPhase.Fall, launched.LaunchReaction!.Value.Phase);
+        Assert.True(launched.LaunchReaction.Value.RestrictsAirFollowupFrom(0));
         Assert.Equal(FixedPoint.FromFraction(15, 2), launched.PositionY);
         Assert.Equal(32, launched.PositionX);
         Assert.Equal(FixedPoint.FromFraction(75, 2), Assert.Single(FighterBoxes.GetHurtboxes(launched, fighter)).MaxY);
@@ -106,6 +110,8 @@ public class FighterDataTests
             BattleStepResult next = sim.Step(state, input);
             Assert.Equal(next.State.Fighters, sim.Step(state, input).State.Fighters);
             state = next.State;
+            if (state.Fighter(1).LaunchReaction is { Phase: LaunchReactionPhase.Impact or LaunchReactionPhase.Tech } grounded)
+                Assert.False(grounded.RestrictsAirFollowupFrom(0));
             if (state.Fighter(1).LaunchReaction is { Phase: LaunchReactionPhase.Tech, Ticks: 1 })
             {
                 performedTech = true;

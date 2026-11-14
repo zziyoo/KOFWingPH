@@ -620,8 +620,7 @@ public sealed class BattleSimulation
         //    放在近战与投技之后：近战优先占用目标本帧的受击资格（相杀/投技同理），
         //    投掷物作为独立实体仍然可以结算（不同来源互不取消），但每名目标每帧至多被
         //    一枚投掷物命中（按 ID 升序取第一枚）。
-        ProjectileStep projectileStep = StepProjectiles(
-            state.Frame, nextFighters, state.Projectiles, candidates, state.NextProjectileId);
+        ProjectileStep projectileStep = StepProjectiles(state, nextFighters, candidates);
 
         // Independent projectiles remain active. A hit to either participant cancels the unresolved grab.
         if (pending is not null && projectileStep.Events.Any(e => e.Type == BattleEventType.ProjectileHit))
@@ -981,7 +980,8 @@ public sealed class BattleSimulation
                     LandingWakeupFrames = settled.WakeupFrames,
                     HitLaunchGravity = settled.LaunchGravity,
                     LaunchReaction = settled.LaunchReaction is { } profile
-                        ? new LaunchReactionState(profile, LaunchReactionPhase.Shake, 0) : null,
+                        ? new LaunchReactionState(profile, LaunchReactionPhase.Shake, 0,
+                            LaunchOwner: profile.SuppressOwnerProjectilesDuringFall ? attacker : -1) : null,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     LastHitContactGroups = settled.ContactGroups,
                     MoveStartedFrame = -1,
@@ -1371,13 +1371,10 @@ public sealed class BattleSimulation
     /// <para>每枚实体最多结算一次，动作切换与打断独立于已生成实体的寿命。
     /// 动态 HitDef 从结算前的角色快照读取所属席位的伤害变量。</para>
     /// </summary>
-    private ProjectileStep StepProjectiles(
-        int frame,
-        FighterState[] fighters,
-        IReadOnlyList<ProjectileState> incoming,
-        FighterCandidate[] candidates,
-        int nextProjectileId)
+    private ProjectileStep StepProjectiles(BattleState before, FighterState[] fighters, FighterCandidate[] candidates)
     {
+        IReadOnlyList<ProjectileState> incoming = before.Projectiles;
+        int nextProjectileId = before.NextProjectileId;
         var events = new List<ProjectileEvent>(4);
         var alive = new List<ProjectileState>(incoming.Count);
         var definitions = new List<ProjectileDefinition>(incoming.Count);
@@ -1474,7 +1471,10 @@ public sealed class BattleSimulation
 
             ProjectileDefinition definition = definitions[i];
             ProjectileHitSpan? span = definition.Timeline?.HitAt(definition.LifetimeFrames - projectile.RemainingLifetime);
-            if (definition.Timeline is not null && (projectile.HasContact || span is null))
+            // The source controller reads the reaction before this tick's landing transition.
+            if (definition.Timeline is { } timeline && (projectile.HasContact || span is null ||
+                (timeline.RespectsAirFollowupRestriction &&
+                    before.Fighter(target).LaunchReaction?.RestrictsAirFollowupFrom(projectile.OwnerFighterId) == true)))
             {
                 survivors.Add(projectile);
                 continue;
@@ -1527,7 +1527,7 @@ public sealed class BattleSimulation
 
                 if (nextProjectileId == int.MaxValue)
                     throw new InvalidOperationException(
-                        $"帧 {frame}：投掷物 ID 空间耗尽（NextProjectileId 已达 int 上限）。");
+                        $"帧 {before.Frame}：投掷物 ID 空间耗尽（NextProjectileId 已达 int 上限）。");
 
                 FixedPoint forwardSign = fighter.Facing == Facing.Right
                     ? FixedPoint.One
@@ -1722,7 +1722,8 @@ public sealed class BattleSimulation
                 LandingWakeupFrames = hit.WakeupFrames,
                 HitLaunchGravity = span?.LaunchGravity,
                 LaunchReaction = span?.LaunchReaction is { } launchReaction
-                    ? new LaunchReactionState(launchReaction, LaunchReactionPhase.Shake, 0)
+                    ? new LaunchReactionState(launchReaction, LaunchReactionPhase.Shake, 0,
+                        LaunchOwner: launchReaction.SuppressOwnerProjectilesDuringFall ? projectile.OwnerFighterId : -1)
                     : null,
                 MoveStartedFrame = -1,
                 MoveElapsedFrames = 0,
