@@ -51,6 +51,9 @@ public sealed class FighterDocumentDto
     [JsonPropertyName("protectGroundHitstunExit")]
     public bool ProtectGroundHitstunExit { get; set; }
 
+    [JsonPropertyName("useOrderedGroundHitstunExit")]
+    public bool UseOrderedGroundHitstunExit { get; set; }
+
     [JsonPropertyName("moves")]
     public List<MoveDto>? Moves { get; set; }
 
@@ -273,6 +276,9 @@ public sealed class CommandDto
 
     [JsonPropertyName("reserveGroundInput")]
     public bool ReserveGroundInput { get; set; }
+
+    [JsonPropertyName("reserveOnEdgeDirection")]
+    public bool ReserveOnEdgeDirection { get; set; }
 }
 
 public sealed class CommandBufferPolicyDto

@@ -142,7 +142,7 @@ public static class FighterDataLoader
                 airBodyWidths, neutralAirHurtboxes, damageRules, dto.UseCommandPriority, dto.AllowStrikeClash,
                 dto.ForwardGuardDistance is { } guard ? Fraction(guard, sourceName, "forwardGuardDistance") : null,
                 dto.RetainProjectileGuard, dto.PreserveGuardEntryMomentum, dto.ProjectileGuardRecoveryFrames,
-                dto.ProtectGroundHitstunExit),
+                dto.ProtectGroundHitstunExit, dto.UseOrderedGroundHitstunExit),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }
@@ -247,7 +247,7 @@ public static class FighterDataLoader
                     RequiredInt(buffer.HelperReleasedDecay, source, path + ".bufferPolicy.helperReleasedDecay"))
                 : null,
             matchHeldMotion: dto.MatchHeldMotion, reserveGroundInput: dto.ReserveGroundInput,
-            matchCompletedMotion: dto.MatchCompletedMotion),
+            matchCompletedMotion: dto.MatchCompletedMotion, reserveOnEdgeDirection: dto.ReserveOnEdgeDirection),
         source, path);
 
     private static MoveDefinition BuildMove(MoveDto dto, string source, string path) => Guard(

@@ -78,7 +78,7 @@ public sealed class BattleSimulation
     /// <summary>对局双方的角色配置。</summary>
     public FightRoster Roster => _roster;
 
-    private static FixedPoint OpponentBodyDistance(FighterState fighter, FighterState opponent,
+    private static FixedPoint OpponentBodyDistance(FighterState fighter, FighterState opponent, FixedPoint opponentX,
         FighterDefinition definition, FighterDefinition opponentDefinition)
     {
         if (definition.GroundBodyWidths is not { } own)
@@ -86,7 +86,7 @@ public sealed class BattleSimulation
 
         int facing = fighter.Facing == Facing.Right ? 1 : -1;
         int opponentFacing = opponent.Facing == Facing.Right ? 1 : -1;
-        Int128 distance = ((Int128)opponent.PositionX.RawValue - fighter.PositionX.RawValue) * facing;
+        Int128 distance = ((Int128)opponentX.RawValue - fighter.PositionX.RawValue) * facing;
         GroundBodyWidths? other = opponent.LogicState.IsAirborneLike()
             ? opponentDefinition.AirBodyWidths ?? opponentDefinition.GroundBodyWidths
             : opponentDefinition.GroundBodyWidths;
@@ -96,6 +96,13 @@ public sealed class BattleSimulation
         Int128 bodyDistance = distance - own.Front.RawValue + opponentEdge;
         return FixedPoint.FromRaw((long)Int128.Clamp(bodyDistance, long.MinValue, long.MaxValue));
     }
+
+    private bool UsesOrderedGroundHitstunExit(FighterState fighter, int seat) =>
+        _roster.Fighter(seat).UseOrderedGroundHitstunExit && fighter.LogicState == FighterLogicState.Hitstun &&
+        fighter.StunRemainingFrames == 1 && fighter.HitstopRemainingFrames == 0;
+
+    private static bool CanMoveBeforeGroundHitstunExit(FighterState fighter) =>
+        fighter.LogicState is FighterLogicState.Standing or FighterLogicState.Crouching or FighterLogicState.Recovery;
 
     /// <summary>本模拟使用的场地配置。</summary>
     public StageDefinition Stage => _stage;
@@ -195,13 +202,17 @@ public sealed class BattleSimulation
             return new BattleStepResult(state.Frame, frameAfter, input, frozen);
         }
 
-        // ── 第 1-2 阶段：逐角色「识别 → 状态机 → 运动」（只读取帧开始快照）──
+        // ── 第 1-2 阶段：逐角色「识别 → 状态机 → 运动」──
         Int128 separation = (Int128)state.Fighters[0].PositionX.RawValue - state.Fighters[1].PositionX.RawValue;
         FixedPoint opponentDistance = FixedPoint.FromRaw((long)Int128.Min(Int128.Abs(separation), long.MaxValue));
         var candidates = new FighterCandidate[state.Fighters.Count];
         var frozenThisFrame = new bool[candidates.Length];
-        for (int i = 0; i < candidates.Length; i++)
+        // Authored ground-hitstun exits see an idle opponent's current tick of movement.
+        bool secondActsFirst = UsesOrderedGroundHitstunExit(state.Fighters[0], 0) &&
+            CanMoveBeforeGroundHitstunExit(state.Fighters[1]);
+        for (int turn = 0; turn < candidates.Length; turn++)
         {
+            int i = secondActsFirst ? 1 - turn : turn;
             FighterState fighter = state.Fighters[i];
             FighterDefinition definition = _roster.Fighter(i);
             InputBits bits = input.ForPlayer(i);
@@ -294,6 +305,11 @@ public sealed class BattleSimulation
             // 动作有效经过帧数（D96）：帧开始时已在招式中 → 上一帧值 + 1；
             // 本帧发动/取消时由状态机返回 0（新实例）。
             int moveElapsed = fighter.IsInMove ? fighter.MoveElapsedFrames + 1 : 0;
+            int opponentSeat = 1 - i;
+            FighterState opponent = state.Fighters[opponentSeat];
+            bool orderedGroundHitstunExit = UsesOrderedGroundHitstunExit(fighter, i);
+            FixedPoint opponentX = orderedGroundHitstunExit && turn > 0 && CanMoveBeforeGroundHitstunExit(opponent)
+                ? candidates[opponentSeat].PositionX : opponent.PositionX;
 
             FighterActionTick tick = FighterStateMachine.Tick(
                 fighter.LogicState,
@@ -311,7 +327,7 @@ public sealed class BattleSimulation
                 fighter.LandingWakeupFrames,
                 moveElapsed,
                 opponentDistance,
-                OpponentBodyDistance(fighter, state.Fighters[1 - i], definition, _roster.Fighter(1 - i)),
+                OpponentBodyDistance(fighter, opponent, opponentX, definition, _roster.Fighter(opponentSeat)),
                 fighter.CrouchReturnTicks, fighter.GroundReaction.Crouching);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
@@ -436,7 +452,7 @@ public sealed class BattleSimulation
                 bool guardThreat = resolved.Back && HasForwardGuardThreat(state, i);
                 bool enteringGuardRecovery = fighter.LogicState == FighterLogicState.Blockstun &&
                     definition.ProjectileGuardRecoveryFrames > 0;
-                if (!guardThreat && !enteringGuardRecovery)
+                if (!guardThreat && !enteringGuardRecovery && !orderedGroundHitstunExit)
                     x = GroundMovement.StepX(tick.State, fighter.PositionX, fighter.Facing, resolved, definition.Movement);
                 if (definition.PreserveGuardEntryMomentum && resolved.Back)
                 {

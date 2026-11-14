@@ -105,6 +105,55 @@ public sealed class CommandPriorityTests
         Assert.All(action.Recognition.Buffer, entry => Assert.True(entry.Consumed));
     }
 
+    [Theory]
+    [InlineData(InputBits.Right, 1, true)]
+    [InlineData(InputBits.Right, 3, true)]
+    [InlineData(InputBits.Right, 4, false)]
+    [InlineData(InputBits.None, 1, false)]
+    public void DirectionalReservationUsesItsCapturedDirectionUntilTheHelperExpires(
+        InputBits edgeDirection, int age, bool shouldReserve)
+    {
+        var normal = new CommandDefinition("Normal", [], InputBits.LightPunch, priority: 1, bufferLifetimeFrames: 4);
+        var sourceCommand = new CommandDefinition("Source", [], InputBits.LightKick);
+        var deferred = new CommandDefinition("Deferred", [CommandDirection.Forward], InputBits.LightPunch,
+            maxSequenceFrames: 1, buttonToleranceFrames: 0, priority: 2, bufferLifetimeFrames: 0,
+            bufferPolicy: new CommandBufferPolicy(true, 4, 1, 1), reserveGroundInput: true, reserveOnEdgeDirection: true);
+        var source = new MoveDefinition(Light, "Source", 4, 5, 7,
+            cancels: [new CancelDefinition(Heavy, 5, 8, MoveCancelPhases.Active, allowWhiff: true)],
+            reservedCancels: [new ReservedCancelDefinition("Deferred", 5, 8, MoveCancelPhases.Active)]);
+        var target = new MoveDefinition(Heavy, "Normal", 5, 3, 7);
+        var fighter = new FighterDefinition("Test", [normal, sourceCommand, deferred], [source, target], useCommandPriority: true);
+        RecognitionState recognized = Advance(fighter, [edgeDirection | InputBits.LightPunch]);
+        recognized = Advance(fighter, Enumerable.Repeat(InputBits.None, age), first: 1, prior: recognized);
+
+        FighterActionTick action = Tick(fighter, recognized, 5, age);
+
+        Assert.Equal(shouldReserve ? Light : Heavy, action.MoveId);
+        Assert.All(action.Recognition.Buffer, entry => Assert.True(entry.Consumed));
+    }
+
+    [Fact]
+    public void DirectionalReservationRetainsTheRootEdgeAcrossHitPauseAfterTheHelperExpires()
+    {
+        var normal = new CommandDefinition("Normal", [], InputBits.LightPunch, priority: 1, bufferLifetimeFrames: 4);
+        var sourceCommand = new CommandDefinition("Source", [], InputBits.LightKick);
+        var deferred = new CommandDefinition("Deferred", [CommandDirection.Forward], InputBits.LightPunch,
+            maxSequenceFrames: 1, buttonToleranceFrames: 0, priority: 2, bufferLifetimeFrames: 0,
+            bufferPolicy: new CommandBufferPolicy(true, 4, 1, 1), reserveGroundInput: true, reserveOnEdgeDirection: true);
+        var source = new MoveDefinition(Light, "Source", 4, 5, 7,
+            cancels: [new CancelDefinition(Heavy, 5, 8, MoveCancelPhases.Active, allowWhiff: true)],
+            reservedCancels: [new ReservedCancelDefinition("Deferred", 5, 8, MoveCancelPhases.Active)]);
+        var target = new MoveDefinition(Heavy, "Normal", 5, 3, 7);
+        var fighter = new FighterDefinition("Test", [normal, sourceCommand, deferred], [source, target], useCommandPriority: true);
+        RecognitionState recognized = Advance(fighter, [InputBits.Right | InputBits.LightPunch], frozen: true);
+        recognized = Advance(fighter, Enumerable.Repeat(InputBits.None, 3), first: 1, prior: recognized, frozen: true);
+        recognized = Advance(fighter, [InputBits.None], first: 4, prior: recognized);
+
+        FighterActionTick resumed = Tick(fighter, recognized, 5, 4);
+        Assert.Equal(Light, resumed.MoveId);
+        Assert.All(resumed.Recognition.Buffer, entry => Assert.True(entry.Consumed));
+    }
+
     [Fact]
     public void ADeferredMotionAtNaturalRecoveryDoesNotReplayTheSamePunch()
     {

@@ -1355,6 +1355,69 @@ public class FighterDataTests
     }
 
     [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    public void OrderedGroundHitstunExitKeepsStandingKickOnTheCorrectSideOfTheBodyThreshold(
+        int recoveringSeat, bool recoveringSeatKicks)
+    {
+        FighterDefinition fighter = FighterDataLoader.Load(Mutate(Json("Kai"), document =>
+        {
+            document["useOrderedGroundHitstunExit"] = true;
+            document["groundBodyWidths"] = JsonNode.Parse("""
+                {"front":{"numerator":15,"denominator":1},"back":{"numerator":16,"denominator":1}}
+                """);
+            document["movement"]!["walkForwardSpeed"] = JsonNode.Parse("""{"numerator":811,"denominator":256}""");
+            document["movement"]!["walkBackwardSpeed"] = JsonNode.Parse("""{"numerator":811,"denominator":256}""");
+            document["commands"] = JsonNode.Parse("""
+                [{"commandId":"5C","directions":[],"buttons":["LightKick"],"maxSequenceFrames":1,
+                  "buttonToleranceFrames":0,"priority":0,"bufferLifetimeFrames":2,"chargeHoldFrames":0,
+                  "chargeReleaseToleranceFrames":0}]
+                """);
+            document["moves"] = JsonNode.Parse("""
+                [{"moveId":"NearKick","commandId":"5C","allowedFrom":"Standing","startupFrames":4,"activeFrames":5,
+                  "recoveryFrames":7,"maximumStartBodyDistance":{"numerator":28,"denominator":1},
+                  "attacks":[],"cancels":[],"throws":[],"projectiles":[]},
+                 {"moveId":"FarKick","commandId":"5C","allowedFrom":"Standing","startupFrames":5,"activeFrames":3,
+                  "recoveryFrames":11,"attacks":[],"cancels":[],"throws":[],"projectiles":[]}]
+                """);
+        }));
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        FighterState[] fighters =
+        [
+            FighterState.Create(0, 1000, -30, Facing.Right) with { PositionX = FixedPoint.FromFraction(-237, 8) },
+            FighterState.Create(1, 1000, 30, Facing.Left) with { PositionX = FixedPoint.FromFraction(237, 8) },
+        ];
+        fighters[recoveringSeat] = fighters[recoveringSeat] with { LogicState = FighterLogicState.Hitstun, StunRemainingFrames = 1 };
+        var initial = new BattleState(0, fighters, BattleState.CreateDefault().StateVersion);
+        InputBits recoveryInput = (recoveringSeat == 0 ? InputBits.Left : InputBits.Right) |
+            (recoveringSeatKicks ? InputBits.LightKick : InputBits.None);
+        InputBits approachInput = recoveringSeat == 0 ? InputBits.Left : InputBits.Right;
+        var input = new FrameInput(0, recoveringSeat == 0 ? recoveryInput : approachInput,
+            recoveringSeat == 1 ? recoveryInput : approachInput);
+        BattleState recovered = simulation.Step(initial, input).State;
+
+        Assert.Equal(recovered.Fighters, simulation.Step(initial, input).State.Fighters);
+        Assert.Equal(fighters[recoveringSeat].PositionX, recovered.Fighter(recoveringSeat).PositionX);
+        Assert.Equal(fighters[1 - recoveringSeat].PositionX + (recoveringSeat == 0 ? -1 : 1) * FixedPoint.FromFraction(811, 256),
+            recovered.Fighter(1 - recoveringSeat).PositionX);
+        if (recoveringSeatKicks)
+        {
+            Assert.Equal("NearKick", recovered.Fighter(recoveringSeat).MoveId);
+            Assert.Equal(0, recovered.Fighter(recoveringSeat).MoveStartedFrame);
+        }
+        else
+        {
+            Assert.Equal(FighterLogicState.Standing, recovered.Fighter(recoveringSeat).LogicState);
+            BattleState next = simulation.Step(recovered, F(1,
+                recoveringSeat == 0 ? InputBits.None : InputBits.LightKick,
+                recoveringSeat == 1 ? InputBits.None : InputBits.LightKick)).State;
+            Assert.Equal("NearKick", next.Fighter(1 - recoveringSeat).MoveId);
+        }
+    }
+
+    [Theory]
     [InlineData(Facing.Right, -20, 19)]
     [InlineData(Facing.Left, -19, 20)]
     public void NeutralJumpHurtboxes_MirrorWithoutReplacingMovingOrUnconfiguredAirHurtboxes(

@@ -490,7 +490,8 @@ public sealed class RecognitionState
 
         if (definition.ReserveGroundInput && !definition.MatchHeldMotion)
         {
-            if (definition.BufferLifetimeFrames == 0 && !sequence.Contains(directions[^1].Direction))
+            if ((definition.BufferLifetimeFrames == 0 || definition.ReserveOnEdgeDirection) &&
+                !sequence.Contains(directions[^1].Direction))
                 return false;
             pressIndex = FindPressIndex(presses, definition.RequiredButtons, frame, tolerance: 0);
             if (pressIndex < 0)

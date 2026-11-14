@@ -259,7 +259,7 @@ public static class FighterStateMachine
             {
                 if (!reservation.AllowsReservedDirection(recognition.Directions[^1].Direction))
                     continue;
-                recognition = reservation.MatchHeldMotion
+                recognition = reservation.MatchHeldMotion || reservation.ReserveOnEdgeDirection
                     ? recognition.WithResultConsumed(match.RecognizedFrame)
                     : recognition.WithReservedGroundInputConsumed(match.RecognizedFrame, frame);
                 break;

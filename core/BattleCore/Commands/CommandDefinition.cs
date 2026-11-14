@@ -97,7 +97,8 @@ public sealed class CommandDefinition
         bool matchHeldMotion = false,
         CommandBufferPolicy? bufferPolicy = null,
         bool reserveGroundInput = false,
-        bool matchCompletedMotion = false)
+        bool matchCompletedMotion = false,
+        bool reserveOnEdgeDirection = false)
     {
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("指令 ID 不能为空。", nameof(commandId));
@@ -161,9 +162,12 @@ public sealed class CommandDefinition
             throw new ArgumentException("A completed motion uses the held-motion direction parser.", nameof(matchCompletedMotion));
         if (bufferPolicy is { HelperTicks: > 0 } && requiredButtons == InputBits.None)
             throw new ArgumentException("A helper command buffer requires attack buttons.", nameof(bufferPolicy));
+        if (reserveOnEdgeDirection && (!reserveGroundInput || matchHeldMotion || bufferPolicy is not { HelperTicks: > 0 }))
+            throw new ArgumentException("An edge-direction reservation requires a directional ground reservation with a helper clock.",
+                nameof(reserveOnEdgeDirection));
         if (reserveGroundInput && !matchHeldMotion &&
             (sequence.Length == 0 || sequence.Distinct().Count() != sequence.Length || requiredButtons == InputBits.None ||
-             buttonToleranceFrames != 0 || chargeHoldFrames != 0 || bufferPolicy is not null))
+             buttonToleranceFrames != 0 || chargeHoldFrames != 0 || bufferPolicy is not null && !reserveOnEdgeDirection))
             throw new ArgumentException("保留的地面指令需要一组不重复的相对方向和当帧按键边沿。", nameof(reserveGroundInput));
 
         CommandId = commandId;
@@ -179,6 +183,7 @@ public sealed class CommandDefinition
         BufferPolicy = bufferPolicy;
         ReserveGroundInput = reserveGroundInput;
         MatchCompletedMotion = matchCompletedMotion;
+        ReserveOnEdgeDirection = reserveOnEdgeDirection;
     }
 
     /// <summary>唯一标识，如 <c>236A</c>。</summary>
@@ -220,7 +225,8 @@ public sealed class CommandDefinition
     public CommandBufferPolicy? BufferPolicy { get; }
     public bool ReserveGroundInput { get; }
     public bool MatchCompletedMotion { get; }
+    public bool ReserveOnEdgeDirection { get; }
 
     internal bool AllowsReservedDirection(CommandDirection direction) =>
-        MatchHeldMotion || DirectionSequence.Contains(direction);
+        MatchHeldMotion || ReserveOnEdgeDirection || DirectionSequence.Contains(direction);
 }
