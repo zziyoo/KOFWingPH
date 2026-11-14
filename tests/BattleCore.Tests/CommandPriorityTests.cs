@@ -158,6 +158,26 @@ public sealed class CommandPriorityTests
     }
 
     [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void GlobalPauseButtonHelperOptInSupportsAnEdgeOnTheFrozenTick(bool helperRuns, bool starts)
+    {
+        var command = new CommandDefinition("Kick", [], InputBits.HeavyKick, bufferLifetimeFrames: 0,
+            bufferPolicy: new CommandBufferPolicy(true, 3, 1, 1, helperRunsDuringGlobalPause: helperRuns));
+        var fighter = new FighterDefinition("Test", [command], [new MoveDefinition(Heavy, "Kick", 3, 4, 5)],
+            useCommandPriority: true);
+        RecognitionState frozen = Advance(fighter, [InputBits.HeavyKick], globalPaused: true);
+        RecognitionState runnable = Advance(fighter, [InputBits.None], first: 1, prior: frozen);
+
+        FighterActionTick action = FighterStateMachine.Tick(FighterLogicState.Standing, null, 0, default, runnable, fighter, 1);
+
+        Assert.Equal(starts ? Heavy : null, action.MoveId);
+        Assert.Equal(runnable, Advance(fighter, [InputBits.None], first: 1, prior: frozen));
+        RecognitionState after = Advance(fighter, [InputBits.HeavyKick], first: 2, prior: action.Recognition);
+        Assert.Equal(2, Assert.Single(after.Buffer, item => !item.Consumed).Match.ButtonFrame);
+    }
+
+    [Theory]
     [InlineData(InputBits.Right, 1, true)]
     [InlineData(InputBits.Right, 3, true)]
     [InlineData(InputBits.Right, 4, false)]

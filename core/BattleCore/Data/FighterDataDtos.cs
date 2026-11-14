@@ -309,6 +309,9 @@ public sealed class CommandBufferPolicyDto
 
     [JsonPropertyName("helperReleasedDecay")]
     public int? HelperReleasedDecay { get; set; }
+
+    [JsonPropertyName("helperRunsDuringGlobalPause")]
+    public bool HelperRunsDuringGlobalPause { get; set; }
 }
 
 public sealed class MoveDto

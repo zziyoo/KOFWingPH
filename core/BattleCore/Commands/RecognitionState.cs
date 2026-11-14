@@ -56,7 +56,8 @@ public readonly struct BufferedResult
 
         // A root command completed during HitPause receives one extra tick on thaw.
         int root = checked(definition.BufferLifetimeFrames + 1 + (inHitPause && policy.PreserveDuringHitPause ? 1 : 0));
-        int helper = globalPaused || !qualifiesForHelper ? 0 : Math.Max(0, policy.HelperTicks - policy.HelperHeldDecay);
+        int helper = !qualifiesForHelper || (globalPaused && !policy.HelperRunsDuringGlobalPause)
+            ? 0 : Math.Max(0, policy.HelperTicks - policy.HelperHeldDecay);
         return new BufferedResult(match, false, policy, root, helper, definition.RequiredButtons);
     }
 
@@ -67,7 +68,7 @@ public readonly struct BufferedResult
 
         int root = inHitPause && policy.PreserveDuringHitPause ? RootTicks : Math.Max(0, RootTicks - 1);
         int decay = (held & Buttons) == Buttons ? policy.HelperHeldDecay : policy.HelperReleasedDecay;
-        int helper = globalPaused ? HelperTicks : Math.Max(0, HelperTicks - decay);
+        int helper = globalPaused && !policy.HelperRunsDuringGlobalPause ? HelperTicks : Math.Max(0, HelperTicks - decay);
         return new BufferedResult(Match, Consumed, policy, root, helper, Buttons, HelperTicks > 0);
     }
 
@@ -364,7 +365,8 @@ public sealed class RecognitionState
                         if (!string.Equals(buffer[i].Match.CommandId, candidate.Match.CommandId, StringComparison.Ordinal))
                             continue;
                         BufferedResult helper = buffer[i].WithoutRootClock();
-                        if ((globalPaused || !qualifiesForHelper) && !helper.IsExpiredAt(frame))
+                        if (((globalPaused && !candidate.Definition.BufferPolicy.HelperRunsDuringGlobalPause) ||
+                             !qualifiesForHelper) && !helper.IsExpiredAt(frame))
                             buffer[i] = helper;
                         else
                             buffer.RemoveAt(i);

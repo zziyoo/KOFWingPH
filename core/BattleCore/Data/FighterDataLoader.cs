@@ -244,7 +244,8 @@ public static class FighterDataLoader
                 ? new CommandBufferPolicy(buffer.PreserveDuringHitPause,
                     RequiredInt(buffer.HelperTicks, source, path + ".bufferPolicy.helperTicks"),
                     RequiredInt(buffer.HelperHeldDecay, source, path + ".bufferPolicy.helperHeldDecay"),
-                    RequiredInt(buffer.HelperReleasedDecay, source, path + ".bufferPolicy.helperReleasedDecay"))
+                    RequiredInt(buffer.HelperReleasedDecay, source, path + ".bufferPolicy.helperReleasedDecay"),
+                    buffer.HelperRunsDuringGlobalPause)
                 : null,
             matchHeldMotion: dto.MatchHeldMotion, reserveGroundInput: dto.ReserveGroundInput,
             matchCompletedMotion: dto.MatchCompletedMotion, reserveOnEdgeDirection: dto.ReserveOnEdgeDirection,

@@ -6,7 +6,8 @@ namespace NewKOF.BattleCore.Commands;
 /// <summary>Optional root and helper clocks for a recognized command.</summary>
 public sealed record CommandBufferPolicy
 {
-    public CommandBufferPolicy(bool preserveDuringHitPause, int helperTicks, int helperHeldDecay, int helperReleasedDecay)
+    public CommandBufferPolicy(bool preserveDuringHitPause, int helperTicks, int helperHeldDecay, int helperReleasedDecay,
+        bool helperRunsDuringGlobalPause = false)
     {
         if (helperTicks is < 0 or > 120)
             throw new ArgumentOutOfRangeException(nameof(helperTicks));
@@ -18,12 +19,14 @@ public sealed record CommandBufferPolicy
         HelperTicks = helperTicks;
         HelperHeldDecay = helperHeldDecay;
         HelperReleasedDecay = helperReleasedDecay;
+        HelperRunsDuringGlobalPause = helperRunsDuringGlobalPause;
     }
 
     public bool PreserveDuringHitPause { get; }
     public int HelperTicks { get; }
     public int HelperHeldDecay { get; }
     public int HelperReleasedDecay { get; }
+    public bool HelperRunsDuringGlobalPause { get; }
 }
 
 /// <summary>Target eligibility for a deferred ground command, sampled at consumption.</summary>
