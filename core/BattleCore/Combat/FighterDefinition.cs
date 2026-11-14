@@ -30,7 +30,8 @@ public sealed class GroundHurtboxes
         IReadOnlyList<MoveHurtboxSpan>? heavyHitstun = null, IReadOnlyList<MoveHurtboxSpan>? crouchingHeavyHitstun = null,
         IReadOnlyList<MoveHurtboxSpan>? crouchingLightHitstun = null, IReadOnlyList<MoveHurtboxSpan>? lowHeavyHitstun = null,
         IReadOnlyList<FixedRect>? standingGuard = null, IReadOnlyList<FixedRect>? crouchingGuard = null,
-        IReadOnlyList<FixedRect>? standingGuardReady = null, IReadOnlyList<FixedRect>? crouchingGuardReady = null)
+        IReadOnlyList<FixedRect>? standingGuardReady = null, IReadOnlyList<FixedRect>? crouchingGuardReady = null,
+        IReadOnlyList<MoveHurtboxSpan>? tripFall = null)
     {
         Standing = Copy(standing, nameof(standing));
         Crouching = Copy(crouching, nameof(crouching));
@@ -50,6 +51,7 @@ public sealed class GroundHurtboxes
         CrouchingGuard = crouchingGuard is null ? null : Copy(crouchingGuard, nameof(crouchingGuard));
         StandingGuardReady = standingGuardReady is null ? null : Copy(standingGuardReady, nameof(standingGuardReady));
         CrouchingGuardReady = crouchingGuardReady is null ? null : Copy(crouchingGuardReady, nameof(crouchingGuardReady));
+        TripFall = CopyTimeline(tripFall, nameof(tripFall));
         if ((StandingGuard is null) != (CrouchingGuard is null) ||
             (StandingGuardReady is null) != (CrouchingGuardReady is null) ||
             (StandingGuardReady is not null && StandingGuard is null))
@@ -72,6 +74,7 @@ public sealed class GroundHurtboxes
     public IReadOnlyList<FixedRect>? CrouchingGuard { get; }
     public IReadOnlyList<FixedRect>? StandingGuardReady { get; }
     public IReadOnlyList<FixedRect>? CrouchingGuardReady { get; }
+    public IReadOnlyList<MoveHurtboxSpan>? TripFall { get; }
     public int CrouchRiseFrames { get; }
 
     internal IReadOnlyList<MoveHurtboxSpan>? HitReactionTimeline(GroundHitReaction reaction, bool crouching) =>

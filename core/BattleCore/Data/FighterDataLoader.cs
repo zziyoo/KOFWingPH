@@ -120,7 +120,8 @@ public static class FighterDataLoader
                 boxes.LowHeavyHitstun is null ? null : BuildArray(boxes.LowHeavyHitstun, sourceName,
                     "groundHurtboxes.lowHeavyHitstun", BuildMoveHurtboxSpan),
                 GuardBoxes(boxes.StandingGuard, "standingGuard"), GuardBoxes(boxes.CrouchingGuard, "crouchingGuard"),
-                GuardBoxes(boxes.StandingGuardReady, "standingGuardReady"), GuardBoxes(boxes.CrouchingGuardReady, "crouchingGuardReady")),
+                GuardBoxes(boxes.StandingGuardReady, "standingGuardReady"), GuardBoxes(boxes.CrouchingGuardReady, "crouchingGuardReady"),
+                boxes.TripFall is null ? null : BuildArray(boxes.TripFall, sourceName, "groundHurtboxes.tripFall", BuildMoveHurtboxSpan)),
                 sourceName, "groundHurtboxes")
             : null;
 
@@ -309,7 +310,9 @@ public static class FighterDataLoader
             dynamicDamage: BuildDynamicDamage(dto.DynamicDamage, source, path + ".dynamicDamage"),
             lightGroundReaction: dto.LightGroundReaction,
             groundHitReaction: dto.GroundHitReaction is { } reaction
-                ? ParseEnum<GroundHitReaction>(reaction, source, path + ".groundHitReaction") : GroundHitReaction.Standard),
+                ? ParseEnum<GroundHitReaction>(reaction, source, path + ".groundHitReaction") : GroundHitReaction.Standard,
+            launchGravity: dto.LaunchGravity is { } gravity ? Fraction(gravity, source, path + ".launchGravity") : null,
+            launchReaction: dto.LaunchReaction is { } launch ? BuildLaunchReaction(launch, source, path + ".launchReaction") : null),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>
@@ -413,7 +416,17 @@ public static class FighterDataLoader
             RequiredInt(dto.WakeupFrames, source, path + ".wakeupFrames"),
             RequiredInt(dto.RiseFrames, source, path + ".riseFrames"),
             RequiredInt(dto.LieImpactFrames, source, path + ".lieImpactFrames"),
-            RequiredInt(dto.TransitionGravitySteps, source, path + ".transitionGravitySteps")),
+            RequiredInt(dto.TransitionGravitySteps, source, path + ".transitionGravitySteps"), dto.StartInFall,
+            dto.GroundTech is { } tech ? BuildGroundTech(tech, source, path + ".groundTech") : null),
+        source, path);
+
+    private static GroundTechProfile BuildGroundTech(GroundTechDto dto, string source, string path) => Guard(
+        () => new GroundTechProfile(
+            RequiredInt(dto.InputBufferFrames, source, path + ".inputBufferFrames"),
+            RequiredInt(dto.DurationFrames, source, path + ".durationFrames"),
+            RequiredInt(dto.SlideFrames, source, path + ".slideFrames"),
+            Fraction(dto.InitialSpeed, source, path + ".initialSpeed"),
+            Fraction(dto.VelocityRetention, source, path + ".velocityRetention")),
         source, path);
 
     // ── 字段级校验 ──────────────────────────────────────────────────

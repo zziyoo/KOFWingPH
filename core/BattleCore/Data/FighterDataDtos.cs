@@ -114,6 +114,9 @@ public sealed class GroundBodyWidthsDto
 
 public sealed class GroundHurtboxesDto
 {
+    [JsonPropertyName("tripFall")]
+    public List<MoveHurtboxSpanDto>? TripFall { get; set; }
+
     [JsonPropertyName("standingOnCrouchEntry")]
     public bool StandingOnCrouchEntry { get; set; }
 
@@ -344,6 +347,12 @@ public sealed class MoveHurtboxSpanDto
 
 public sealed class AttackDto
 {
+    [JsonPropertyName("launchGravity")]
+    public FractionDto? LaunchGravity { get; set; }
+
+    [JsonPropertyName("launchReaction")]
+    public LaunchReactionDto? LaunchReaction { get; set; }
+
     [JsonPropertyName("lightGroundReaction")]
     public bool LightGroundReaction { get; set; }
 
@@ -588,6 +597,12 @@ public sealed class ProjectileHitSpanDto
 
 public sealed class LaunchReactionDto
 {
+    [JsonPropertyName("startInFall")]
+    public bool StartInFall { get; set; }
+
+    [JsonPropertyName("groundTech")]
+    public GroundTechDto? GroundTech { get; set; }
+
     [JsonPropertyName("impactFrames")]
     public int? ImpactFrames { get; set; }
 
@@ -614,4 +629,22 @@ public sealed class LaunchReactionDto
 
     [JsonPropertyName("transitionGravitySteps")]
     public int? TransitionGravitySteps { get; set; }
+}
+
+public sealed class GroundTechDto
+{
+    [JsonPropertyName("inputBufferFrames")]
+    public int? InputBufferFrames { get; set; }
+
+    [JsonPropertyName("durationFrames")]
+    public int? DurationFrames { get; set; }
+
+    [JsonPropertyName("slideFrames")]
+    public int? SlideFrames { get; set; }
+
+    [JsonPropertyName("initialSpeed")]
+    public FractionDto? InitialSpeed { get; set; }
+
+    [JsonPropertyName("velocityRetention")]
+    public FractionDto? VelocityRetention { get; set; }
 }

@@ -271,7 +271,7 @@ public readonly record struct FighterState(
             }
             else
             {
-                if (VelocityX != FixedPoint.Zero)
+                if (VelocityX != FixedPoint.Zero && LaunchReaction?.Phase != LaunchReactionPhase.Tech)
                     throw new InvalidOperationException(
                         $"角色 {Id} 处于地面状态 {LogicState} 但携带水平速度 {VelocityX}（必须为 0）。");
                 if (KnockbackFriction != FixedPoint.Zero)
@@ -300,6 +300,8 @@ public readonly record struct FighterState(
             throw new InvalidOperationException($"角色 {Id} 的受击重力 {HitLaunchGravity} 与当前状态不符。");
         if (LaunchReaction is { } reaction && (reaction.Profile is null || !Enum.IsDefined(reaction.Phase) ||
             reaction.LogicState != LogicState || reaction.Ticks < 0 ||
+            reaction.TechInputTicks < 0 || reaction.TechInputTicks > (reaction.Profile.GroundTech?.InputBufferFrames ?? 0) ||
+            reaction.Phase == LaunchReactionPhase.Tech && reaction.Profile.GroundTech is null ||
             (reaction.Phase == LaunchReactionPhase.Shake) != (reaction.Ticks == 0) ||
             HitLaunchGravity is null && reaction.Phase is (LaunchReactionPhase.Shake or LaunchReactionPhase.Lift or
                 LaunchReactionPhase.Rise or LaunchReactionPhase.Fall) ||

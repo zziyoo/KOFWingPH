@@ -244,7 +244,7 @@ public sealed class BattleSimulation
                     ProjectileSpawnMask = fighter.ProjectileSpawnMask,
                     HitLaunchGravity = fighter.HitLaunchGravity,
                     LaunchReaction = fighter.LaunchReaction,
-                    ProtectWakeup = fighter.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup,
+                    ProtectWakeup = ProtectsRecovery(fighter.LaunchReaction),
                 };
                 frozenThisFrame[i] = true;
                 continue;
@@ -261,7 +261,10 @@ public sealed class BattleSimulation
             if (fighter.LaunchReaction is not null)
             {
                 // The source recovery controller owns movement until control returns on the next tick.
-                FighterState reaction = ScriptedLaunchLanding.Advance(fighter);
+                const InputBits groundTech = InputBits.LightPunch | InputBits.LightKick;
+                bool techPressed = (bits & groundTech) == groundTech &&
+                    (fighter.RecognitionState.HeldAttacks & groundTech) != groundTech;
+                FighterState reaction = ScriptedLaunchLanding.Advance(fighter, techPressed);
                 candidates[i] = new FighterCandidate
                 {
                     LogicState = reaction.LogicState,
@@ -280,8 +283,7 @@ public sealed class BattleSimulation
                     LandingWakeupFrames = reaction.LandingWakeupFrames,
                     HitLaunchGravity = reaction.HitLaunchGravity,
                     LaunchReaction = reaction.LaunchReaction,
-                    ProtectWakeup = fighter.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup ||
-                        reaction.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup,
+                    ProtectWakeup = ProtectsRecovery(fighter.LaunchReaction) || ProtectsRecovery(reaction.LaunchReaction),
                 };
                 continue;
             }
@@ -977,8 +979,9 @@ public sealed class BattleSimulation
                     KnockbackFriction = FixedPoint.Zero,
                     LandingKnockdownFrames = settled.KnockdownFrames,
                     LandingWakeupFrames = settled.WakeupFrames,
-                    HitLaunchGravity = null,
-                    LaunchReaction = null,
+                    HitLaunchGravity = settled.LaunchGravity,
+                    LaunchReaction = settled.LaunchReaction is { } profile
+                        ? new LaunchReactionState(profile, LaunchReactionPhase.Shake, 0) : null,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     LastHitContactGroups = settled.ContactGroups,
                     MoveStartedFrame = -1,
@@ -1851,6 +1854,9 @@ public sealed class BattleSimulation
         return cleared ? fighter : fighter with { LandingKnockdownFrames = 0, LandingWakeupFrames = 0 };
     }
 
+    private static bool ProtectsRecovery(LaunchReactionState? reaction) =>
+        reaction?.Phase is LaunchReactionPhase.Wakeup or LaunchReactionPhase.Tech;
+
     /// <summary>
     /// 命中/防御确认帧归一化（阶段 07B，D91）：确认只属于当前攻击实例。
     /// 非动作状态一律清空；动作中若确认帧早于当前发动帧（换招）也清空。
@@ -1956,7 +1962,9 @@ public sealed class BattleSimulation
             KnockdownFrames: launches ? attack.KnockdownFrames : 0,
             WakeupFrames: launches ? attack.WakeupFrames : 0,
             Hitstop: attack.ResolveMeleeHitstop(blocked: false),
-            GroundReaction: attack.GroundReaction);
+            GroundReaction: attack.GroundReaction,
+            LaunchGravity: attack.LaunchGravity,
+            LaunchReaction: attack.LaunchReaction);
     }
 
     private static GroundHitReactionState ResolveGroundReaction(
@@ -2265,7 +2273,9 @@ public sealed class BattleSimulation
         int KnockdownFrames,
         int WakeupFrames,
         HitstopPair Hitstop,
-        GroundHitReaction GroundReaction = GroundHitReaction.Standard);
+        GroundHitReaction GroundReaction = GroundHitReaction.Standard,
+        FixedPoint? LaunchGravity = null,
+        LaunchReactionProfile? LaunchReaction = null);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。
@@ -2313,7 +2323,9 @@ public sealed class BattleSimulation
     {
         // 仅双方候选都非空中时强制（有一方在空中 → 不推挤，允许越身）。
         // D94：空中状态 = Airborne | AirHitstun（击飞当帧 Y 可能为 0，不能靠高度判断）。
-        if (candidates[0].LogicState.IsAirborneLike() || candidates[1].LogicState.IsAirborneLike())
+        if (candidates[0].LogicState.IsAirborneLike() || candidates[1].LogicState.IsAirborneLike() ||
+            candidates[0].LaunchReaction?.Phase == LaunchReactionPhase.Tech ||
+            candidates[1].LaunchReaction?.Phase == LaunchReactionPhase.Tech)
             return;
 
         FixedPoint p1Cand = candidates[0].PositionX;

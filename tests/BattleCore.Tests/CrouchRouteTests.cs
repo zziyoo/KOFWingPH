@@ -14,6 +14,30 @@ public sealed class CrouchRouteTests
     private const string Stand = "StandLight";
 
     [Theory]
+    [InlineData(InputBits.Down, InputBits.LightKick | InputBits.HeavyKick, null, "LightKick")]
+    [InlineData(InputBits.Down | InputBits.Left, InputBits.LightKick | InputBits.HeavyKick, null, "LightKick")]
+    [InlineData(InputBits.Down | InputBits.Right, InputBits.LightKick | InputBits.HeavyKick, null, "LightKick")]
+    [InlineData(InputBits.None, InputBits.HeavyKick, null, "StandingKick")]
+    [InlineData(InputBits.Down, InputBits.HeavyKick, "Sweep", "HeavyKick")]
+    public void ReservedInputCanUseAlternativeDirections(InputBits direction, InputBits buttons, string? move, string candidate)
+    {
+        var light = new CommandDefinition("LightKick", [CommandDirection.Down, CommandDirection.DownBack, CommandDirection.DownForward],
+            InputBits.LightKick, 1, 0, priority: 1, bufferLifetimeFrames: 0, reserveGroundInput: true);
+        var standing = new CommandDefinition("StandingKick", [CommandDirection.Neutral, CommandDirection.Back, CommandDirection.Forward],
+            InputBits.HeavyKick, 1, 0, priority: 1, bufferLifetimeFrames: 0, reserveGroundInput: true);
+        var kick = new CommandDefinition("HeavyKick", [], InputBits.HeavyKick, 1, 0, bufferLifetimeFrames: 2);
+        var sweep = new MoveDefinition("Sweep", "HeavyKick", 10, 8, 22, MoveAllowedStates.Crouching);
+        var fighter = new FighterDefinition("Test", [light, standing, kick], [sweep], useCommandPriority: true);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+
+        BattleState state = simulation.Step(BattleState.CreateDefault(), new FrameInput(0, direction | buttons, 0)).State;
+        Assert.Equal(move, state.Fighter(0).MoveId);
+        Assert.Contains(state.Fighter(0).RecognitionState.Buffer, result => result.Match.CommandId == candidate && result.Consumed);
+        state = simulation.Step(state, new FrameInput(1, InputBits.Down | buttons, 0)).State;
+        Assert.Equal(move, state.Fighter(0).MoveId);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]

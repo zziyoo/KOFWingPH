@@ -7,13 +7,21 @@ namespace NewKOF.BattleCore.Simulation;
 /// <summary>Advances an opted-in launch reaction once on the unfrozen world clock.</summary>
 internal static class ScriptedLaunchLanding
 {
-    public static FighterState Advance(FighterState fighter)
+    public static FighterState Advance(FighterState fighter, bool groundTechPressed)
     {
         LaunchReactionState reaction = fighter.LaunchReaction!.Value;
         LaunchReactionProfile profile = reaction.Profile;
+        if (profile.GroundTech is { } tech && reaction.Phase is LaunchReactionPhase.Shake or LaunchReactionPhase.Fall)
+        {
+            reaction = reaction with { TechInputTicks = reaction.TechInputTicks > 0 ? reaction.TechInputTicks - 1
+                : groundTechPressed ? tech.InputBufferFrames : 0 };
+        }
 
         switch (reaction.Phase)
         {
+            case LaunchReactionPhase.Shake when profile.StartInFall:
+                return AdvanceAir(fighter, reaction with { Phase = LaunchReactionPhase.Fall, Ticks = 1 },
+                    fighter.VelocityY - fighter.HitLaunchGravity!.Value);
             case LaunchReactionPhase.Shake:
                 return AdvanceAir(fighter, reaction with { Phase = LaunchReactionPhase.Lift, Ticks = 1 },
                     fighter.VelocityY);
@@ -23,8 +31,17 @@ internal static class ScriptedLaunchLanding
             case LaunchReactionPhase.Rise:
             case LaunchReactionPhase.Fall:
                 if (reaction.GroundCrossed)
+                {
+                    if (reaction.TechInputTicks > 0 && fighter.Health > 0 && profile.GroundTech is { } groundTech)
+                    {
+                        FighterState start = AtGround(fighter, reaction with { Phase = LaunchReactionPhase.Tech, Ticks = 1,
+                            GroundCrossed = false, TechInputTicks = 0 }, groundTech.DurationFrames);
+                        FixedPoint velocity = fighter.Facing == Facing.Right ? -groundTech.InitialSpeed : groundTech.InitialSpeed;
+                        return start with { PositionX = start.PositionX + velocity, VelocityX = velocity };
+                    }
                     return AtGround(fighter, reaction with { Phase = LaunchReactionPhase.Impact, Ticks = 1,
-                        GroundCrossed = false, ImpactHorizontalVelocity = fighter.VelocityX }, profile.ImpactFrames);
+                        GroundCrossed = false, ImpactHorizontalVelocity = fighter.VelocityX, TechInputTicks = 0 }, profile.ImpactFrames);
+                }
 
                 bool startFall = reaction.Phase == LaunchReactionPhase.Rise && reaction.Ticks >= profile.RiseFrames;
                 return AdvanceAir(fighter, startFall ? reaction with { Phase = LaunchReactionPhase.Fall, Ticks = 1 }
@@ -63,6 +80,15 @@ internal static class ScriptedLaunchLanding
                 if (reaction.Ticks < profile.WakeupFrames)
                     return AtGround(fighter, reaction with { Ticks = reaction.Ticks + 1 }, profile.WakeupFrames - reaction.Ticks);
                 return fighter with { LogicState = FighterLogicState.Standing, StunRemainingFrames = 0, LaunchReaction = null };
+            case LaunchReactionPhase.Tech:
+                GroundTechProfile recovery = profile.GroundTech!;
+                if (reaction.Ticks >= recovery.DurationFrames)
+                    return fighter with { LogicState = FighterLogicState.Standing, StunRemainingFrames = 0, LaunchReaction = null };
+                FixedPoint slide = reaction.Ticks < recovery.SlideFrames
+                    ? fighter.VelocityX * recovery.VelocityRetention : FixedPoint.Zero;
+                return fighter with { PositionX = fighter.PositionX + slide, VelocityX = slide,
+                    StunRemainingFrames = recovery.DurationFrames - reaction.Ticks,
+                    LaunchReaction = reaction with { Ticks = reaction.Ticks + 1 } };
             default:
                 throw new InvalidOperationException($"Unsupported launch reaction phase {reaction.Phase}.");
         }

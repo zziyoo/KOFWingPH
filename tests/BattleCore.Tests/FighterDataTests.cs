@@ -33,6 +33,91 @@ public class FighterDataTests
     private static FrameInput F(int frame, InputBits p1, InputBits p2 = InputBits.None) => new(frame, p1, p2);
 
     [Theory]
+    [InlineData(-1, false)]
+    [InlineData(26, false)]
+    [InlineData(27, true)]
+    [InlineData(31, true)]
+    public void AuthoredMeleeTripPreservesReactionAndGroundTechWindow(int techAtFallTick, bool groundTech)
+    {
+        string json = Mutate(Json("Kai"), fighter =>
+        {
+            JsonNode hit = fighter["moves"]![0]!["attacks"]![0]!;
+            hit["launchVelocityX"] = JsonNode.Parse("""{"numerator":2,"denominator":1}""");
+            hit["launchVelocityY"] = JsonNode.Parse("""{"numerator":8,"denominator":1}""");
+            hit["knockdownFrames"] = 13;
+            hit["wakeupFrames"] = 25;
+            hit["hitstopFrames"] = 3;
+            hit["launchGravity"] = JsonNode.Parse("""{"numerator":1,"denominator":2}""");
+            hit["launchReaction"] = JsonNode.Parse("""
+                {"startInFall":true,"impactFrames":4,"riseFrames":8,"lieImpactFrames":3,
+                 "lieDownFrames":13,"wakeupFrames":25,"transitionGravitySteps":2,
+                 "bounceHorizontalRetention":{"numerator":3,"denominator":4},
+                 "bounceVerticalVelocity":{"numerator":3,"denominator":1},
+                 "bounceGravity":{"numerator":1,"denominator":2},
+                 "groundTech":{"inputBufferFrames":5,"durationFrames":28,"slideFrames":16,
+                   "initialSpeed":{"numerator":8,"denominator":1},
+                   "velocityRetention":{"numerator":85,"denominator":100}}}
+                """);
+            JsonNode box = JsonNode.Parse("""
+                {"minX":{"numerator":-4,"denominator":1},"maxX":{"numerator":4,"denominator":1},
+                 "minY":{"numerator":12,"denominator":1},"maxY":{"numerator":30,"denominator":1}}
+                """)!;
+            JsonNode idle = JsonNode.Parse("""
+                {"minX":{"numerator":-30,"denominator":1},"maxX":{"numerator":30,"denominator":1},
+                 "minY":{"numerator":0,"denominator":1},"maxY":{"numerator":120,"denominator":1}}
+                """)!;
+            fighter["groundHurtboxes"] = new JsonObject
+            {
+                ["standing"] = new JsonArray(idle.DeepClone()),
+                ["crouching"] = new JsonArray(idle),
+                ["tripFall"] = new JsonArray(new JsonObject { ["frames"] = 1, ["boxes"] = new JsonArray(box) }),
+            };
+        });
+        FighterDefinition fighter = FighterDataLoader.Load(json);
+        var sim = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = ActiveState("StandLightPunch", 2, p1X: -30, p2X: 30);
+        BattleStepResult contact = sim.Step(state, FrameInput.Empty(state.Frame));
+        Assert.Single(contact.Events, e => e.Type == BattleEventType.Hit);
+        state = contact.State;
+        for (int freeze = 0; freeze < 3; freeze++)
+        {
+            FighterState target = state.Fighter(1);
+            Assert.Equal(LaunchReactionPhase.Shake, target.LaunchReaction!.Value.Phase);
+            Assert.Equal(FixedPoint.Zero, target.PositionY);
+            Assert.Equal(30, Assert.Single(FighterBoxes.GetHurtboxes(target, fighter)).MaxY);
+            state = sim.Step(state, FrameInput.Empty(state.Frame)).State;
+        }
+
+        BattleState saved = state;
+        state = sim.Step(state, FrameInput.Empty(state.Frame)).State;
+        Assert.Equal(state.Fighters, sim.Step(saved, FrameInput.Empty(saved.Frame)).State.Fighters);
+        FighterState launched = state.Fighter(1);
+        Assert.Equal(LaunchReactionPhase.Fall, launched.LaunchReaction!.Value.Phase);
+        Assert.Equal(FixedPoint.FromFraction(15, 2), launched.PositionY);
+        Assert.Equal(32, launched.PositionX);
+        Assert.Equal(FixedPoint.FromFraction(75, 2), Assert.Single(FighterBoxes.GetHurtboxes(launched, fighter)).MaxY);
+        bool performedTech = false;
+        while (state.Fighter(1).LaunchReaction is { } reaction)
+        {
+            Assert.InRange(state.Frame, 1, 100);
+            InputBits defense = reaction.Phase == LaunchReactionPhase.Fall && reaction.Ticks == techAtFallTick
+                ? InputBits.LightPunch | InputBits.LightKick : InputBits.None;
+            FrameInput input = F(state.Frame, InputBits.None, defense);
+            BattleStepResult next = sim.Step(state, input);
+            Assert.Equal(next.State.Fighters, sim.Step(state, input).State.Fighters);
+            state = next.State;
+            if (state.Fighter(1).LaunchReaction is { Phase: LaunchReactionPhase.Tech, Ticks: 1 })
+            {
+                performedTech = true;
+                Assert.Equal(100, state.Fighter(1).PositionX);
+                Assert.Equal(8, state.Fighter(1).VelocityX);
+            }
+        }
+        Assert.Equal(groundTech, performedTech);
+        Assert.Equal(FighterLogicState.Standing, state.Fighter(1).LogicState);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]

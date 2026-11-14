@@ -59,6 +59,9 @@ public static class FighterBoxes
         IReadOnlyList<FixedRect>? local = fighter.IsInMove && fighter.MoveId is { } moveId
             ? definition.FindMoveById(moveId)?.HurtboxesAt(fighter.MoveElapsedFrames)
             : null;
+        if (fighter.LaunchReaction is { Profile.StartInFall: true, Phase: LaunchReactionPhase.Shake or LaunchReactionPhase.Fall } trip &&
+            definition.GroundHurtboxes?.TripFall is { } timeline)
+            local = GroundHurtboxes.BoxesAt(timeline, trip.Ticks) ?? timeline[^1].Boxes;
         if (fighter.GroundGuardCrouching is { } crouching && definition.GroundHurtboxes is { } guards)
         {
             if (fighter.LogicState == FighterLogicState.Blockstun)

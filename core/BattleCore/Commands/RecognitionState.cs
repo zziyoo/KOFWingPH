@@ -473,7 +473,7 @@ public sealed class RecognitionState
 
         if (definition.ReserveGroundInput)
         {
-            if (directions[^1].Direction != sequence[0])
+            if (!sequence.Contains(directions[^1].Direction))
                 return false;
             pressIndex = FindPressIndex(presses, definition.RequiredButtons, frame, tolerance: 0);
             if (pressIndex < 0)

@@ -104,7 +104,9 @@ public sealed class AttackDefinition
         int? damageAfterPriorContact = null,
         DynamicAttackDamage? dynamicDamage = null,
         bool lightGroundReaction = false,
-        GroundHitReaction groundHitReaction = GroundHitReaction.Standard)
+        GroundHitReaction groundHitReaction = GroundHitReaction.Standard,
+        FixedPoint? launchGravity = null,
+        LaunchReactionProfile? launchReaction = null)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -170,6 +172,11 @@ public sealed class AttackDefinition
         if (!Enum.IsDefined(groundHitReaction) ||
             (lightGroundReaction && groundHitReaction is not (GroundHitReaction.Standard or GroundHitReaction.Light)))
             throw new ArgumentException("地面受击反应配置非法或冲突。", nameof(groundHitReaction));
+        if (launchGravity is { } gravity && (launchVelocityY <= FixedPoint.Zero || gravity <= FixedPoint.Zero ||
+            gravity > FixedPoint.FromInt(MovementDefinition.MaxGravityUnits)))
+            throw new ArgumentException("受击重力需要有效的击飞速度和重力。", nameof(launchGravity));
+        if (launchReaction is not null && launchGravity is null)
+            throw new ArgumentException("击飞反应需要受击重力。", nameof(launchReaction));
         GroundReaction = lightGroundReaction ? GroundHitReaction.Light : groundHitReaction;
         OffsetForward = offsetForward;
         OffsetUp = offsetUp;
@@ -186,6 +193,8 @@ public sealed class AttackDefinition
         BlockKnockback = blockPush;
         LaunchVelocityX = launchVelocityX;
         LaunchVelocityY = launchVelocityY;
+        LaunchGravity = launchGravity;
+        LaunchReaction = launchReaction;
         KnockdownFrames = knockdownFrames;
         WakeupFrames = wakeupFrames;
         HitstopFrames = hitstopFrames;
@@ -200,6 +209,8 @@ public sealed class AttackDefinition
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
     public FixedPoint OffsetForward { get; }
     public GroundHitReaction GroundReaction { get; }
+    public FixedPoint? LaunchGravity { get; }
+    public LaunchReactionProfile? LaunchReaction { get; }
 
     /// <summary>攻击框中心相对脚底锚点的向上偏移（世界单位）。</summary>
     public FixedPoint OffsetUp { get; }
