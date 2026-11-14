@@ -32,10 +32,10 @@ RESERVATIONS = {230: 'ReservedStandLightKick', 235: 'ReservedStandLightKick', 24
 REACTIONS = {5000, 5001, 5010, 5011, 5070}
 
 
-def fixture(reference, name):
+def fixture(reference, name, *, capture_profile='Stage25', native_moves=NATIVE, reservations=RESERVATIONS):
     run = json.loads((reference.parent / 'run-metadata.json').read_bytes())
     meta = json.loads(reference.with_name(f'{reference.stem}-metadata.json').read_bytes())
-    assert_equal('Stage25', run['capture_profile'], 'native capture profile')
+    assert_equal(capture_profile, run['capture_profile'], 'native capture profile')
     assert_equal(True, reference.stem in run['executed_cases'], 'native case appears in run metadata')
     assert_equal((run['rng_seed'], run['executable_sha256'], run['config_sha256']),
                  (meta['rng_seed'], meta['executable_sha256'], meta['config_sha256']), 'native run identity')
@@ -45,7 +45,7 @@ def fixture(reference, name):
         return any(helper['anim'] == 1020 and helper['id'] == target['hitPlayerId']
                    for helper in owner['helpers'] or [])
 
-    scene, phases, changes = native_case(reference, name, last_frame=run.get('last_frame', 75), native_moves=NATIVE,
+    scene, phases, changes = native_case(reference, name, last_frame=run.get('last_frame', 75), native_moves=native_moves,
                                          raw_keys=SOURCE_KEYS, contact_is_wave=is_wave)
     mirror = name.startswith('mirror-')
     assert_equal(mirror, phases['before-command'][0]['chars'][0]['facing'] < 0, 'native mirrored start')
@@ -56,7 +56,7 @@ def fixture(reference, name):
             raise ValueError(f'unsupported raw input at F{frame} in {reference.name}')
     phases['damage-rows'] = [row for row in map(json.loads, reference.read_text(encoding='utf-8').splitlines())
                              if row['phase'] in ('hitdef', 'var21-draw')]
-    deferred = [change for change in changes if change['to'] in RESERVATIONS]
+    deferred = [change for change in changes if change['to'] in reservations]
     if deferred:
         first = min(row['frame'] for row in deferred)
         assert_equal([], [row for row in scene.moves if row['frame'] > first], 'no later in-scope move after deferred entry')
@@ -68,7 +68,8 @@ def fixture(reference, name):
     return scene, phases, changes
 
 
-def verify_commands(profile, scene, phases, changes, events, moves, damage, lines):
+def verify_commands(profile, scene, phases, changes, events, moves, damage, lines, *, reservations=RESERVATIONS,
+                    sweep_kick_targets=(430,)):
     command_by_move = {move['moveId']: move['commandId'] for move in profile['moves']}
     table = indexed(audit_rows(lines, 'CommandAudit'))
     started = {(row['source'], row['frame']): row['move'] for row in events if row['kind'] == 'MoveStarted'}
@@ -106,12 +107,12 @@ def verify_commands(profile, scene, phases, changes, events, moves, damage, line
         commits.append({'native': entry, 'host': row})
     reserved = []
     for entry in changes:
-        if entry['to'] not in RESERVATIONS:
+        if entry['to'] not in reservations:
             continue
         seat, logic = (entry['seat'] - 1) ^ mirror, entry['frame'] + 14
         assert_equal(None, started.get((seat, logic)), f'deferred State {entry["to"]} not replaced with a different move')
         row = table[seat, logic]
-        command = RESERVATIONS[entry['to']]
+        command = reservations[entry['to']]
         if not any(candidate[0] == command and candidate[-2:] == ['True', 'True']
                    for candidate in (value.split(',') for value in row['candidates'].split(';'))):
             raise ValueError(f'deferred State {entry["to"]} did not reserve {command} at L{logic}')
@@ -141,7 +142,7 @@ def verify_commands(profile, scene, phases, changes, events, moves, damage, line
                            'host': table.get((seat, logic))})
     buffered_kick_rival = []
     for entry in scene.moves:
-        if (entry['from'], entry['to']) != (440, 430) or entry['aBuffer'] or not entry['bBuffer']:
+        if entry['from'] != 440 or entry['to'] not in sweep_kick_targets or entry['aBuffer'] or not entry['bBuffer']:
             continue
         seat, logic = entry['hostSeat'], entry['frame'] + 14
         rival = command_by_move[NATIVE[440]]
@@ -156,7 +157,7 @@ def verify_commands(profile, scene, phases, changes, events, moves, damage, line
                 break
             assert_equal(['False'], [candidate[-1] for candidate in newer], 'new b remains pending after older a')
             if frame != logic:
-                assert_equal('-', row['committed'], 'new b cannot ghost during 430 startup')
+                assert_equal('-', row['committed'], 'new b cannot ghost during kick startup')
             pending.append(row)
         assert_equal(True, len(pending) > 0, 'trace includes preserved b before expiry')
         assert_equal('-', table[seat, logic + len(pending)]['committed'], 'no sweep on b expiry')
@@ -340,7 +341,7 @@ def check_poses(phases, scene, events, committed, timelines, modes):
     return windows
 
 
-def sparse_realtime(options, name, scene, alias, timelines):
+def sparse_realtime(options, name, scene, alias, timelines, *, actions=VISUALS, sample_actions=(430,)):
     output = options.output / name / 'sprite'
     output.mkdir(parents=True)
     args, capture = runtime_capture(options, scene, output, True, alias=alias)
@@ -351,9 +352,10 @@ def sparse_realtime(options, name, scene, alias, timelines):
                  [(row['kind'], row['source'], row['target']) for row in events if row['kind'] in CONTACTS],
                  'realtime contact outcomes')
     windows, images = validate_captures(scene, events, lines, output, capture, timelines, ('default', 'default'), False,
-                                       move_validator=partial(fighter_poses, actions=VISUALS), check_reactions=False)
-    if not any(row['action'] == '430' for image in images for row in image['fighters']):
-        raise ValueError('sparse capture did not present Action 430')
+                                       move_validator=partial(fighter_poses, actions=actions), check_reactions=False)
+    if not any(int(row['action']) in sample_actions for image in images for row in image['fighters']
+               if row['action'].isdigit()):
+        raise ValueError(f'sparse capture did not present the requested actions {sample_actions}')
     backlog, rates = [], []
     logic = -1
     captured = False

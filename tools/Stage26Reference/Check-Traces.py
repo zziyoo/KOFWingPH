@@ -11,6 +11,7 @@ STAGE25 = runpy.run_path(str(HERE.parent / 'Stage25Reference/Check-Traces.py'))
 STAGE20 = STAGE25['STAGE20']
 STAGE17 = STAGE25['STAGE17']
 FIXTURES = json.loads((HERE / 'Cases.json').read_bytes())
+BATCHES = json.loads((HERE / 'Batches.json').read_bytes())
 PREFIX = 'default-standing-light-kick-'
 MOVES = {230: (5, 3, 11), 235: (4, 5, 7)}
 BODY_HURT = [[-16, -88, 23, -1], [4, -100, 27, -77]]
@@ -360,7 +361,15 @@ def main():
         for name, case in read_cases(directory):
             assert name not in cases, name
             cases[name] = case
-    print(json.dumps(verify_cases(cases), indent=2))
+    expected = {('mode2-standing-light-kick-' + name.removeprefix('mode2:') if name.startswith('mode2:') else PREFIX + name)
+                for batch in BATCHES.values() for name in batch['cases']}
+    if cases.keys() != expected:
+        parser.exit(1, f'Incomplete Stage 26 reference: missing {sorted(expected - cases.keys())}, '
+                    f'unexpected {sorted(cases.keys() - expected)}\n')
+    result = verify_cases(cases)
+    print(json.dumps(result, indent=2))
+    if not result['completeVerified']:
+        parser.exit(1, 'Stage 26 reference contract did not pass\n')
     print(f'PASS: {len(cases)} native Stage 26 fixtures')
 
 

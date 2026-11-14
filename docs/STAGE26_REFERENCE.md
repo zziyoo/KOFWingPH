@@ -79,4 +79,4 @@ $groundedAligned = @('held', 'release') | ForEach-Object {
   -RunDirectory local-mugen/stage26-native-repro-grounded-205-aligned -Cases $groundedAligned
 ```
 
-最终实际目录用 `local-mugen/stage26-native-` 加同名批次。四条 F190 延伸轨迹用于 Vulkan 的完整 Wave 恢复对照，在 242 场原版门禁中按原有身份计数一次。 [逐场状态与断言结果](../local-mugen/stage26-native-final-242.log) · [Wave 延伸轨迹](../local-mugen/stage26-native-wave-extended/results)
+最终实际目录用 `local-mugen/stage26-native-` 加同名批次。四条 F190 延伸轨迹用于 Vulkan 的完整 Wave 恢复对照，在 242 场原版门禁中按原有身份计数一次。 [逐场状态与断言结果](../local-mugen/stage26-native-canonical-gate.log) · [Wave 延伸轨迹](../local-mugen/stage26-native-wave-extended/results)

@@ -419,7 +419,8 @@ def run_case(options, name, reference, timelines, profile, *, mode="default", al
         args, capture = runtime_capture(options, scene, output, sprites, mode=mode, alias=alias,
                                         minimum_render_frames=minimum_render_frames)
         args.extend(extra_arguments)
-        log = run_godot(options.godot, args, output / "duel.log", output / "end.png")
+        log = run_godot(options.godot, args, output / "duel.log", output / "end.png",
+                        timeout=getattr(options, "timeout", 50))
         lines = log.decode("utf-8").splitlines()
         events = battle_events(lines)
         moves = indexed(audit_rows(lines, "MoveAudit"))

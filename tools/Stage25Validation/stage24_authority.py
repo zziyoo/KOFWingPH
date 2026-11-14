@@ -73,7 +73,7 @@ def candidate(options, saved, target, *, profile=None):
             index, = matches
             args[index] = f'{prefix}res://{profile}'
             visual = f'--p{seat}-visual='
-            args = [f'{visual}terry98-stage25-default' if value.startswith(visual) else value for value in args]
+            args = [f'{visual}{options.visual_alias}' if value.startswith(visual) else value for value in args]
         if '--command-audit' not in args:
             args.append('--command-audit')
     return log, run_godot(options.godot, args, log, shot)
@@ -174,6 +174,8 @@ def main():
     parser.add_argument('--resolution', choices=('320x180',))
     parser.add_argument('--wave-profile', nargs='?', const=PROFILE, metavar='PROFILE_DIR',
                         help='verify the six old Wave sources on the Stage 25 profile')
+    parser.add_argument('--visual-alias', default='terry98-stage25-default',
+                        help='visual alias for the selected Wave profile')
     options = parser.parse_args()
     if options.godot and options.output is None:
         parser.error('--godot requires --output')

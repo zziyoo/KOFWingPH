@@ -72,11 +72,11 @@ def frozen_args(archive, name, shot):
     ]
 
 
-def run_godot(exe, args, evidence_log, final_shot):
+def run_godot(exe, args, evidence_log, final_shot, *, timeout=50):
     command = [str(exe), *args]
     evidence_log.with_suffix(".args.txt").write_text(subprocess.list2cmdline(command) + "\n", encoding="utf-8")
     with evidence_log.open("wb") as log_file:
-        run = subprocess.run(command, cwd=ROOT, stdout=log_file, stderr=subprocess.STDOUT, timeout=50)
+        run = subprocess.run(command, cwd=ROOT, stdout=log_file, stderr=subprocess.STDOUT, timeout=timeout)
     log = evidence_log.read_bytes()
     lines = log.splitlines()
     if run.returncode != 0 or not final_shot.is_file():
