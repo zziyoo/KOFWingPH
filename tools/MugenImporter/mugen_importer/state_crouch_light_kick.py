@@ -305,6 +305,7 @@ def build_profile(audit, native, fighter, binding, mode, *, with_chains=True, de
                 candidate['priority'] += 1
             if candidate['commandId'] == wave.COMMAND_ID:
                 candidate['priority'] += 1
+                candidate['matchCompletedMotion'] = True
         commands.append({**reserved, 'commandId': RESERVED_STANDING_LIGHT_KICK,
                          'directions': ['Neutral', 'Back', 'Forward'], 'priority': 0})
         commands.append({**reserved, 'commandId': RESERVED_FORWARD_LIGHT_PUNCH, 'directions': ['Forward'],
@@ -316,7 +317,8 @@ def build_profile(audit, native, fighter, binding, mode, *, with_chains=True, de
                     and not any(m['moveId'] == wave.MOVE_ID for m in fighter['moves']),
                     'mode 2 requires the default Wave gesture without the State 1000 move')
             commands.append({**copy.deepcopy(default_wave_command), 'commandId': RESERVED_MODE2_WAVE,
-                             'reserveGroundInput': True, 'priority': default_wave_command['priority'] + 2})
+                             'reserveGroundInput': True, 'matchCompletedMotion': True,
+                             'priority': default_wave_command['priority'] + 2})
     action = audit['action']
     attack = ground_attack(audit, native, fighter['movement']['groundReaction'])
     move = {'moveId': MOVE, 'commandId': COMMAND, 'allowedFrom': 'Crouching', 'returnsToCrouch': True,

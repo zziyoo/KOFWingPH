@@ -67,3 +67,4 @@ py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-repro/resul
   -PreparedEngineDirectory local-mugen/stage25-native-repro/engine
 py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-guard-controls-repro/results --guard-controls
 ```
+在输入语法层，`Terry.cmd:166–169` 的弱 Wave 为 `~D, DF, F, x`，窗口 16 tick。固定 IKEMEN `src/input.go:764–817` 严格匹配独立 F 步，`2588–2594`、`2638–2648`、`2670–2704` 则用此前已完成的 F 和当前 x 新边沿完成末步。末步没有附加前方向条件。原引擎 `wave-mixed-at-exit` 在 F18 完成 F，F19 前下＋x+a+b 仍选 1000。三个额外原引擎对照把末步分别改为提前一 tick 已按住的前下＋x、后下＋x、后＋x，均在 F19 由 `var(2)=1` 自然进入 1000。逐场输入及原始轨迹位于 `local-mugen/stage25-native-motion-final-button.ps1` 与 `local-mugen/stage25-native-motion-final-button`。

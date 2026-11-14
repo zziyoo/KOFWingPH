@@ -265,6 +265,9 @@ public sealed class CommandDto
     [JsonPropertyName("matchHeldMotion")]
     public bool MatchHeldMotion { get; set; }
 
+    [JsonPropertyName("matchCompletedMotion")]
+    public bool MatchCompletedMotion { get; set; }
+
     [JsonPropertyName("bufferPolicy")]
     public CommandBufferPolicyDto? BufferPolicy { get; set; }
 

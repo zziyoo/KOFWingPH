@@ -16,13 +16,15 @@ public sealed class CommandPriorityTests
     private static readonly InputBits[] Motion =
         [InputBits.Down, InputBits.Down | InputBits.Right, InputBits.Right, InputBits.Right | InputBits.LightPunch];
 
-    private static FighterDefinition Fighter(bool useCommandPriority = true, int waveMinDistance = 0) => new("Test", new CommandDefinition[]
+    private static FighterDefinition Fighter(bool useCommandPriority = true, int waveMinDistance = 0,
+        bool matchCompletedMotion = false) => new("Test", new CommandDefinition[]
     {
         new("5A", [], InputBits.LightPunch, priority: 1, bufferLifetimeFrames: 2),
         new("5B", [], InputBits.HeavyPunch, priority: 0, bufferLifetimeFrames: 2),
         new("236A", [CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward],
             InputBits.LightPunch, maxSequenceFrames: 16, buttonToleranceFrames: 0, priority: 2,
-            bufferLifetimeFrames: 0, matchHeldMotion: true, bufferPolicy: new CommandBufferPolicy(true, 12, 1, 4)),
+            bufferLifetimeFrames: 0, matchHeldMotion: true, bufferPolicy: new CommandBufferPolicy(true, 12, 1, 4),
+            matchCompletedMotion: matchCompletedMotion),
     }, new MoveDefinition[]
     {
         new(Light, "5A", 3, 4, 5, cancels:
@@ -178,6 +180,36 @@ public sealed class CommandPriorityTests
         Assert.Contains(Advance(fighter, exactBoundary).Buffer, entry => entry.Match.CommandId == "236A");
         var expired = Motion.Take(3).Concat(Enumerable.Repeat(InputBits.Right, 15)).Append(Motion[3]);
         Assert.DoesNotContain(Advance(fighter, expired).Buffer, entry => entry.Match.CommandId == "236A");
+    }
+
+    [Theory]
+    [InlineData(false, InputBits.Down | InputBits.Right, 1, true, false)]
+    [InlineData(true, InputBits.Down | InputBits.Right, 1, true, true)]
+    [InlineData(true, InputBits.Down | InputBits.Left, 2, true, true)]
+    [InlineData(true, InputBits.Left, 3, true, true)]
+    [InlineData(true, InputBits.None, 3, true, true)]
+    [InlineData(true, InputBits.Down | InputBits.Right, 1, false, false)]
+    [InlineData(true, InputBits.Down | InputBits.Right, 16, true, false)]
+    public void CompletedMotionKeepsItsFinalCardinalStepUntilTheButtonOrDeadline(bool enabled,
+        InputBits finish, int delay, bool includedForward, bool expected)
+    {
+        FighterDefinition fighter = Fighter(matchCompletedMotion: enabled);
+        var sequence = new List<InputBits> { InputBits.Down, InputBits.Down | InputBits.Right };
+        if (includedForward)
+            sequence.Add(InputBits.Right);
+        sequence.AddRange(Enumerable.Repeat(finish, delay - 1));
+        sequence.Add(finish | InputBits.LightPunch);
+        RecognitionState recognized = Advance(fighter, sequence);
+        Assert.Equal(expected, recognized.Buffer.Any(entry => entry.Match.CommandId == "236A"));
+        if (!expected)
+            return;
+        CommandMatch special = Assert.Single(recognized.Buffer, entry => entry.Match.CommandId == "236A").Match;
+        Assert.Equal(2, special.SequenceEndFrame);
+        Assert.Equal(sequence.Count - 1, special.ButtonFrame);
+        RecognitionState second = Advance(fighter, [finish, finish | InputBits.LightPunch],
+            first: sequence.Count, prior: recognized);
+        Assert.DoesNotContain(second.Buffer, entry => entry.Match.CommandId == "236A" &&
+            entry.Match.ButtonFrame != special.ButtonFrame);
     }
 
     [Fact]

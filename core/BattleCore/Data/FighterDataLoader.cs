@@ -246,7 +246,8 @@ public static class FighterDataLoader
                     RequiredInt(buffer.HelperHeldDecay, source, path + ".bufferPolicy.helperHeldDecay"),
                     RequiredInt(buffer.HelperReleasedDecay, source, path + ".bufferPolicy.helperReleasedDecay"))
                 : null,
-            matchHeldMotion: dto.MatchHeldMotion, reserveGroundInput: dto.ReserveGroundInput),
+            matchHeldMotion: dto.MatchHeldMotion, reserveGroundInput: dto.ReserveGroundInput,
+            matchCompletedMotion: dto.MatchCompletedMotion),
         source, path);
 
     private static MoveDefinition BuildMove(MoveDto dto, string source, string path) => Guard(

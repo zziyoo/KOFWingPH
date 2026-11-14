@@ -95,6 +95,8 @@ class OriginalCrouchLightKickTests(unittest.TestCase):
         self.assertEqual({'commandId': 'ReservedStandLightKick', 'windowFirstFrame': 6, 'windowLastFrame': 13,
                           'phases': 'Active,Recovery'}, crouch_kick['reservedCancels'][0])
         command_order = {command['commandId']: command['priority'] for command in fighter['commands']}
+        command, = (command for command in fighter['commands'] if command['commandId'] == wave.COMMAND_ID)
+        self.assertIs(command.get('matchCompletedMotion'), True)
         self.assertEqual([wave.COMMAND_ID, 'ReservedForwardLightPunch', 'ReservedRisingUpper', '5A', '5B',
                           'ReservedStandLightKick', '2C'],
                          sorted((key for key in command_order if command_order[key] >= -1),
@@ -120,6 +122,7 @@ class OriginalCrouchLightKickTests(unittest.TestCase):
                                         default_wave_command=default_wave)
         command, = (entry for entry in fighter['commands'] if entry['commandId'] == 'ReservedMode2Wave')
         self.assertEqual({**default_wave, 'commandId': 'ReservedMode2Wave', 'reserveGroundInput': True,
+                          'matchCompletedMotion': True,
                           'priority': default_wave['priority'] + 2}, command)
         self.assertFalse(any(move['moveId'] == wave.MOVE_ID for move in fighter['moves']))
         crouch_kick, = (move for move in fighter['moves'] if move['moveId'] == kick.MOVE)

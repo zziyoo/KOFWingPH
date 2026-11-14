@@ -607,11 +607,22 @@ public sealed class RecognitionState
         matchedEndFrame = -1;
         pressIndex = FindPressIndex(presses, definition.RequiredButtons, frame, tolerance: 0);
         IReadOnlyList<CommandDirection> sequence = definition.DirectionSequence;
-        if (pressIndex < 0 || directions[^1].Direction != sequence[^1] || consumedEndFrames.Contains(directions[^1].Frame))
+        if (pressIndex < 0)
             return false;
 
         var matched = new int[sequence.Count];
         int cursor = directions.Count - 1;
+        if (definition.MatchCompletedMotion)
+        {
+            // The final button is its own step. Once the final direction is entered,
+            // later direction changes do not revoke it before the motion deadline.
+            while (cursor >= 0 && directions[cursor].Direction != sequence[^1])
+                cursor--;
+        }
+        if (cursor < 0 || directions[cursor].Direction != sequence[^1] ||
+            consumedEndFrames.Contains(directions[cursor].Frame))
+            return false;
+
         for (int element = sequence.Count - 1; element >= 0; element--)
         {
             while (cursor >= 0 && directions[cursor].Direction == CommandDirection.Neutral)

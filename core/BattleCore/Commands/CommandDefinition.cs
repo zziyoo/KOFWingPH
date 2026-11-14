@@ -96,7 +96,8 @@ public sealed class CommandDefinition
         int chargeReleaseToleranceFrames = CommandCatalog.DefaultChargeReleaseToleranceFrames,
         bool matchHeldMotion = false,
         CommandBufferPolicy? bufferPolicy = null,
-        bool reserveGroundInput = false)
+        bool reserveGroundInput = false,
+        bool matchCompletedMotion = false)
     {
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("指令 ID 不能为空。", nameof(commandId));
@@ -156,6 +157,8 @@ public sealed class CommandDefinition
             chargeHoldFrames != 0 || buttonToleranceFrames != 0 || sequence.Contains(CommandDirection.Neutral)))
             throw new ArgumentException("Held motions require a button, distinct non-neutral directions, and no charge or button tolerance.",
                 nameof(matchHeldMotion));
+        if (matchCompletedMotion && !matchHeldMotion)
+            throw new ArgumentException("A completed motion uses the held-motion direction parser.", nameof(matchCompletedMotion));
         if (bufferPolicy is { HelperTicks: > 0 } && requiredButtons == InputBits.None)
             throw new ArgumentException("A helper command buffer requires attack buttons.", nameof(bufferPolicy));
         if (reserveGroundInput && !matchHeldMotion &&
@@ -175,6 +178,7 @@ public sealed class CommandDefinition
         MatchHeldMotion = matchHeldMotion;
         BufferPolicy = bufferPolicy;
         ReserveGroundInput = reserveGroundInput;
+        MatchCompletedMotion = matchCompletedMotion;
     }
 
     /// <summary>唯一标识，如 <c>236A</c>。</summary>
@@ -215,6 +219,7 @@ public sealed class CommandDefinition
     public bool MatchHeldMotion { get; }
     public CommandBufferPolicy? BufferPolicy { get; }
     public bool ReserveGroundInput { get; }
+    public bool MatchCompletedMotion { get; }
 
     internal bool AllowsReservedDirection(CommandDirection direction) =>
         MatchHeldMotion || DirectionSequence.Contains(direction);
