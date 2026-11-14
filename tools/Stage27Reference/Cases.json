@@ -168,5 +168,7 @@
   "default-standing-heavy-kick-far-global-pause-b-103": {"distance": 170,"p1": [[5,5,"b"],[40,40,"D"],[41,41,"D+F"],[42,42,"F"],[43,43,"x"],[103,103,"b"]],"p2": []},
   "default-standing-heavy-kick-far-global-pause-b-104": {"distance": 170,"p1": [[5,5,"b"],[40,40,"D"],[41,41,"D+F"],[42,42,"F"],[43,43,"x"],[104,104,"b"]],"p2": []},
   "default-standing-heavy-kick-far-global-pause-b-106": {"distance": 170,"p1": [[5,5,"b"],[40,40,"D"],[41,41,"D+F"],[42,42,"F"],[43,43,"x"],[106,106,"b"]],"p2": []},
-  "default-standing-heavy-kick-sweep-b-buffer-away-ground-guard": {"distance": 145,"p1": [[5,5,"D+b"],[44,44,"b"]],"p2": [[22,43,"F"],[44,62,"B"]]}
+  "default-standing-heavy-kick-sweep-b-buffer-away-ground-guard": {"distance": 145,"p1": [[5,5,"D+b"],[44,44,"b"]],"p2": [[22,43,"F"],[44,62,"B"]]},
+  "default-standing-heavy-kick-wakeup-reservation-84": {"distance": 44,"p1": [[5,5,"D+b"],[57,81,"F"],[84,84,"F+b"]],"p2": []},
+  "default-standing-heavy-kick-wakeup-reservation-95": {"distance": 44,"p1": [[5,5,"D+b"],[57,81,"F"],[95,95,"F+b"]],"p2": []}
 }

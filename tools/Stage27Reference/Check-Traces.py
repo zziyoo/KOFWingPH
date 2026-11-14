@@ -16,6 +16,10 @@ FIXTURES = json.loads((HERE / 'Cases.json').read_bytes())
 PREFIX = 'default-standing-heavy-kick-'
 MODE2 = 'mode2-standing-heavy-kick-'
 MOVES = {240: (13, 3, 22), 241: (19, 4, 20), 245: (3, 6, 20)}
+WAKEUP_RESERVATION_CASES = {
+    PREFIX + 'wakeup-reservation-84': (84, 5110, 65536, 245),
+    PREFIX + 'wakeup-reservation-95': (95, 5120, 32768, 805),
+}
 BOXES = {240: [[56, -88, 127, -57]], 241: [[8, -91, 79, -61]], 245: [[36, -101, 79, -29]]}
 POSES = {
     240: ((1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 4), (7,), {28: 32}),
@@ -174,6 +178,20 @@ def verify_mode2_guard_entry(cases):
         assert (attacker['state'], attacker['anim'], attacker['moveType'], attacker['hitDef']['attr']) == (
             240, 241, 131072, 0), name
     return True
+
+
+def verify_wakeup_reservation(cases):
+    assert cases.keys() == WAKEUP_RESERVATION_CASES.keys(), 'Expected both near throw-eligibility controls'
+    for name, (frame, target_state, target_move_type, destination) in WAKEUP_RESERVATION_CASES.items():
+        case = cases[name]
+        verify_case(name, case)
+        defender = char_at(case[0], frame, 1, phase='before-command')
+        assert (defender['state'], defender['stateType'], defender['moveType'], defender['ctrl']) == (
+            target_state, 8, target_move_type, False), name
+        transition, = [row for row in starts(case, {245, 805}) if row['frame'] == frame]
+        assert (transition['from'], transition['to'], transition['bodyDistX'], transition['bBuffer']) == (
+            20, destination, 10.300781, True), (name, transition)
+        assert not any(contact[0] == frame for contact in case[2]), name
 
 
 def verify_cases(cases):
@@ -415,12 +433,17 @@ def verify_routes(cases):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directories', nargs='+', type=Path)
+    parser.add_argument('--wakeup-reservation', action='store_true', help='check the separate target eligibility controls')
     options = parser.parse_args()
     cases = {}
     for directory in options.directories:
         for name, case in read_cases(directory):
             assert name not in cases, name
             cases[name] = case
+    if options.wakeup_reservation:
+        verify_wakeup_reservation(cases)
+        print(f'PASS: {len(cases)} native Stage 27 wakeup reservation fixtures')
+        return
     batches = json.loads((HERE / 'Batches.json').read_bytes())
     expected = {name for batch in batches.values() for name in batch['cases']}
     if cases.keys() != expected:

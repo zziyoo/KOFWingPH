@@ -39,4 +39,14 @@ $longCases = @('near-wave-whiff-4', 'near-wave-whiff-8', 'near-wave-whiff-29', '
 
 The separate `default-standing-heavy-kick-sweep-b-buffer-away-ground-guard` trace holds the defender's Back through F62 to pair the outward threshold case with a full guard reaction. Its input is in `Cases.json`. Capture it the same way with `-LastFrame 145` in a fresh `away-guard` run directory.
 
+The two supplemental throw-eligibility controls compare the same F+b input against a lying target in State 5110 and against a waking target in State 5120. They preserve the canonical 169-case input set and check the reservation decision at the input frame.
+
+```powershell
+$wakeup = @('default-standing-heavy-kick-wakeup-reservation-84', 'default-standing-heavy-kick-wakeup-reservation-95')
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage27 `
+    -PreparedEngineDirectory "$nativeRoot/engine/engine" -LastFrame 155 `
+    -RunDirectory "$nativeRoot/wakeup-reservation" -Cases $wakeup
+python tools/Stage27Reference/Check-Traces.py --wakeup-reservation "$nativeRoot/wakeup-reservation/results"
+```
+
 `Check-Traces.py` validates hashes, mode, physical inputs, the normalized RNG path, full action clocks on whiff, collision timing, ground hit/guard metrics, movement commits, source permissions, and command choice at the fixture boundaries. `docs/STAGE27_REFERENCE.md` records source locations and the rules extracted from those traces.
