@@ -156,7 +156,8 @@ public static class FighterStateMachine
                         MoveStartedFrame: moveStartedFrame, MoveElapsedFrames: moveElapsedFrames);
                 case FighterLogicState.Recovery:
                     // 收招完成 → 回到待机；同帧继续走待机更新、起跳与消费（B5）。
-                    returnToCrouch = move.ReturnsToCrouch;
+                    bool walkRequested = !resolvedInput.Down && resolvedInput.Forward != resolvedInput.Back;
+                    returnToCrouch = move.ReturnsToCrouch && !(move.WalkOnCrouchRecovery && walkRequested);
                     break;
             }
         }
@@ -256,9 +257,11 @@ public static class FighterStateMachine
             CommandMatch match = result.Match;
             if (definition.ReservedGroundCommand(match.CommandId) is { } reservation)
             {
-                if (!reservation.DirectionSequence.Contains(recognition.Directions[^1].Direction))
+                if (!reservation.AllowsReservedDirection(recognition.Directions[^1].Direction))
                     continue;
-                recognition = recognition.WithReservedGroundInputConsumed(match.RecognizedFrame, frame);
+                recognition = reservation.MatchHeldMotion
+                    ? recognition.WithResultConsumed(match.RecognizedFrame)
+                    : recognition.WithReservedGroundInputConsumed(match.RecognizedFrame, frame);
                 break;
             }
             MoveAllowedStates required = idle == FighterLogicState.Crouching
@@ -368,7 +371,7 @@ public static class FighterStateMachine
         FixedPoint opponentDistance,
         FixedPoint opponentBodyDistance)
     {
-        if (move.Cancels.Count == 0 || moveStartedFrame < 0)
+        if ((move.Cancels.Count == 0 && move.ReservedCancels.Count == 0) || moveStartedFrame < 0)
             return null;
 
         // 窗口时间基准 = 动作有效经过帧数（D96），不是全局帧差。
@@ -449,6 +452,15 @@ public static class FighterStateMachine
             if (result.Consumed)
                 continue;
             CommandMatch match = result.Match;
+            if (definition.ReservedGroundCommand(match.CommandId) is { } reservation &&
+                reservation.AllowsReservedDirection(recognition.Directions[^1].Direction) &&
+                move.ReservedCancels.Any(rule => rule.CommandId == match.CommandId && rule.IsOpen(state, elapsed)))
+            {
+                if (rejectedStandingInputs is not null)
+                    ConsumeRejected(ref recognition, rejectedStandingInputs, match.RecognizedFrame);
+                recognition = recognition.WithResultConsumed(match.RecognizedFrame);
+                return null;
+            }
             foreach (CancelDefinition cancel in move.Cancels)
             {
                 if (!IsWindowOpen(cancel, state, elapsed) ||

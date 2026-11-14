@@ -251,8 +251,10 @@ public static class HitDetection
     private static readonly AttackContact[] EmptyContacts = Array.Empty<AttackContact>();
 
     internal static bool CanHitTarget(AttackDefinition attack, FighterState target) =>
-        !attack.RejectsLyingTargets || (target.LaunchReaction is { } reaction
-            ? !reaction.IsLying : target.LogicState is not (FighterLogicState.Knockdown or FighterLogicState.Wakeup));
+        (!attack.RejectsLyingTargets || (target.LaunchReaction is { } reaction
+            ? !reaction.IsLying : target.LogicState is not (FighterLogicState.Knockdown or FighterLogicState.Wakeup))) &&
+        (!attack.RejectsFallingTargets || target.LogicState != FighterLogicState.AirHitstun ||
+            (target.LaunchReaction is null && target.LandingKnockdownFrames == 0));
 
     /// <summary>
     /// 检测本帧全部「攻击框 ∩ 受击框」接触候选（几何层；不结算）。

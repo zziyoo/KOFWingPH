@@ -478,7 +478,7 @@ public sealed class RecognitionState
 
         IReadOnlyList<CommandDirection> sequence = definition.DirectionSequence;
 
-        if (definition.ReserveGroundInput)
+        if (definition.ReserveGroundInput && !definition.MatchHeldMotion)
         {
             if (definition.BufferLifetimeFrames == 0 && !sequence.Contains(directions[^1].Direction))
                 return false;

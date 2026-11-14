@@ -269,7 +269,10 @@ public static class FighterDataLoader
                 ? BuildArray(timeline, source, path + ".hurtboxTimeline", BuildMoveHurtboxSpan) : null,
             maximumStartBodyDistance: dto.MaximumStartBodyDistance is { } bodyDistance
                 ? Fraction(bodyDistance, source, path + ".maximumStartBodyDistance") : null,
-            guardThreatFrames: dto.GuardThreatFrames, returnsToCrouch: dto.ReturnsToCrouch),
+            guardThreatFrames: dto.GuardThreatFrames, returnsToCrouch: dto.ReturnsToCrouch,
+            reservedCancels: dto.ReservedCancels is { } reserved
+                ? BuildArray(reserved, source, path + ".reservedCancels", BuildReservedCancel) : null,
+            walkOnCrouchRecovery: dto.WalkOnCrouchRecovery),
         source, path);
 
     private static MoveHurtboxSpan BuildMoveHurtboxSpan(MoveHurtboxSpanDto dto, string source, string path) => Guard(
@@ -313,7 +316,8 @@ public static class FighterDataLoader
                 ? ParseEnum<GroundHitReaction>(reaction, source, path + ".groundHitReaction") : GroundHitReaction.Standard,
             launchGravity: dto.LaunchGravity is { } gravity ? Fraction(gravity, source, path + ".launchGravity") : null,
             launchReaction: dto.LaunchReaction is { } launch ? BuildLaunchReaction(launch, source, path + ".launchReaction") : null,
-            rejectsLyingTargets: dto.RejectsLyingTargets),
+            rejectsLyingTargets: dto.RejectsLyingTargets,
+            rejectsFallingTargets: dto.RejectsFallingTargets),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>
@@ -355,6 +359,15 @@ public static class FighterDataLoader
             allowSameMove: dto.AllowSameMove,
             standingInputOnly: dto.StandingInputOnly,
             maximumInputAge: dto.MaximumInputAge),
+        source, path);
+
+    private static ReservedCancelDefinition BuildReservedCancel(ReservedCancelDto dto, string source, string path) => Guard(
+        () => new ReservedCancelDefinition(
+            RequiredString(dto.CommandId, source, path + ".commandId"),
+            RequiredInt(dto.WindowFirstFrame, source, path + ".windowFirstFrame"),
+            RequiredInt(dto.WindowLastFrame, source, path + ".windowLastFrame"),
+            ParseFlags(RequiredString(dto.Phases, source, path + ".phases"),
+                source, path + ".phases", MoveCancelPhases.Active | MoveCancelPhases.Recovery)),
         source, path);
 
     private static ThrowDefinition BuildThrow(ThrowDto dto, string source, string path) => Guard(

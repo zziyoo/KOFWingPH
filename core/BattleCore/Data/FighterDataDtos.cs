@@ -322,12 +322,17 @@ public sealed class MoveDto
     [JsonPropertyName("returnsToCrouch")]
     public bool ReturnsToCrouch { get; set; }
 
+    [JsonPropertyName("walkOnCrouchRecovery")]
+    public bool WalkOnCrouchRecovery { get; set; }
 
     [JsonPropertyName("attacks")]
     public List<AttackDto>? Attacks { get; set; }
 
     [JsonPropertyName("cancels")]
     public List<CancelDto>? Cancels { get; set; }
+
+    [JsonPropertyName("reservedCancels")]
+    public List<ReservedCancelDto>? ReservedCancels { get; set; }
 
     [JsonPropertyName("throws")]
     public List<ThrowDto>? Throws { get; set; }
@@ -349,6 +354,9 @@ public sealed class AttackDto
 {
     [JsonPropertyName("rejectsLyingTargets")]
     public bool RejectsLyingTargets { get; set; }
+
+    [JsonPropertyName("rejectsFallingTargets")]
+    public bool RejectsFallingTargets { get; set; }
 
     [JsonPropertyName("launchGravity")]
     public FractionDto? LaunchGravity { get; set; }
@@ -486,6 +494,21 @@ public sealed class CancelDto
 
     [JsonPropertyName("maximumInputAge")]
     public int? MaximumInputAge { get; set; }
+}
+
+public sealed class ReservedCancelDto
+{
+    [JsonPropertyName("commandId")]
+    public string? CommandId { get; set; }
+
+    [JsonPropertyName("windowFirstFrame")]
+    public int? WindowFirstFrame { get; set; }
+
+    [JsonPropertyName("windowLastFrame")]
+    public int? WindowLastFrame { get; set; }
+
+    [JsonPropertyName("phases")]
+    public string? Phases { get; set; }
 }
 
 public sealed class ThrowDto

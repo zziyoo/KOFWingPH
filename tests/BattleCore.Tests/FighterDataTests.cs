@@ -131,16 +131,19 @@ public class FighterDataTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public void AuthoredHeavyReactionHoldsDuringHitPauseAndUsesDefenderTimeline(bool mirror, bool crouching)
+    [InlineData(false, false, "Heavy")]
+    [InlineData(true, false, "Heavy")]
+    [InlineData(false, true, "Heavy")]
+    [InlineData(true, true, "Heavy")]
+    [InlineData(false, false, "LightLow")]
+    [InlineData(true, true, "LightLow")]
+    public void AuthoredGroundReactionHoldsDuringHitPauseAndUsesDefenderTimeline(
+        bool mirror, bool crouching, string reaction)
     {
         string attackerJson = Mutate(Json("Kai"), o =>
         {
             JsonNode strike = o["moves"]![0]!["attacks"]![0]!;
-            strike["groundHitReaction"] = "Heavy";
+            strike["groundHitReaction"] = reaction;
             strike["hitstunFrames"] = 5;
             strike["hitstopFrames"] = 3;
         });
@@ -149,7 +152,7 @@ public class FighterDataTests
             new { minX = Number(left), maxX = Number(right), minY = Number(0), maxY = Number(top) };
         string defenderJson = Mutate(Json("Kai"), o =>
         {
-            o["groundHurtboxes"] = JsonSerializer.SerializeToNode(new
+            JsonNode ground = JsonSerializer.SerializeToNode(new
             {
                 standing = new[] { Box(-30, 30, 120) },
                 crouching = new[] { Box(-30, 30, 70) },
@@ -157,7 +160,15 @@ public class FighterDataTests
                 heavyHitstun = new[] { new { frames = 2, boxes = new[] { Box(-19, 11, 104) } },
                     new { frames = 3, boxes = new[] { Box(-45, 7, 72) } } },
                 crouchingHeavyHitstun = new[] { new { frames = 5, boxes = new[] { Box(-17, 12, 68) } } },
-            });
+            })!;
+            if (reaction == "LightLow")
+            {
+                ground["lightHitstun"] = ground["heavyHitstun"]!.DeepClone();
+                ground["crouchingLightHitstun"] = ground["crouchingHeavyHitstun"]!.DeepClone();
+                ground.AsObject().Remove("heavyHitstun");
+                ground.AsObject().Remove("crouchingHeavyHitstun");
+            }
+            o["groundHurtboxes"] = ground;
         });
         FighterDefinition attacker = FighterDataLoader.Load(attackerJson);
         FighterDefinition defender = FighterDataLoader.Load(defenderJson);
@@ -185,6 +196,94 @@ public class FighterDataTests
             Assert.Equal(FixedPoint.FromInt(right), box.MaxX - target.PositionX);
         }
         Assert.Equal(FighterLogicState.Standing, state.Fighter(1).LogicState);
+    }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public void FallingTargetFilterLeavesOrdinaryAirTargetsEligible(bool rejectFalling, bool normalAir, bool hits)
+    {
+        FighterDefinition fighter = FighterDataLoader.Load(Mutate(Json("Kai"), data =>
+        {
+            if (rejectFalling)
+                data["moves"]![0]!["attacks"]![0]!["rejectsFallingTargets"] = true;
+        }));
+        BattleState initial = ActiveState("StandLightPunch", 2, p1X: -30, p2X: 30);
+        FighterState target = initial.Fighter(1) with
+        {
+            LogicState = normalAir ? FighterLogicState.Airborne : FighterLogicState.AirHitstun,
+            PositionY = 15,
+            VelocityY = -1,
+            JumpKind = normalAir ? JumpKind.ShortHop : JumpKind.None,
+            LandingKnockdownFrames = normalAir ? 0 : 5,
+        };
+        Assert.Equal(hits, HitDetection.Detect(initial.Fighter(0), target, fighter, fighter).Count == 1);
+    }
+
+    [Theory]
+    [InlineData(false, 4, false)]
+    [InlineData(false, 6, true)]
+    [InlineData(true, 6, false)]
+    public void DeferredNormalCancelReservesOnlyItsLegalWindowAndDirection(bool down, int edge, bool consumed)
+    {
+        FighterDefinition fighter = FighterDataLoader.Load(Mutate(Json("Kai"), data =>
+        {
+            var reserved = data["commands"]![0]!.DeepClone();
+            reserved["commandId"] = "ReservedStandingKick";
+            reserved["directions"] = JsonNode.Parse("""["Neutral","Forward","Back"]""");
+            reserved["buttons"] = JsonNode.Parse("""["LightKick"]""");
+            reserved["buttonToleranceFrames"] = 0;
+            reserved["bufferLifetimeFrames"] = 2;
+            reserved["priority"] = 9;
+            reserved["reserveGroundInput"] = true;
+            data["commands"]!.AsArray().Add(reserved);
+            data["useCommandPriority"] = true;
+            data["moves"]![0]!["reservedCancels"] = JsonNode.Parse("""
+                [{"commandId":"ReservedStandingKick","windowFirstFrame":6,"windowLastFrame":9,"phases":"Recovery"}]
+                """);
+        }));
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = BattleState.CreateDefault();
+        for (int frame = 0; frame <= edge; frame++)
+        {
+            InputBits input = frame == 0 ? InputBits.LightPunch : frame == edge ? InputBits.LightKick : InputBits.None;
+            if (down && frame == edge)
+                input |= InputBits.Down;
+            BattleStepResult result = simulation.Step(state, F(frame, input));
+            if (frame == edge)
+                Assert.DoesNotContain(result.Events, evt => evt.Type == BattleEventType.MoveStarted);
+            state = result.State;
+        }
+        Assert.Equal("StandLightPunch", state.Fighter(0).MoveId);
+        Assert.Equal(edge, state.Fighter(0).MoveElapsedFrames);
+        Assert.Equal(consumed, Assert.Single(state.Fighter(0).RecognitionState.Buffer,
+            entry => entry.Match.CommandId == "ReservedStandingKick").Consumed);
+    }
+
+    [Theory]
+    [InlineData(InputBits.Right, FighterLogicState.Standing)]
+    [InlineData(InputBits.Left, FighterLogicState.Standing)]
+    [InlineData(InputBits.Down | InputBits.Right, FighterLogicState.Crouching)]
+    [InlineData(InputBits.None, FighterLogicState.Crouching)]
+    public void AuthoredCrouchRecoveryCanWalkOnTheFirstControlTick(InputBits direction, FighterLogicState expected)
+    {
+        FighterDefinition fighter = FighterDataLoader.Load(Mutate(Json("Kai"), data =>
+        {
+            data["moves"]![0]!["returnsToCrouch"] = true;
+            data["moves"]![0]!["walkOnCrouchRecovery"] = true;
+        }));
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = BattleState.CreateDefault();
+        int end = fighter.Moves[0].StartupFrames + fighter.Moves[0].ActiveFrames + fighter.Moves[0].RecoveryFrames;
+        for (int frame = 0; frame < end; frame++)
+            state = simulation.Step(state, F(frame, frame == 0 ? InputBits.LightPunch : direction)).State;
+        Assert.Equal(FighterLogicState.Recovery, state.Fighter(0).LogicState);
+
+        FighterState after = simulation.Step(state, F(end, direction)).State.Fighter(0);
+        Assert.Equal(expected, after.LogicState);
+        int walkDirection = expected == FighterLogicState.Crouching ? 0 : direction == InputBits.Right ? 1 : -1;
+        Assert.Equal(walkDirection, Math.Sign((after.PositionX - state.Fighter(0).PositionX).RawValue));
     }
 
     [Fact]

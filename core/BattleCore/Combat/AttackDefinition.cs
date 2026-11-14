@@ -30,6 +30,7 @@ public enum GroundHitReaction
     Heavy,
     CrouchingLight,
     HeavyLow,
+    LightLow,
 }
 
 /// <summary>
@@ -107,7 +108,8 @@ public sealed class AttackDefinition
         GroundHitReaction groundHitReaction = GroundHitReaction.Standard,
         FixedPoint? launchGravity = null,
         LaunchReactionProfile? launchReaction = null,
-        bool rejectsLyingTargets = false)
+        bool rejectsLyingTargets = false,
+        bool rejectsFallingTargets = false)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -197,6 +199,7 @@ public sealed class AttackDefinition
         LaunchGravity = launchGravity;
         LaunchReaction = launchReaction;
         RejectsLyingTargets = rejectsLyingTargets;
+        RejectsFallingTargets = rejectsFallingTargets;
         KnockdownFrames = knockdownFrames;
         WakeupFrames = wakeupFrames;
         HitstopFrames = hitstopFrames;
@@ -214,6 +217,7 @@ public sealed class AttackDefinition
     public FixedPoint? LaunchGravity { get; }
     public LaunchReactionProfile? LaunchReaction { get; }
     public bool RejectsLyingTargets { get; }
+    public bool RejectsFallingTargets { get; }
 
     /// <summary>攻击框中心相对脚底锚点的向上偏移（世界单位）。</summary>
     public FixedPoint OffsetUp { get; }

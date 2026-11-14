@@ -90,7 +90,8 @@ public sealed class FighterVisual
         }
         if (fighter.LogicState == FighterLogicState.Hitstun &&
             _sprite?.HitReactionClip(_hitReaction.MoveId,
-                fighter.GroundReaction.Kind is GroundHitReaction.Heavy or GroundHitReaction.CrouchingLight or GroundHitReaction.HeavyLow
+                fighter.GroundReaction.Kind is GroundHitReaction.Heavy or GroundHitReaction.CrouchingLight
+                    or GroundHitReaction.HeavyLow or GroundHitReaction.LightLow
                     ? fighter.GroundReaction.Tick - 1 : _hitReaction.Elapsed,
                 fighter.GroundReaction.Crouching) is { } hitClip)
             return hitClip;

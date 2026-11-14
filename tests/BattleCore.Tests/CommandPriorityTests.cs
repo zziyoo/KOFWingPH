@@ -104,6 +104,25 @@ public sealed class CommandPriorityTests
     }
 
     [Fact]
+    public void ADeferredMotionAtNaturalRecoveryDoesNotReplayTheSamePunch()
+    {
+        FighterDefinition profile = Fighter();
+        CommandDefinition normal = profile.Commands[0];
+        var reserved = new CommandDefinition("ReservedMotion", [CommandDirection.Down, CommandDirection.DownForward,
+            CommandDirection.Forward], InputBits.LightPunch, maxSequenceFrames: 16, buttonToleranceFrames: 0,
+            priority: 2, bufferLifetimeFrames: 0, matchHeldMotion: true, reserveGroundInput: true,
+            bufferPolicy: new CommandBufferPolicy(true, 12, 1, 4));
+        var light = new MoveDefinition(Light, normal.CommandId, 3, 4, 5);
+        var fighter = new FighterDefinition("Test", [normal, reserved], [light], useCommandPriority: true);
+        RecognitionState motion = Advance(fighter, Motion, first: 8);
+        RecognitionState buffered = Advance(fighter, [InputBits.Down], first: 12, prior: motion);
+        FighterActionTick result = Tick(fighter, buffered, 12, 12, InputBits.Down);
+        Assert.Null(result.MoveId);
+        Assert.Null(result.ConsumedMatch);
+        Assert.All(result.Recognition.Buffer, candidate => Assert.True(candidate.Consumed));
+    }
+
+    [Fact]
     public void HelperBridgesTheEarlyBoundaryAndExpiresAfterThreeReleasedTicksHaveRun()
     {
         FighterDefinition fighter = Fighter();

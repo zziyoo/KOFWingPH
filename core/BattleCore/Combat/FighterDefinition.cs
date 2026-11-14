@@ -84,6 +84,7 @@ public sealed class GroundHurtboxes
             GroundHitReaction.Heavy => crouching ? CrouchingHeavyHitstun : HeavyHitstun,
             GroundHitReaction.CrouchingLight => crouching ? CrouchingLightHitstun : null,
             GroundHitReaction.HeavyLow => crouching ? CrouchingHeavyHitstun : LowHeavyHitstun,
+            GroundHitReaction.LightLow => crouching ? CrouchingLightHitstun : LightHitstun,
             _ => null,
         };
 
@@ -240,6 +241,10 @@ public sealed class FighterDefinition
         // 取消目标必须存在于本角色，重进必须显式允许。必须在 moveIds 完整后再校验。
         foreach (MoveDefinition move in moveCopy)
         {
+            foreach (ReservedCancelDefinition cancel in move.ReservedCancels)
+                if (!reserved.ContainsKey(cancel.CommandId))
+                    throw new ArgumentException(
+                        $"招式 {move.MoveId} 的保留取消引用了非保留指令 {cancel.CommandId}。", nameof(moves));
             foreach (CancelDefinition cancel in move.Cancels)
             {
                 if (!cancel.AllowSameMove && string.Equals(cancel.TargetMoveId, move.MoveId, StringComparison.Ordinal))

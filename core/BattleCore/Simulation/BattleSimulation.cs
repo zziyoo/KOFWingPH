@@ -1972,7 +1972,7 @@ public sealed class BattleSimulation
         FighterState defender, FighterDefinition definition, GroundHitReaction reaction)
     {
         bool crouching = definition.GroundHurtboxes?.HitReactionTimeline(reaction, crouching: true) is not null &&
-            reaction is GroundHitReaction.Heavy or GroundHitReaction.CrouchingLight or GroundHitReaction.HeavyLow &&
+            reaction is GroundHitReaction.Heavy or GroundHitReaction.CrouchingLight or GroundHitReaction.HeavyLow or GroundHitReaction.LightLow &&
             (defender.LogicState == FighterLogicState.Crouching || defender.GroundReaction.Crouching ||
              defender.IsInMove && definition.FindMoveById(defender.MoveId!)?.AllowedFrom == MoveAllowedStates.Crouching);
         return definition.GroundHurtboxes?.HitReactionTimeline(reaction, crouching) is null

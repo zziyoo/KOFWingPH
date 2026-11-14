@@ -158,8 +158,9 @@ public sealed class CommandDefinition
                 nameof(matchHeldMotion));
         if (bufferPolicy is { HelperTicks: > 0 } && requiredButtons == InputBits.None)
             throw new ArgumentException("A helper command buffer requires attack buttons.", nameof(bufferPolicy));
-        if (reserveGroundInput && (sequence.Length == 0 || sequence.Distinct().Count() != sequence.Length || requiredButtons == InputBits.None ||
-            buttonToleranceFrames != 0 || chargeHoldFrames != 0 || matchHeldMotion || bufferPolicy is not null))
+        if (reserveGroundInput && !matchHeldMotion &&
+            (sequence.Length == 0 || sequence.Distinct().Count() != sequence.Length || requiredButtons == InputBits.None ||
+             buttonToleranceFrames != 0 || chargeHoldFrames != 0 || bufferPolicy is not null))
             throw new ArgumentException("保留的地面指令需要一组不重复的相对方向和当帧按键边沿。", nameof(reserveGroundInput));
 
         CommandId = commandId;
@@ -214,4 +215,7 @@ public sealed class CommandDefinition
     public bool MatchHeldMotion { get; }
     public CommandBufferPolicy? BufferPolicy { get; }
     public bool ReserveGroundInput { get; }
+
+    internal bool AllowsReservedDirection(CommandDirection direction) =>
+        MatchHeldMotion || DirectionSequence.Contains(direction);
 }

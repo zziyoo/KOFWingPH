@@ -65,7 +65,9 @@ public MoveDefinition(
     IReadOnlyList<MoveHurtboxSpan>? hurtboxTimeline = null,
     FixedPoint? maximumStartBodyDistance = null,
     int? guardThreatFrames = null,
-    bool returnsToCrouch = false)
+    bool returnsToCrouch = false,
+    IReadOnlyList<ReservedCancelDefinition>? reservedCancels = null,
+    bool walkOnCrouchRecovery = false)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -90,6 +92,8 @@ public MoveDefinition(
             throw new ArgumentOutOfRangeException(nameof(maximumStartBodyDistance), "最大发动身体距离不能为负。");
         if (guardThreatFrames is { } threat && (threat < 1 || threat > (long)startupFrames + activeFrames + recoveryFrames))
             throw new ArgumentOutOfRangeException(nameof(guardThreatFrames));
+        if (walkOnCrouchRecovery && !returnsToCrouch)
+            throw new ArgumentException("Walking on crouch recovery requires a crouch return.", nameof(walkOnCrouchRecovery));
 
         MoveId = moveId;
         CommandId = commandId;
@@ -98,6 +102,7 @@ public MoveDefinition(
         RecoveryFrames = recoveryFrames;
         AllowedFrom = allowedFrom;
         ReturnsToCrouch = returnsToCrouch;
+        WalkOnCrouchRecovery = walkOnCrouchRecovery;
         MinimumStartDistance = minimumStartDistance;
         MaximumStartBodyDistance = maximumStartBodyDistance;
         GuardThreatFrames = guardThreatFrames;
@@ -128,6 +133,10 @@ public MoveDefinition(
 
         // 取消规则（D91）：防御复制；目标是否存在/是否自身由 FighterDefinition 校验（它知道全表）。
         Cancels = Array.AsReadOnly((cancels ?? Array.Empty<CancelDefinition>()).ToArray());
+        var reservedCopy = (reservedCancels ?? Array.Empty<ReservedCancelDefinition>()).ToArray();
+        if (reservedCopy.Any(rule => rule is null || rule.WindowLastFrame >= (long)startupFrames + activeFrames + recoveryFrames))
+            throw new ArgumentException("Reserved cancel windows must end before natural move recovery.", nameof(reservedCancels));
+        ReservedCancels = Array.AsReadOnly(reservedCopy);
 
         // 投技定义（D97）：生效帧窗口必须在 Active 阶段内，ThrowId 在本招式内唯一。
         ThrowDefinition[] throwCopy = (throws ?? Array.Empty<ThrowDefinition>()).ToArray();
@@ -182,6 +191,7 @@ public MoveDefinition(
     /// <summary>允许发动的待机状态集合。</summary>
     public MoveAllowedStates AllowedFrom { get; }
     public bool ReturnsToCrouch { get; }
+    public bool WalkOnCrouchRecovery { get; }
 
     public FixedPoint MinimumStartDistance { get; }
     public FixedPoint? MaximumStartBodyDistance { get; }
@@ -213,6 +223,8 @@ public MoveDefinition(
 
     /// <summary>取消规则（阶段 07B，D91；只读，可为空列表 = 不可取消）。</summary>
     public IReadOnlyList<CancelDefinition> Cancels { get; }
+
+    public IReadOnlyList<ReservedCancelDefinition> ReservedCancels { get; }
 
     /// <summary>投技定义（阶段 08B，D97；只读，可为空列表 = 本招式没有投技判定）。</summary>
     public IReadOnlyList<ThrowDefinition> Throws { get; }

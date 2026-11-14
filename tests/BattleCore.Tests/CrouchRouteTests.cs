@@ -12,6 +12,8 @@ public sealed class CrouchRouteTests
 {
     private const string Crouch = "CrouchLight";
     private const string Stand = "StandLight";
+    private const string Kick = "CrouchLightKick";
+    private const string Wave = "PowerWave";
 
     [Theory]
     [InlineData(InputBits.Down, InputBits.LightKick | InputBits.HeavyKick, null, "LightKick")]
@@ -63,6 +65,45 @@ public sealed class CrouchRouteTests
         Assert.Equal(startsSweep ? "Sweep" : null, state.Fighter(0).MoveId);
         if (exitDirection == InputBits.Down && !startsSweep)
             Assert.All(state.Fighter(0).RecognitionState.Buffer, result => Assert.True(result.Consumed));
+    }
+
+    [Theory]
+    [InlineData(39, InputBits.Down, InputBits.Down, "CrouchLightKick", false)]
+    [InlineData(38, InputBits.None, InputBits.Down, "CrouchLightKick", false)]
+    [InlineData(37, InputBits.Down, InputBits.Down, "Sweep", true)]
+    [InlineData(39, InputBits.Down, InputBits.None, null, false)]
+    public void RealGroundMoveUsesCurrentDirectionAndLetsAYoungerLosingEdgeExpire(int lightEdge, InputBits edgeDirection,
+        InputBits exitDirection, string? expectedMove, bool heavyConsumed)
+    {
+        var light = new CommandDefinition("LightKick", [], InputBits.LightKick, 1, 0, priority: 1, bufferLifetimeFrames: 2);
+        var heavy = new CommandDefinition("HeavyKick", [], InputBits.HeavyKick, 1, 0, bufferLifetimeFrames: 2);
+        var sweep = new MoveDefinition("Sweep", "HeavyKick", 10, 8, 22, MoveAllowedStates.Crouching, returnsToCrouch: true);
+        var kick = new MoveDefinition("CrouchLightKick", "LightKick", 3, 3, 8, MoveAllowedStates.Crouching,
+            returnsToCrouch: true);
+        var fighter = new FighterDefinition("Test", [light, heavy], [sweep, kick], useCommandPriority: true);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = BattleState.CreateDefault();
+        for (int frame = 0; frame < 40; frame++)
+        {
+            InputBits bits = frame == 0 ? InputBits.Down | InputBits.HeavyKick
+                : frame == lightEdge ? edgeDirection | InputBits.LightKick : InputBits.Down;
+            state = simulation.Step(state, new FrameInput(frame, bits, 0)).State;
+        }
+
+        var input = new FrameInput(40, exitDirection | InputBits.HeavyKick, 0);
+        BattleStepResult result = simulation.Step(state, input);
+        Assert.Equal(expectedMove, result.State.Fighter(0).MoveId);
+        Assert.Equal(result.State.Fighters, simulation.Step(state, input).State.Fighters);
+        Assert.Equal(heavyConsumed, Assert.Single(result.State.Fighter(0).RecognitionState.Buffer,
+            entry => entry.Match.CommandId == "HeavyKick" && entry.Match.ButtonFrame == 40).Consumed);
+        state = result.State;
+        for (int frame = 41; frame <= 43; frame++)
+        {
+            result = simulation.Step(state, new FrameInput(frame, exitDirection, 0));
+            Assert.DoesNotContain(result.Events, entry => entry.Type == BattleEventType.MoveStarted);
+            state = result.State;
+        }
+        Assert.DoesNotContain(state.Fighter(0).RecognitionState.Buffer, entry => entry.Match.ButtonFrame == 40);
     }
 
     [Theory]
@@ -126,6 +167,116 @@ public sealed class CrouchRouteTests
         }
         Assert.Equal(expected, state.Fighter(0).MoveId);
         Assert.Equal(7, state.Fighter(0).MoveStartedFrame);
+    }
+
+    [Theory]
+    [InlineData(3, null, -1)]
+    [InlineData(4, Stand, 6)]
+    [InlineData(6, Stand, 6)]
+    [InlineData(13, Stand, 13)]
+    [InlineData(14, Wave, 14)]
+    [InlineData(15, Wave, 15)]
+    public void KickWaveInputFallsBackWithinChainOrStartsAtNaturalRecovery(int edge, string? expected, int start)
+    {
+        FighterDefinition fighter = KickFighter();
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        BattleState state = BattleState.CreateDefault();
+        var followups = new List<(int Frame, string? Move)>();
+        for (int frame = 0; frame <= 17; frame++)
+        {
+            InputBits bits = frame == 0 ? InputBits.Down | InputBits.LightKick : InputBits.None;
+            if (frame == edge - 3) bits |= InputBits.Down;
+            if (frame == edge - 2) bits |= InputBits.Down | InputBits.Right;
+            if (frame == edge - 1) bits |= InputBits.Right;
+            if (frame == edge) bits |= InputBits.Right | InputBits.LightPunch;
+            BattleStepResult step = simulation.Step(state, new FrameInput(frame, bits, InputBits.None));
+            if (frame > 0 && step.Events.Any(evt => evt.Type == BattleEventType.MoveStarted))
+                followups.Add((frame, step.State.Fighter(0).MoveId));
+            state = step.State;
+        }
+        if (expected is null)
+            Assert.Empty(followups);
+        else
+            Assert.Equal((start, expected), Assert.Single(followups));
+    }
+
+    [Theory]
+    [InlineData(14, false)]
+    [InlineData(17, true)]
+    [InlineData(19, true)]
+    public void KickSelfChainReplaysFromHitPauseAndCreatesANewContactInstance(int edge, bool chains)
+    {
+        FighterDefinition fighter = KickFighter();
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        var initial = new BattleState(0, [FighterState.Create(0, 1000, -30, Facing.Right),
+            FighterState.Create(1, 1000, 30, Facing.Left)], stateVersion: 15);
+        BattleState state = initial;
+        var inputs = Enumerable.Range(0, 24).Select(frame => new FrameInput(frame,
+            frame == 0 || frame == edge ? InputBits.Down | InputBits.LightKick : InputBits.Down, InputBits.None)).ToArray();
+        foreach (FrameInput input in inputs.Take(4))
+            state = simulation.Step(state, input).State;
+        Assert.Equal(3, state.Fighter(0).HitConfirmFrame);
+        Assert.Equal(11, state.Fighter(0).HitstopRemainingFrames);
+        Assert.Equal(13, state.Fighter(1).HitstopRemainingFrames);
+        BattleState snapshot = state;
+
+        List<BattleStepResult> Run()
+        {
+            var steps = new List<BattleStepResult>();
+            BattleState current = snapshot;
+            foreach (FrameInput input in inputs.Skip(snapshot.Frame))
+            {
+                BattleStepResult step = simulation.Step(current, input);
+                steps.Add(step);
+                current = step.State;
+            }
+            return steps;
+        }
+        List<BattleStepResult> actual = Run();
+        foreach ((BattleStepResult step, BattleStepResult replay) in actual.Zip(Run()))
+        {
+            Assert.Equal(step.State.Fighters, replay.State.Fighters);
+            Assert.Equal(step.Events, replay.Events);
+            Assert.Equal(step.Contacts, replay.Contacts);
+        }
+        if (!chains)
+        {
+            Assert.DoesNotContain(actual.SelectMany(step => step.Events), evt => evt.Type == BattleEventType.MoveStarted);
+            return;
+        }
+        BattleStepResult started = Assert.Single(actual, step => step.Events.Any(evt => evt.Type == BattleEventType.MoveStarted));
+        Assert.Equal(Math.Max(17, edge), started.FrameBefore);
+        FighterState fresh = started.State.Fighter(0);
+        Assert.Equal(Kick, fresh.MoveId);
+        Assert.Equal(started.FrameBefore, fresh.MoveStartedFrame);
+        Assert.Equal(0, fresh.MoveElapsedFrames);
+        Assert.Equal(-1, fresh.HitConfirmFrame);
+        Assert.Equal(-1, fresh.BlockConfirmFrame);
+        Assert.Equal(1, fresh.DamageScript.ContactDivisor);
+        Assert.Single(actual.SelectMany(step => step.Events), evt => evt.Type == BattleEventType.Hit);
+        Assert.Equal(started.FrameBefore, actual[^1].State.Fighter(1).LastHitAttackStartFrame);
+    }
+
+    private static FighterDefinition KickFighter()
+    {
+        var light = new CommandDefinition("5A", [], InputBits.LightPunch, 1, 0, priority: 1, bufferLifetimeFrames: 2);
+        var kick = new CommandDefinition("2C", [], InputBits.LightKick, 1, 0, bufferLifetimeFrames: 2);
+        var wave = new CommandDefinition("236A", [CommandDirection.Down, CommandDirection.DownForward, CommandDirection.Forward],
+            InputBits.LightPunch, 16, 0, priority: 3, bufferLifetimeFrames: 0, matchHeldMotion: true,
+            bufferPolicy: new CommandBufferPolicy(true, 12, 1, 4));
+        var moves = new MoveDefinition[]
+        {
+            new(Stand, "5A", 3, 4, 5, MoveAllowedStates.Standing),
+            new(Wave, "236A", 15, 2, 35),
+            new(Kick, "2C", 3, 3, 8, MoveAllowedStates.Crouching,
+                attacks: [new AttackDefinition(45, 8, 20, 7, height: AttackHeight.Low, hitstunFrames: 11,
+                    hitstopByOutcome: new(new(11, 13), new(11, 11)), dynamicDamage: new(7, 8, false))],
+                cancels: [new CancelDefinition(Stand, 6, 13, allowWhiff: true, standingInputOnly: true, maximumInputAge: 2),
+                    new CancelDefinition(Kick, 6, 13, allowWhiff: true, allowSameMove: true, maximumInputAge: 2)],
+                returnsToCrouch: true),
+        };
+        var rules = new DynamicDamageRules(DamageRatio.One, DamageRatio.One, DamageRatio.One, DamageRatio.One, 1, 2);
+        return new FighterDefinition("Test", [light, kick, wave], moves, useCommandPriority: true, damageRules: rules);
     }
 
     [Theory]

@@ -114,10 +114,12 @@ public sealed class CancelDefinition
     public int? MaximumInputAge { get; }
 
     /// <summary>阶段是否允许（纯函数，供状态机与测试共用）。</summary>
-    public bool AllowsPhase(FighterLogicState state) => state switch
+    public bool AllowsPhase(FighterLogicState state) => AllowsPhase(Phases, state);
+
+    internal static bool AllowsPhase(MoveCancelPhases phases, FighterLogicState state) => state switch
     {
-        FighterLogicState.Active => (Phases & MoveCancelPhases.Active) != 0,
-        FighterLogicState.Recovery => (Phases & MoveCancelPhases.Recovery) != 0,
+        FighterLogicState.Active => (phases & MoveCancelPhases.Active) != 0,
+        FighterLogicState.Recovery => (phases & MoveCancelPhases.Recovery) != 0,
         _ => false,
     };
 
@@ -140,4 +142,29 @@ public sealed class CancelDefinition
 
         return hitOk || blockOk;
     }
+}
+
+/// <summary>A source window for a real command whose target move is outside the loaded profile.</summary>
+public sealed class ReservedCancelDefinition
+{
+    public ReservedCancelDefinition(string commandId, int windowFirstFrame, int windowLastFrame, MoveCancelPhases phases)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(commandId);
+        if (windowFirstFrame < 0 || windowLastFrame < windowFirstFrame)
+            throw new ArgumentOutOfRangeException(nameof(windowFirstFrame), "Reserved cancel requires a valid action window.");
+        if (phases == MoveCancelPhases.None || (phases & ~(MoveCancelPhases.Active | MoveCancelPhases.Recovery)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(phases), "Reserved cancel requires an active or recovery phase.");
+        CommandId = commandId;
+        WindowFirstFrame = windowFirstFrame;
+        WindowLastFrame = windowLastFrame;
+        Phases = phases;
+    }
+
+    public string CommandId { get; }
+    public int WindowFirstFrame { get; }
+    public int WindowLastFrame { get; }
+    public MoveCancelPhases Phases { get; }
+
+    internal bool IsOpen(FighterLogicState state, int elapsed) =>
+        elapsed >= WindowFirstFrame && elapsed <= WindowLastFrame && CancelDefinition.AllowsPhase(Phases, state);
 }
