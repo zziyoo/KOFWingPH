@@ -39,31 +39,33 @@ FROZEN_BASE = {
 }
 
 
-def source_attack(raw):
-    definition, controls = move_scope(state_reentry.script_sections(raw), 430)
-    sweep.require_fields(definition, {'type': 'c', 'movetype': 'a', 'physics': 'n', 'ctrl': '0', 'velset': '0,0',
-                                      'anim': '430', 'facep2': '1'}, 'unsupported State 430 StateDef')
+def source_attack(raw, number=430, *, posture='c', guard_flag='l', hit_flag='ma'):
+    definition, controls = move_scope(state_reentry.script_sections(raw), number)
+    label = f'State {number}'
+    sweep.require_fields(definition, {'type': posture, 'movetype': 'a', 'physics': 'n', 'ctrl': '0', 'velset': '0,0',
+                                      'anim': str(number), 'facep2': '1'}, f'unsupported {label} StateDef')
     require([normalized(c.one('type')) for c in controls] ==
             ['playsnd', 'playsnd', 'hitdef', 'hitdef', 'varadd', 'varadd', 'statetypeset', 'changestate'],
-            'unsupported State 430 controller sequence')
+            f'unsupported {label} controller sequence')
     hit, inactive = controls[2:4]
     require(set(map(normalized, hit.values('triggerall'))) == {'var(12)=0', '!movecontact&&!movereversed'}
             and set(map(normalized, inactive.values('triggerall'))) == {'var(12)>0'}
-            and inactive.one('attr') == '', 'unsupported State 430 contact or inactive HitDef')
-    sweep.require_fields(hit, {'attr': 'c,na', 'animtype': 'light', 'ground.type': 'low', 'guardflag': 'l',
-                               'hitflag': 'ma', 'ground.cornerpush.veloff': '0', 'air.cornerpush.veloff': '0'},
-                         'unsupported State 430 target, ground reaction or guard eligibility')
+            and inactive.one('attr') == '', f'unsupported {label} contact or inactive HitDef')
+    sweep.require_fields(hit, {'attr': f'{posture},na', 'animtype': 'light', 'ground.type': 'low', 'guardflag': guard_flag,
+                               'hitflag': hit_flag, 'ground.cornerpush.veloff': '0', 'air.cornerpush.veloff': '0'},
+                         f'unsupported {label} target, ground reaction or guard eligibility')
     require(not hit.values('guard.velocity') and not hit.values('guard.hittime') and not hit.values('fall'),
-            'unsupported State 430 guard override or ground launch')
+            f'unsupported {label} guard override or ground launch')
     bounds = hit_window(hit)
     require(len(hit.values('trigger1')) == 2 and 'var(28):=1' in map(normalized, hit.values('trigger1'))
             and hit_window(inactive) == bounds and len(inactive.values('trigger1')) == 1,
-            'State 430 HitDef triggers differ from the audited window')
+            f'{label} HitDef triggers differ from the audited window')
     counter, normal = number_in(hit.one('damage'), r'floor\(\(ifelse\(var\(6\),(\d+),(\d+)\)-var\(21\)\)\*fvar\(7\)\),0',
-                                'State 430 dynamic damage')
+                                f'{label} dynamic damage')
     recovery, exit_state = controls[-2:]
-    sweep.require_fields(recovery, {'trigger1': f'animelem={bounds[1]}', 'movetype': 'i'}, 'unsupported State 430 recovery')
-    sweep.require_fields(exit_state, {'trigger1': 'animtime=0', 'value': '11', 'ctrl': '1'}, 'unsupported State 430 exit')
+    sweep.require_fields(recovery, {'trigger1': f'animelem={bounds[1]}', 'movetype': 'i'}, f'unsupported {label} recovery')
+    sweep.require_fields(exit_state, {'trigger1': 'animtime=0', 'value': '11' if posture == 'c' else '0', 'ctrl': '1'},
+                         f'unsupported {label} exit')
     return definition, controls, hit, bounds, {'normalBase': normal, 'counterBase': counter, 'useContactDivisor': False}
 
 
@@ -72,7 +74,7 @@ def command_entry(entries, target):
                    and 'var(59)!=1' in map(normalized, entry.values('triggerall'))), f'human State {target} command')
 
 
-def source_commands(contents, durations, prior):
+def source_commands(contents, durations, prior, *, include_standing_kicks=False):
     commands = state_reentry.script_sections(contents['cmd'])
     defaults = unique((s for s in commands if s.title == 'defaults'), 'CMD defaults')
     remap = unique((s for s in commands if s.title == 'remap'), 'CMD remap')
@@ -126,11 +128,15 @@ def source_commands(contents, durations, prior):
                          'unsupported forward punch Helper decay')
     require(latch.line < decay.line and not any(c.values('ignorehitpause') for c in (latch, decay)),
             'unsupported forward punch Helper clock')
-    priority = [relevant[number].line for number in (300, 310, 205, 200, 235, 230, 400, 410, 430, 440)]
+    priority_states = (300, 310, 205, 200, 235, 230, 400, 410, 430, 440)
+    if include_standing_kicks:
+        relevant.update({number: command_entry(entries, number) for number in (215, 210, 245, 240)})
+        priority_states = (300, 310, 205, 200, 215, 210, 235, 230, 245, 240, 400, 410, 430, 440)
+    priority = [relevant[number].line for number in priority_states]
     require(prior['sourceLines']['defaultWaveEntry'] < prior['sourceLines']['mode2WaveEntry'] < priority[0]
             and priority == sorted(priority), 'State 430 CMD priority differs from the audited sequence')
     windows = {}
-    for number in MOVE_IDS:
+    for number in conditions if include_standing_kicks else MOVE_IDS:
         (element, offset) = number_in(conditions[number], rf'stateno={number}&&animelem=(\d+),>=(\d+)',
                                       f'State {number} ordinary chain start')
         action = durations[number]
@@ -205,47 +211,49 @@ def inspect_source(archive, manifest):
                             'mode2WaveEntry': prior['sourceLines']['mode2WaveEntry']}}
 
 
-def ground_attack(audit, native, movement):
+def ground_attack(audit, native, movement, *, number=430, height='Low', rejects_falling=True):
     defaults = audit['groundDefaults']
     source_movement = audit['groundMovement']
     require(all(movement[key] == source_movement[key] for key in ('velocityRetention', 'crouchGuardVelocityRetention',
                                                                   'lastHitStepScale'))
             and movement['crouchHitVelocityRetention'] == source_movement['crouchGuardVelocityRetention'],
-            'frozen reaction movement differs from the State 430 source')
+            f'frozen reaction movement differs from the State {number} source')
     push = Fraction(defaults['initialPush']['numerator'], defaults['initialPush']['denominator'])
     for name in ('hit', 'guard'):
         measured = native[name]
         pause = measured['pause']
         require(Fraction(str(measured['initialPush'])) == push
                 and (pause['attackerFrames'], pause['defenderFrames']) == defaults[f'{name}Pause'],
-                f'State 430 {name} sample differs from the default source push or pause')
+                f'State {number} {name} sample differs from the default source push or pause')
     action = audit['action']
     attack = state210.attack_fields({'strike': action['strikes'][0]['box'], 'active': action['active']},
                                     native['hit'], native['guard'], movement['velocityRetention'])
-    attack.update(height='Low', damage=0, dynamicDamage=audit['damage'], groundHitReaction='LightLow',
-                  rejectsLyingTargets=True, rejectsFallingTargets=True)
+    attack.update(height=height, damage=0, dynamicDamage=audit['damage'], groundHitReaction='LightLow',
+                  rejectsLyingTargets=True)
+    if rejects_falling:
+        attack['rejectsFallingTargets'] = True
     return attack
 
 
-def bind_reactions(audit, native, fighter, binding):
+def bind_reactions(audit, native, fighter, binding, *, number=430, move_id=MOVE):
     bindings = {}
     for posture, timeline_key in (('standing', 'lightHitstun'), ('crouching', 'crouchingLightHitstun')):
         measured = native['groundReactions'][posture]
         source = audit['groundReactions'][posture]
         require(measured['effectiveStun'] == native['hit']['effectiveStun'],
-                f'State 430 {posture} stun differs from its normal hit')
+                f'State {number} {posture} stun differs from its normal hit')
         timeline, first_hold = state_crouch_heavy_wave.ground_reaction(source, measured, posture)
         frozen = fighter['groundHurtboxes'][timeline_key]
         require(first_hold == 1 and frozen[:-1] == timeline[:-1]
                 and frozen[-1]['boxes'] == timeline[-1]['boxes']
                 and frozen[-1]['frames'] >= timeline[-1]['frames'],
-                f'State 430 {posture} native reaction differs from the frozen hurtbox timeline')
+                f'State {number} {posture} native reaction differs from the frozen hurtbox timeline')
         initial = f'stage25_{posture}_initial'
         followup = f'stage25_{posture}_slide'
         for name, action in ((initial, source['initial']['action']), (followup, source['slide']['action'])):
             binding['clips'][name] = {'action': action, 'clock': 'phase', 'loop': False}
         bindings[posture] = {'initial': initial, 'followup': followup, 'followupTick': measured['initialTicks']}
-    binding['hitReactions'][MOVE] = {**bindings['standing'], 'crouching': bindings['crouching']}
+    binding['hitReactions'][move_id] = {**bindings['standing'], 'crouching': bindings['crouching']}
 
 
 def apply_chains(audit, native, fighter):

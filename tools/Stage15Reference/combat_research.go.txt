@@ -32,7 +32,9 @@ var researchStage22 = strings.HasPrefix(researchScenario, "crouch-wave-")
 var researchStage23 = strings.HasPrefix(researchScenario, "crouch-heavy-wave-")
 var researchStage24 = strings.HasPrefix(researchScenario, "crouch-kick-wave-")
 var researchStage25 = strings.HasPrefix(researchScenario, "crouch-light-kick-")
-var researchKickTrace = researchStage24 || researchStage25
+var researchStage26 = strings.HasPrefix(researchScenario, "standing-light-kick-")
+var researchLightKickTrace = researchStage25 || researchStage26
+var researchKickTrace = researchStage24 || researchLightKickTrace
 var researchWaveTrace = researchStage19 || researchStage20 || researchStage21 || researchStage22 || researchStage23 || researchKickTrace
 var researchSpecialMirror = researchStage19 && strings.HasPrefix(researchSpecialScenario, "mirror-") ||
 	researchStage20 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "near-wave-"), "mirror-") ||
@@ -40,7 +42,8 @@ var researchSpecialMirror = researchStage19 && strings.HasPrefix(researchSpecial
 	researchStage22 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-wave-"), "mirror-") ||
 	researchStage23 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-heavy-wave-"), "mirror-") ||
 	researchStage24 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-kick-wave-"), "mirror-") ||
-	researchStage25 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-light-kick-"), "mirror-")
+	researchStage25 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "crouch-light-kick-"), "mirror-") ||
+	researchStage26 && strings.HasPrefix(strings.TrimPrefix(researchScenario, "standing-light-kick-"), "mirror-")
 const researchPowerWaveCommand = "\x8e\xe3\x83\x70\x83\x8f\x81\x5b\x83\x45\x83\x46\x83\x43\x83\x75"
 var researchStage16 = !researchStage21 && (strings.HasPrefix(researchScenario, "light-") || strings.HasPrefix(researchScenario, "heavy-"))
 var researchTraceFile *os.File
@@ -108,7 +111,7 @@ func researchBegin() {
 
 	if researchBaseTick < 0 {
 		researchBaseTick = sys.tickCount
-		if researchStage25 {
+		if researchLightKickTrace {
 			researchLoadPhysicalInputs()
 		}
 		researchIntroFrame = -1
@@ -190,7 +193,7 @@ func researchBits(pn int) InputBits {
 	if researchStage24 {
 		return researchCrouchKickWaveBits(pn)
 	}
-	if researchStage25 {
+	if researchLightKickTrace {
 		return researchPhysicalInputs[pn][researchFrame]
 	}
 	if pn == 0 && researchFrame == 5 {
@@ -1073,7 +1076,7 @@ func researchTraceWithOwner(phase string, owner int) {
 			}
 			char["helperX"], char["helperY"] = researchCommandHelper(c)
 			char["helperB"], char["helperRecovery"] = researchKickHelper(c)
-			if researchStage25 {
+			if researchLightKickTrace {
 				char["helperA"], char["helperForwardX"] = researchLightKickHelper(c)
 			}
 			char["hitId"], char["hitOwner"] = c.ghv.hitid, c.ghv.playerno+1
@@ -1146,7 +1149,7 @@ func researchStateChange(c *Char, next int32) {
 	if researchWaveTrace {
 		relevant = relevant || c.ss.no == 1000 || c.ss.no == 1050 || next == 1000 || next == 1050 || next == 300
 	}
-	if !relevant && !researchStage25 {
+	if !relevant && !researchLightKickTrace {
 		return
 	}
 	helperX, helperY := researchCommandHelper(c)
@@ -1169,7 +1172,7 @@ func researchStateChange(c *Char, next int32) {
 		row["bBuffer"], row["recoveryBuffer"] = c.commandByName("b"), c.commandByName("recovery")
 		row["helperB"], row["helperRecovery"] = researchKickHelper(c)
 		row["var4"] = c.varGet(4).ToI()
-		if researchStage25 {
+		if researchLightKickTrace {
 			row["aBuffer"] = c.commandByName("a")
 			row["helperA"], row["helperForwardX"] = researchLightKickHelper(c)
 		}
@@ -1258,7 +1261,7 @@ func researchDamageVariable(c *Char, operation string, index, before, after int3
 }
 
 func researchHitDef(c *Char) {
-	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || researchStage22 && c.ss.no == 400 || researchStage23 && c.ss.no == 410 || researchStage24 && c.ss.no == 440 || researchStage25 && c.ss.no == 430 || (researchStage16 || researchStage17 || researchStage18 || researchWaveTrace) && c.ss.no == 205) {
+	if c.helperIndex == 0 && (c.ss.no == 200 || c.ss.no == 210 || c.ss.no == 215 || researchStage22 && c.ss.no == 400 || researchStage23 && c.ss.no == 410 || researchStage24 && c.ss.no == 440 || researchLightKickTrace && c.ss.no == 430 || researchStage26 && (c.ss.no == 230 || c.ss.no == 235) || (researchStage16 || researchStage17 || researchStage18 || researchWaveTrace) && c.ss.no == 205) {
 		researchTraceWithOwner("hitdef", c.playerNo+1)
 	}
 }
