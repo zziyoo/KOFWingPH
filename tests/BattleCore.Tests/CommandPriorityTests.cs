@@ -106,6 +106,58 @@ public sealed class CommandPriorityTests
     }
 
     [Theory]
+    [InlineData(InputBits.Right, 11, true, true)]
+    [InlineData(InputBits.Left, 11, true, true)]
+    [InlineData(InputBits.Right, 12, true, false)]
+    [InlineData(InputBits.Right, 11, false, false)]
+    [InlineData(InputBits.None, 11, true, false)]
+    public void GroundReservationTestsTargetAndDirectionAtConsumption(InputBits direction, int distance,
+        bool eligibleTarget, bool reserved)
+    {
+        var command = new CommandDefinition("Kick", [], InputBits.HeavyKick, bufferLifetimeFrames: 2);
+        var reservation = new CommandDefinition("CloseThrow", [CommandDirection.Forward, CommandDirection.Back],
+            InputBits.HeavyKick, buttonToleranceFrames: 0, priority: 3, bufferLifetimeFrames: 0,
+            bufferPolicy: new CommandBufferPolicy(true, 3, 1, 1),
+            reserveGroundInput: true, groundReservationTarget: new GroundReservationTarget(11, true));
+        var fighter = new FighterDefinition("Test", [command, reservation],
+            [new MoveDefinition(Heavy, "Kick", 3, 4, 5)], useCommandPriority: true);
+        RecognitionState state = Advance(fighter, [InputBits.HeavyKick]);
+        state = Advance(fighter, [direction], first: 1, prior: state);
+
+        FighterActionTick result = FighterStateMachine.Tick(FighterLogicState.Standing, null, 0,
+            DirectionResolver.Resolve(direction, Facing.Right), state, fighter, 1,
+            opponentBodyDistance: distance, opponentGroundedNonHitstun: eligibleTarget);
+
+        Assert.Equal(reserved ? null : Heavy, result.MoveId);
+        Assert.All(result.Recognition.Buffer, item => Assert.True(item.Consumed));
+    }
+
+    [Fact]
+    public void DeferredButtonChordUsesRootAndHelperClocksWithoutConsumingNewerButtons()
+    {
+        var reserved = new CommandDefinition("Blowback", [CommandDirection.Neutral, CommandDirection.Back,
+            CommandDirection.Forward], InputBits.HeavyPunch | InputBits.HeavyKick, buttonToleranceFrames: 0,
+            priority: 3, bufferLifetimeFrames: 0, bufferPolicy: new CommandBufferPolicy(true, 3, 1, 1),
+            reserveGroundInput: true);
+        var normal = new CommandDefinition("Kick", [], InputBits.LightKick, bufferLifetimeFrames: 2);
+        var fighter = new FighterDefinition("Test", [reserved, normal],
+            [new MoveDefinition(Heavy, "Kick", 3, 4, 5)], useCommandPriority: true);
+        RecognitionState state = Advance(fighter, [InputBits.Down | InputBits.HeavyPunch | InputBits.HeavyKick,
+            InputBits.None, InputBits.None, InputBits.None], frozen: true);
+        state = Advance(fighter, [InputBits.LightKick], first: 4, prior: state);
+
+        FighterActionTick action = FighterStateMachine.Tick(FighterLogicState.Standing, null, 0, default,
+            state, fighter, 4);
+
+        Assert.Null(action.MoveId);
+        Assert.Contains(action.Recognition.Buffer, item => item.Match.CommandId == "Blowback" && item.Consumed);
+        Assert.Contains(action.Recognition.Buffer, item => item.Match.CommandId == "Kick" && !item.Consumed);
+        RecognitionState next = Advance(fighter, [InputBits.None], first: 5, prior: action.Recognition);
+        Assert.Equal(Heavy, FighterStateMachine.Tick(FighterLogicState.Standing, null, 0, default,
+            next, fighter, 5).MoveId);
+    }
+
+    [Theory]
     [InlineData(InputBits.Right, 1, true)]
     [InlineData(InputBits.Right, 3, true)]
     [InlineData(InputBits.Right, 4, false)]

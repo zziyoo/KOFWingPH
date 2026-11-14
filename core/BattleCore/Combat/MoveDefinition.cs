@@ -18,6 +18,9 @@ public sealed class MoveHurtboxSpan
     public IReadOnlyList<FixedRect> Boxes { get; }
 }
 
+/// <summary>A facing-relative horizontal displacement at one effective move tick.</summary>
+public readonly record struct MovePositionStep(int Frame, FixedPoint X);
+
 /// <summary>
 /// 一条<b>招式定义</b>（阶段 04，纯数据）：说明「哪个指令触发哪个动作、
 /// 动作各阶段持续多少帧、允许从哪些待机状态发动」。
@@ -48,6 +51,7 @@ public sealed class MoveDefinition
 /// 出生帧必须在 Active 阶段内，且同一招式内 ProjectileTypeId 不得重复。</param>
 /// <param name="minimumStartDistance">发动或取消到此招时，帧开始的最小水平中心距。缺省无距离限制。</param>
 /// <param name="hurtboxTimeline">可选的局部受击框时间线，持续时间必须覆盖完整招式。</param>
+/// <param name="positionSteps">Optional displacements indexed by zero-based effective move ticks.</param>
 /// <exception cref="ArgumentException">ID 为空 / 阶段帧数 &lt; 1 / 允许状态为空。</exception>
 /// <exception cref="ArgumentException">攻击数据的生效帧范围超出 ActiveFrames。</exception>
 public MoveDefinition(
@@ -67,7 +71,8 @@ public MoveDefinition(
     int? guardThreatFrames = null,
     bool returnsToCrouch = false,
     IReadOnlyList<ReservedCancelDefinition>? reservedCancels = null,
-    bool walkOnCrouchRecovery = false)
+    bool walkOnCrouchRecovery = false,
+    IReadOnlyList<MovePositionStep>? positionSteps = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -113,6 +118,16 @@ public MoveDefinition(
                 spans.Sum(span => (long)span.Frames) != (long)startupFrames + activeFrames + recoveryFrames)
                 throw new ArgumentException("受击框时段必须覆盖整个招式。", nameof(hurtboxTimeline));
             HurtboxTimeline = Array.AsReadOnly(spans);
+        }
+        if (positionSteps is not null)
+        {
+            var steps = positionSteps.OrderBy(step => step.Frame).ToArray();
+            long total = (long)startupFrames + activeFrames + recoveryFrames;
+            if (steps.Any(step => step.Frame < 0 || step.Frame >= total || step.X == FixedPoint.Zero) ||
+                steps.Select(step => step.Frame).Distinct().Count() != steps.Length)
+                throw new ArgumentException("Position steps require unique move ticks and nonzero horizontal displacement.",
+                    nameof(positionSteps));
+            PositionSteps = Array.AsReadOnly(steps);
         }
 
         // 攻击判定数据（D76）：防御复制 + 生效帧范围必须在 Active 阶段内
@@ -204,6 +219,18 @@ public MoveDefinition(
         (MaximumStartBodyDistance is not { } maximum || bodyDistance <= maximum);
 
     public IReadOnlyList<MoveHurtboxSpan>? HurtboxTimeline { get; }
+
+    public IReadOnlyList<MovePositionStep> PositionSteps { get; } = Array.Empty<MovePositionStep>();
+
+    internal FixedPoint PositionStepAt(int elapsed)
+    {
+        foreach (MovePositionStep step in PositionSteps)
+        {
+            if (step.Frame >= elapsed)
+                return step.Frame == elapsed ? step.X : FixedPoint.Zero;
+        }
+        return FixedPoint.Zero;
+    }
 
     internal IReadOnlyList<FixedRect>? HurtboxesAt(int elapsed)
     {

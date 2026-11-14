@@ -1,4 +1,5 @@
 using NewKOF.BattleCore.Input;
+using NewKOF.BattleCore.Numerics;
 
 namespace NewKOF.BattleCore.Commands;
 
@@ -23,6 +24,13 @@ public sealed record CommandBufferPolicy
     public int HelperTicks { get; }
     public int HelperHeldDecay { get; }
     public int HelperReleasedDecay { get; }
+}
+
+/// <summary>Target eligibility for a deferred ground command, sampled at consumption.</summary>
+public sealed record GroundReservationTarget(FixedPoint MaximumBodyDistance, bool RequiresGroundedNonHitstun)
+{
+    internal bool Allows(FixedPoint distance, bool groundedNonHitstun) =>
+        distance <= MaximumBodyDistance && (!RequiresGroundedNonHitstun || groundedNonHitstun);
 }
 
 /// <summary>
@@ -98,7 +106,8 @@ public sealed class CommandDefinition
         CommandBufferPolicy? bufferPolicy = null,
         bool reserveGroundInput = false,
         bool matchCompletedMotion = false,
-        bool reserveOnEdgeDirection = false)
+        bool reserveOnEdgeDirection = false,
+        GroundReservationTarget? groundReservationTarget = null)
     {
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("指令 ID 不能为空。", nameof(commandId));
@@ -165,9 +174,13 @@ public sealed class CommandDefinition
         if (reserveOnEdgeDirection && (!reserveGroundInput || matchHeldMotion || bufferPolicy is not { HelperTicks: > 0 }))
             throw new ArgumentException("An edge-direction reservation requires a directional ground reservation with a helper clock.",
                 nameof(reserveOnEdgeDirection));
+        if (groundReservationTarget is not null &&
+            (!reserveGroundInput || groundReservationTarget.MaximumBodyDistance < FixedPoint.Zero))
+            throw new ArgumentException("Target eligibility requires a ground reservation and nonnegative body distance.",
+                nameof(groundReservationTarget));
         if (reserveGroundInput && !matchHeldMotion &&
             (sequence.Length == 0 || sequence.Distinct().Count() != sequence.Length || requiredButtons == InputBits.None ||
-             buttonToleranceFrames != 0 || chargeHoldFrames != 0 || bufferPolicy is not null && !reserveOnEdgeDirection))
+             buttonToleranceFrames != 0 || chargeHoldFrames != 0))
             throw new ArgumentException("保留的地面指令需要一组不重复的相对方向和当帧按键边沿。", nameof(reserveGroundInput));
 
         CommandId = commandId;
@@ -184,6 +197,7 @@ public sealed class CommandDefinition
         ReserveGroundInput = reserveGroundInput;
         MatchCompletedMotion = matchCompletedMotion;
         ReserveOnEdgeDirection = reserveOnEdgeDirection;
+        GroundReservationTarget = groundReservationTarget;
     }
 
     /// <summary>唯一标识，如 <c>236A</c>。</summary>
@@ -227,4 +241,6 @@ public sealed class CommandDefinition
     public bool MatchCompletedMotion { get; }
     /// <summary>Latch directions and button edges separately for the root and qualify the helper on the physical edge.</summary>
     public bool ReserveOnEdgeDirection { get; }
+
+    public GroundReservationTarget? GroundReservationTarget { get; }
 }

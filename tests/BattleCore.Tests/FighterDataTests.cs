@@ -1674,6 +1674,70 @@ public class FighterDataTests
         Assert.Contains("schemaVersion", missing.FieldPath);
     }
 
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(0, 3)]
+    [InlineData(1, 0)]
+    [InlineData(1, 3)]
+    public void AuthoredPositionStepsUseEffectiveMoveTimeAndFacing(int seat, int hitpause)
+    {
+        FighterDefinition fighter = FighterDataLoader.Load(Mutate(Json("Kai"), json =>
+        {
+            JsonNode move = json["moves"]![0]!;
+            move["positionSteps"] = JsonNode.Parse("""
+                [{"frame":0,"x":{"numerator":1,"denominator":2}},
+                 {"frame":1,"x":{"numerator":32,"denominator":1}},
+                 {"frame":2,"x":{"numerator":-3,"denominator":2}}]
+                """);
+        }));
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        FighterState[] fighters =
+        [
+            FighterState.Create(0, 1000, -120, Facing.Right),
+            FighterState.Create(1, 1000, 120, Facing.Left),
+        ];
+        var initial = new BattleState(0, fighters, BattleState.CreateDefault().StateVersion);
+        int facing = seat == 0 ? 1 : -1;
+        FixedPoint startX = fighters[seat].PositionX + facing * FixedPoint.FromFraction(1, 2);
+        BattleState started = simulation.Step(initial, seat == 0 ? F(0, InputBits.LightPunch) :
+            F(0, InputBits.None, InputBits.LightPunch)).State;
+        Assert.Equal(startX, started.Fighter(seat).PositionX);
+        Assert.Equal(0, started.Fighter(seat).MoveElapsedFrames);
+
+        FighterState[] paused = started.Fighters.ToArray();
+        paused[seat] = paused[seat] with { HitstopRemainingFrames = hitpause };
+        BattleState state = new(started.Frame, paused, started.StateVersion);
+        for (int i = 0; i < hitpause; i++)
+        {
+            state = simulation.Step(state, FrameInput.Empty(state.Frame)).State;
+            Assert.Equal(startX, state.Fighter(seat).PositionX);
+            Assert.Equal(0, state.Fighter(seat).MoveElapsedFrames);
+        }
+        FixedPoint nextX = startX + facing * FixedPoint.FromInt(32);
+        FrameInput thaw = FrameInput.Empty(state.Frame);
+        BattleState resumed = simulation.Step(state, thaw).State;
+        Assert.Equal(resumed.Fighters, simulation.Step(state, thaw).State.Fighters);
+        Assert.Equal(nextX, resumed.Fighter(seat).PositionX);
+        Assert.Equal(FixedPoint.Zero, resumed.Fighter(seat).VelocityX);
+        BattleState next = simulation.Step(resumed, FrameInput.Empty(resumed.Frame)).State;
+        Assert.Equal(nextX - facing * FixedPoint.FromFraction(3, 2), next.Fighter(seat).PositionX);
+        Assert.Equal(next.Fighter(seat).PositionX,
+            simulation.Step(next, FrameInput.Empty(next.Frame)).State.Fighter(seat).PositionX);
+    }
+
+    [Theory]
+    [InlineData("""[{"frame":-1,"x":{"numerator":1,"denominator":1}}]""")]
+    [InlineData("""[{"frame":99,"x":{"numerator":1,"denominator":1}}]""")]
+    [InlineData("""[{"frame":1,"x":{"numerator":1,"denominator":1}},{"frame":1,"x":{"numerator":1,"denominator":1}}]""")]
+    [InlineData("""[{"frame":1,"x":{"numerator":1,"denominator":0}}]""")]
+    [InlineData("""[{"frame":1}]""")]
+    public void IllegalAuthoredPositionStepsAreRejected(string steps)
+    {
+        FighterDataException exception = ExpectFailure(Mutate(Json("Kai"),
+            json => json["moves"]![0]!["positionSteps"] = JsonNode.Parse(steps)));
+        Assert.Contains("positionSteps", exception.Message);
+    }
+
     [Fact]
     public void MissingFighterId_AndNullArrays_AreRejected()
     {

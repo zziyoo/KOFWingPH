@@ -103,7 +103,8 @@ public static class FighterStateMachine
         FixedPoint opponentDistance = default,
         FixedPoint opponentBodyDistance = default,
         int crouchReturnTicks = 0,
-        bool crouchingHitReaction = false)
+        bool crouchingHitReaction = false,
+        bool opponentGroundedNonHitstun = true)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -135,7 +136,7 @@ public static class FighterStateMachine
             FighterActionTick? cancel = TryCancel(
                 state, move, definition, ref recognition, resolvedInput, frame,
                 moveStartedFrame, moveElapsedFrames, hitConfirmFrame, blockConfirmFrame,
-                opponentDistance, opponentBodyDistance);
+                opponentDistance, opponentBodyDistance, opponentGroundedNonHitstun);
             if (cancel is FighterActionTick cancelled)
                 return cancelled;
 
@@ -257,9 +258,10 @@ public static class FighterStateMachine
             CommandMatch match = result.Match;
             if (definition.ReservedGroundCommand(match.CommandId) is { } reservation)
             {
-                if (!recognition.AllowsReservation(reservation, result))
+                if (!AllowsReservation(recognition, reservation, result, opponentBodyDistance, opponentGroundedNonHitstun))
                     continue;
-                recognition = reservation.MatchHeldMotion || reservation.ReserveOnEdgeDirection
+                recognition = reservation.MatchHeldMotion || reservation.ReserveOnEdgeDirection ||
+                    reservation.BufferPolicy is not null || reservation.GroundReservationTarget is not null
                     ? recognition.WithResultConsumed(match.RecognizedFrame)
                     : recognition.WithReservedGroundInputConsumed(match.RecognizedFrame, frame);
                 break;
@@ -369,7 +371,8 @@ public static class FighterStateMachine
         int hitConfirmFrame,
         int blockConfirmFrame,
         FixedPoint opponentDistance,
-        FixedPoint opponentBodyDistance)
+        FixedPoint opponentBodyDistance,
+        bool opponentGroundedNonHitstun)
     {
         if ((move.Cancels.Count == 0 && move.ReservedCancels.Count == 0) || moveStartedFrame < 0)
             return null;
@@ -381,7 +384,7 @@ public static class FighterStateMachine
 
         if (definition.UseCommandPriority)
             return TryPriorityCancel(state, move, definition, ref recognition, input, frame, moveStartedFrame,
-                elapsed, hitConfirmFrame, blockConfirmFrame, opponentDistance, opponentBodyDistance);
+                elapsed, hitConfirmFrame, blockConfirmFrame, opponentDistance, opponentBodyDistance, opponentGroundedNonHitstun);
 
         HashSet<int>? rejectedStandingInputs = null;
         foreach (CancelDefinition cancel in move.Cancels)
@@ -444,7 +447,7 @@ public static class FighterStateMachine
     private static FighterActionTick? TryPriorityCancel(FighterLogicState state, MoveDefinition move,
         FighterDefinition definition, ref RecognitionState recognition, RelativeInput input, int frame,
         int moveStartedFrame, int elapsed, int hitConfirmFrame, int blockConfirmFrame,
-        FixedPoint opponentDistance, FixedPoint opponentBodyDistance)
+        FixedPoint opponentDistance, FixedPoint opponentBodyDistance, bool opponentGroundedNonHitstun)
     {
         HashSet<int>? rejectedStandingInputs = null;
         foreach (BufferedResult result in CommandCandidates(recognition, definition))
@@ -453,7 +456,7 @@ public static class FighterStateMachine
                 continue;
             CommandMatch match = result.Match;
             if (definition.ReservedGroundCommand(match.CommandId) is { } reservation &&
-                recognition.AllowsReservation(reservation, result) &&
+                AllowsReservation(recognition, reservation, result, opponentBodyDistance, opponentGroundedNonHitstun) &&
                 move.ReservedCancels.Any(rule => rule.CommandId == match.CommandId && rule.IsOpen(state, elapsed)))
             {
                 if (rejectedStandingInputs is not null)
@@ -501,6 +504,11 @@ public static class FighterStateMachine
             if (rejected != exceptFrame)
                 recognition = recognition.WithResultConsumed(rejected);
     }
+
+    private static bool AllowsReservation(RecognitionState recognition, CommandDefinition reservation,
+        BufferedResult input, FixedPoint opponentBodyDistance, bool opponentGroundedNonHitstun) =>
+        recognition.AllowsReservation(reservation, input) &&
+        (reservation.GroundReservationTarget?.Allows(opponentBodyDistance, opponentGroundedNonHitstun) ?? true);
 
     /// <summary>是否处于招式阶段（Startup/Active/Recovery）。</summary>
     private static bool IsInMove(FighterLogicState state) =>

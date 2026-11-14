@@ -282,6 +282,18 @@ public sealed class CommandDto
 
     [JsonPropertyName("reserveOnEdgeDirection")]
     public bool ReserveOnEdgeDirection { get; set; }
+
+    [JsonPropertyName("groundReservationTarget")]
+    public GroundReservationTargetDto? GroundReservationTarget { get; set; }
+}
+
+public sealed class GroundReservationTargetDto
+{
+    [JsonPropertyName("maximumBodyDistance")]
+    public FractionDto? MaximumBodyDistance { get; set; }
+
+    [JsonPropertyName("requiresGroundedNonHitstun")]
+    public bool RequiresGroundedNonHitstun { get; set; }
 }
 
 public sealed class CommandBufferPolicyDto
@@ -331,6 +343,9 @@ public sealed class MoveDto
     [JsonPropertyName("hurtboxTimeline")]
     public List<MoveHurtboxSpanDto>? HurtboxTimeline { get; set; }
 
+    [JsonPropertyName("positionSteps")]
+    public List<MovePositionStepDto>? PositionSteps { get; set; }
+
     [JsonPropertyName("returnsToCrouch")]
     public bool ReturnsToCrouch { get; set; }
 
@@ -360,6 +375,15 @@ public sealed class MoveHurtboxSpanDto
 
     [JsonPropertyName("boxes")]
     public List<HurtboxDto>? Boxes { get; set; }
+}
+
+public sealed class MovePositionStepDto
+{
+    [JsonPropertyName("frame")]
+    public int? Frame { get; set; }
+
+    [JsonPropertyName("x")]
+    public FractionDto? X { get; set; }
 }
 
 public sealed class AttackDto

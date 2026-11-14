@@ -328,7 +328,8 @@ public sealed class BattleSimulation
                 moveElapsed,
                 opponentDistance,
                 OpponentBodyDistance(fighter, opponent, opponentX, definition, _roster.Fighter(opponentSeat)),
-                fighter.CrouchReturnTicks, fighter.GroundReaction.Crouching);
+                fighter.CrouchReturnTicks, fighter.GroundReaction.Crouching,
+                !opponent.LogicState.IsAirborneLike() && !HasHitMoveType(opponent.LogicState));
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -338,6 +339,14 @@ public sealed class BattleSimulation
             FixedPoint vy = FixedPoint.Zero;
             FighterLogicState logic = tick.State;
             JumpKind jumpKind = JumpKind.None;
+
+            if (tick.MoveId is { } runningMove && definition.FindMoveById(runningMove) is { } authoredMove)
+            {
+                // The committed instance owns the tick. Freeze and interruption leave no deferred movement.
+                FixedPoint step = authoredMove.PositionStepAt(tick.MoveElapsedFrames);
+                Int128 offset = (Int128)step.RawValue * (fighter.Facing == Facing.Right ? 1 : -1);
+                x = FixedPoint.FromRaw((long)Int128.Clamp((Int128)x.RawValue + offset, long.MinValue, long.MaxValue));
+            }
 
             // 落地计划（D93）：只有空中受击会消耗它们，落地后立即清空。
             int landingKnockdown = fighter.LandingKnockdownFrames;
@@ -464,7 +473,7 @@ public sealed class BattleSimulation
                         guardWalkMomentum = residual;
                 }
             }
-            // PreJump / Crouching / 动作三阶段 / 倒地 / 起身：原地（速度归零，坐标不变）。
+            // PreJump / Crouching / 倒地 / 起身不移动。动作只应用配置的位移步骤。
 
             candidates[i] = new FighterCandidate
             {

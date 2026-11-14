@@ -536,7 +536,8 @@ public sealed class RecognitionState
         {
             if (definition.ReserveOnEdgeDirection
                 ? !inHitPause && !sequence.Contains(rootDirection)
-                : definition.BufferLifetimeFrames == 0 && !sequence.Contains(directions[^1].Direction))
+                : definition.BufferLifetimeFrames == 0 && definition.BufferPolicy is null &&
+                  !sequence.Contains(directions[^1].Direction))
                 return false;
             pressIndex = FindPressIndex(presses, definition.RequiredButtons, frame, tolerance: 0);
             if (pressIndex < 0)

@@ -247,7 +247,10 @@ public static class FighterDataLoader
                     RequiredInt(buffer.HelperReleasedDecay, source, path + ".bufferPolicy.helperReleasedDecay"))
                 : null,
             matchHeldMotion: dto.MatchHeldMotion, reserveGroundInput: dto.ReserveGroundInput,
-            matchCompletedMotion: dto.MatchCompletedMotion, reserveOnEdgeDirection: dto.ReserveOnEdgeDirection),
+            matchCompletedMotion: dto.MatchCompletedMotion, reserveOnEdgeDirection: dto.ReserveOnEdgeDirection,
+            groundReservationTarget: dto.GroundReservationTarget is { } target
+                ? new GroundReservationTarget(Fraction(target.MaximumBodyDistance, source,
+                    path + ".groundReservationTarget.maximumBodyDistance"), target.RequiresGroundedNonHitstun) : null),
         source, path);
 
     private static MoveDefinition BuildMove(MoveDto dto, string source, string path) => Guard(
@@ -273,8 +276,13 @@ public static class FighterDataLoader
             guardThreatFrames: dto.GuardThreatFrames, returnsToCrouch: dto.ReturnsToCrouch,
             reservedCancels: dto.ReservedCancels is { } reserved
                 ? BuildArray(reserved, source, path + ".reservedCancels", BuildReservedCancel) : null,
-            walkOnCrouchRecovery: dto.WalkOnCrouchRecovery),
+            walkOnCrouchRecovery: dto.WalkOnCrouchRecovery,
+            positionSteps: dto.PositionSteps is { } steps
+                ? BuildArray(steps, source, path + ".positionSteps", BuildMovePositionStep) : null),
         source, path);
+
+    private static MovePositionStep BuildMovePositionStep(MovePositionStepDto dto, string source, string path) =>
+        new(RequiredInt(dto.Frame, source, path + ".frame"), Fraction(dto.X, source, path + ".x"));
 
     private static MoveHurtboxSpan BuildMoveHurtboxSpan(MoveHurtboxSpanDto dto, string source, string path) => Guard(
         () => new MoveHurtboxSpan(RequiredInt(dto.Frames, source, path + ".frames"),
