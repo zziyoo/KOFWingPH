@@ -317,7 +317,8 @@ public static class FighterDataLoader
             launchGravity: dto.LaunchGravity is { } gravity ? Fraction(gravity, source, path + ".launchGravity") : null,
             launchReaction: dto.LaunchReaction is { } launch ? BuildLaunchReaction(launch, source, path + ".launchReaction") : null,
             rejectsLyingTargets: dto.RejectsLyingTargets,
-            rejectsFallingTargets: dto.RejectsFallingTargets),
+            rejectsFallingTargets: dto.RejectsFallingTargets,
+            retainsGroundGuardOnFollowup: dto.RetainsGroundGuardOnFollowup),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>

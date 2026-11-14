@@ -11,6 +11,7 @@ STAGE17 = runpy.run_path(str(HERE.parent / 'Stage17Reference/Check-Traces.py'))
 PREFIX = 'default-crouch-light-kick-'
 MODE2 = 'mode2-crouch-light-kick-'
 FIXTURES = json.loads((HERE / 'Cases.json').read_bytes())
+GUARD_CONTROLS = json.loads((HERE / 'GuardControls.json').read_bytes())
 BODY = {'hit', 'crouch-hit', 'stand-guard', 'crouch-guard', 'whiff', 'mirror-hit', 'p2-hit', 'interrupt'}
 ATTACK_BOX = [0, -16, 63, -1]
 HURT_BOX = [-20, -72, 19, -1]
@@ -27,11 +28,11 @@ def physical_bits(fixture, seat, f, mirrored):
     return bits
 
 
-def read_cases(directory):
+def read_cases(directory, *, fixtures=FIXTURES):
     run = json.loads((directory / 'run-metadata.json').read_bytes())
     for name, case in STAGE20['read_cases'](directory, capture_profile='Stage25',
                                           extra_phases=('hitdef', 'rng-draw', 'var21-draw')):
-        fixture = FIXTURES[name]
+        fixture = fixtures[name]
         metadata = json.loads((directory / f'{name}-metadata.json').read_bytes())['physical_inputs']
         assert metadata == fixture, name
         assert run['source_sha256']['common_kof.cns'] == '3b934b5390e0b805df549db35601b4882d6c28b9165b56e3dcff72d3bd86c65b'
@@ -282,16 +283,40 @@ def verify_cases(cases):
             **verify_routes(cases)}
 
 
+def verify_guard_controls(cases):
+    assert cases.keys() == GUARD_CONTROLS.keys(), cases.keys()
+    for name, case in cases.items():
+        verify_case(name, case)
+        phases, _, contacts = case
+        releases_down = name.endswith('release-down-22')
+        second = (25, 2, 44, False) if releases_down else (25, 2, 0, True)
+        assert contacts == [(8, 2, 0, True), second], (name, contacts)
+        target_at = lambda frame: char_at(phases, frame, 1)
+        assert all(target_at(frame)['anim'] == 151 and not target_at(frame)['ctrl'] for frame in range(22, 26)), name
+        reaction = target_at(26)
+        assert (reaction['state'], reaction['time'], reaction['anim'], reaction['hitShake']) == (
+            (5000, 1, 5010, 12) if releases_down else (152, 1, 151, 10)), name
+        assert next(frame for frame in range(26, 75) if target_at(frame)['ctrl']) == (
+            49 if releases_down else 46), name
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directories', nargs='+', type=Path)
-    parser.add_argument('--body-only', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--body-only', action='store_true')
+    mode.add_argument('--guard-controls', action='store_true')
     args = parser.parse_args()
     cases = {}
+    fixtures = GUARD_CONTROLS if args.guard_controls else FIXTURES
     for directory in args.directories:
-        for name, case in read_cases(directory):
+        for name, case in read_cases(directory, fixtures=fixtures):
             assert name not in cases, name
             cases[name] = case
+    if args.guard_controls:
+        verify_guard_controls(cases)
+        print(f'PASS: {len(cases)} supplementary native State 430 guard controls')
+        return
     if not args.body_only:
         assert cases.keys() == FIXTURES.keys(), (FIXTURES.keys() - cases.keys(), cases.keys() - FIXTURES.keys())
     print(json.dumps(verify_cases(cases), indent=2))

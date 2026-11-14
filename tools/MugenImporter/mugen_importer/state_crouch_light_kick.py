@@ -259,7 +259,8 @@ def apply_chains(audit, native, fighter):
         # still sees the previously committed phase on the boundary.
         phases = 'Recovery' if number == 400 else 'Active,Recovery'
         window = {'windowFirstFrame': first, 'windowLastFrame': last, 'phases': phases}
-        targets = MOVE_IDS if number == 430 else (430,)
+        # Both standing punches use 5A. Try the distance-limited near punch before the far fallback.
+        targets = (205, 200, 400, 430) if number == 430 else (430,)
         for target in targets:
             target_id = moves[target]['moveId']
             if any(rule['targetMoveId'] == target_id for rule in move['cancels']):
@@ -329,6 +330,11 @@ def build_profile(audit, native, fighter, binding, mode, *, with_chains=True, de
     bind_reactions(audit, native, fighter, binding)
     if with_chains:
         apply_chains(audit, native, fighter)
+        # These are the two crouching follow-up normals measured during blockstun.
+        crouch_punch = unique((m for m in fighter['moves'] if m['moveId'] == MOVE_IDS[400]), 'frozen State 400')
+        for followup in (move, crouch_punch):
+            followup_attack, = followup['attacks']
+            followup_attack['retainsGroundGuardOnFollowup'] = True
     return fighter, binding
 
 

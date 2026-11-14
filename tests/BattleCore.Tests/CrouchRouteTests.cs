@@ -292,7 +292,36 @@ public sealed class CrouchRouteTests
         Assert.Equal(started.FrameBefore, actual[^1].State.Fighter(1).LastHitAttackStartFrame);
     }
 
-    private static FighterDefinition KickFighter(bool retainHelper = false)
+    [Theory]
+    [InlineData(false, InputBits.Down | InputBits.Right, BattleEventType.Hit)]
+    [InlineData(true, InputBits.Down | InputBits.Right, BattleEventType.Blocked)]
+    [InlineData(true, InputBits.Down, BattleEventType.Blocked)]
+    [InlineData(true, InputBits.Right, BattleEventType.Hit)]
+    public void NewKickInstanceCanRespectAnExistingCrouchingGuard(bool retainGuard, InputBits afterFirstBlock,
+        BattleEventType secondResult)
+    {
+        FighterDefinition fighter = KickFighter(retainGuard: retainGuard);
+        var simulation = new BattleSimulation(new FightRoster(fighter, fighter));
+        var state = new BattleState(0, [FighterState.Create(0, 1000, -30, Facing.Right),
+            FighterState.Create(1, 1000, 30, Facing.Left)], stateVersion: 15);
+        var contacts = new List<BattleEvent>();
+        for (int frame = 0; frame <= 20; frame++)
+        {
+            InputBits attack = frame is 0 or 17 ? InputBits.Down | InputBits.LightKick : InputBits.Down;
+            InputBits defense = frame < 15 ? InputBits.Down | InputBits.Right : afterFirstBlock;
+            BattleStepResult step = simulation.Step(state, new FrameInput(frame, attack, defense));
+            contacts.AddRange(step.Events.Where(evt => evt.Type is BattleEventType.Hit or BattleEventType.Blocked));
+            state = step.State;
+        }
+        Assert.Collection(contacts,
+            first => Assert.Equal((3, BattleEventType.Blocked), (first.Frame, first.Type)),
+            second => Assert.Equal((20, secondResult), (second.Frame, second.Type)));
+        Assert.Equal(17, state.Fighter(1).LastHitAttackStartFrame);
+        if (retainGuard && secondResult == BattleEventType.Hit)
+            Assert.False(state.Fighter(1).GroundReaction.Crouching);
+    }
+
+    private static FighterDefinition KickFighter(bool retainHelper = false, bool retainGuard = false)
     {
         var light = new CommandDefinition("5A", [], InputBits.LightPunch, 1, 0, priority: 1, bufferLifetimeFrames: 2);
         var kick = new CommandDefinition("2C", [], InputBits.LightKick, 1, 0, bufferLifetimeFrames: 2);
@@ -305,15 +334,20 @@ public sealed class CrouchRouteTests
                 cancels: [new CancelDefinition(Wave, 4, 6, MoveCancelPhases.Active, allowWhiff: true)]),
             new(Wave, "236A", 15, 2, 35),
             new(Kick, "2C", 3, 3, 8, MoveAllowedStates.Crouching,
-                attacks: [new AttackDefinition(45, 8, 20, 7, height: AttackHeight.Low, hitstunFrames: 11,
-                    hitstopByOutcome: new(new(11, 13), new(11, 11)), dynamicDamage: new(7, 8, false))],
+                attacks: [new AttackDefinition(45, 8, 20, 7, height: AttackHeight.Low, hitstunFrames: 11, blockstunFrames: 10,
+                    hitstopByOutcome: new(new(11, 13), new(11, 11)), dynamicDamage: new(7, 8, false),
+                    groundHitReaction: GroundHitReaction.LightLow, retainsGroundGuardOnFollowup: retainGuard)],
                 cancels: [new CancelDefinition(Stand, 6, 13, allowWhiff: true, standingInputOnly: true, maximumInputAge: 2,
                     retainBufferedMotionHelper: retainHelper),
                     new CancelDefinition(Kick, 6, 13, allowWhiff: true, allowSameMove: true, maximumInputAge: 2)],
                 returnsToCrouch: true),
         };
         var rules = new DynamicDamageRules(DamageRatio.One, DamageRatio.One, DamageRatio.One, DamageRatio.One, 1, 2);
-        return new FighterDefinition("Test", [light, kick, wave], moves, useCommandPriority: true, damageRules: rules);
+        return new FighterDefinition("Test", [light, kick, wave], moves, useCommandPriority: true, damageRules: rules,
+            groundHurtboxes: retainGuard ? new GroundHurtboxes([new(-30, 30, 0, 120)], [new(-30, 30, 0, 70)],
+                lightHitstun: [new(1, [new(-30, 30, 0, 120)])],
+                crouchingLightHitstun: [new(1, [new(-30, 30, 0, 70)])],
+                standingGuard: [new(-30, 30, 0, 120)], crouchingGuard: [new(-30, 30, 0, 70)]) : null);
     }
 
     [Theory]

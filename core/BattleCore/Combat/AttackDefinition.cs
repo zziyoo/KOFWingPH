@@ -109,7 +109,8 @@ public sealed class AttackDefinition
         FixedPoint? launchGravity = null,
         LaunchReactionProfile? launchReaction = null,
         bool rejectsLyingTargets = false,
-        bool rejectsFallingTargets = false)
+        bool rejectsFallingTargets = false,
+        bool retainsGroundGuardOnFollowup = false)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -200,6 +201,7 @@ public sealed class AttackDefinition
         LaunchReaction = launchReaction;
         RejectsLyingTargets = rejectsLyingTargets;
         RejectsFallingTargets = rejectsFallingTargets;
+        RetainsGroundGuardOnFollowup = retainsGroundGuardOnFollowup;
         KnockdownFrames = knockdownFrames;
         WakeupFrames = wakeupFrames;
         HitstopFrames = hitstopFrames;
@@ -218,6 +220,7 @@ public sealed class AttackDefinition
     public LaunchReactionProfile? LaunchReaction { get; }
     public bool RejectsLyingTargets { get; }
     public bool RejectsFallingTargets { get; }
+    public bool RetainsGroundGuardOnFollowup { get; }
 
     /// <summary>攻击框中心相对脚底锚点的向上偏移（世界单位）。</summary>
     public FixedPoint OffsetUp { get; }

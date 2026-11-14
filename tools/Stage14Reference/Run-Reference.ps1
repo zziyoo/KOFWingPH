@@ -9,7 +9,8 @@ param(
     [ValidateRange(75, 600)]
     [int]$LastFrame = 75,
     [string[]]$Cases,
-    [string]$PreparedEngineDirectory
+    [string]$PreparedEngineDirectory,
+    [switch]$Stage25GuardControls
 )
 
 $ErrorActionPreference = 'Stop'
@@ -341,10 +342,14 @@ if ($CaptureProfile -eq 'Stage24') {
         }
     }
 }
+if ($Stage25GuardControls -and $CaptureProfile -ne 'Stage25') {
+    throw '-Stage25GuardControls requires -CaptureProfile Stage25'
+}
 $physicalCases = $null
 if ($CaptureProfile -eq 'Stage25') {
     $captureDir = Join-Path $root 'tools/Stage15Reference'
-    $physicalCases = Get-Content -LiteralPath (Join-Path $root 'tools/Stage25Reference/Cases.json') -Raw |
+    $caseFile = if ($Stage25GuardControls) { 'GuardControls.json' } else { 'Cases.json' }
+    $physicalCases = Get-Content -LiteralPath (Join-Path $root "tools/Stage25Reference/$caseFile") -Raw |
         ConvertFrom-Json -AsHashtable
     $distances = [ordered]@{}
     foreach ($case in $physicalCases.GetEnumerator()) { $distances[$case.Key] = $case.Value.distance }

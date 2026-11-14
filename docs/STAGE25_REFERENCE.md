@@ -57,3 +57,13 @@ py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-repro/resul
 1. **动作中拒绝**。F7 的有效 `236+x`（旧 tick 2）以及 F10 冻结时完成的有效手势都没有 1000。F7 的 x 也在普通技许可前过期。F9 的短按在 F11 以普通 x 进入 200，F12、F18 的新手势当帧回落 200，F12 消费时仍有下则进入 400。F18 后根手势失效，普通技已提交，Helper 的 Wave 和前＋x 分别经 11／7／3／−1 和 3／2／1／0 过期。自然恢复 F19 若只输入前＋x 而未做 236，则进延期 300。
 2. **先衔接再取消**。F11 430→400，F15 400 旧 tick 4 的新手势经 `var(1)=1` 取消到 1000。另一场 F17 430→200，继续按住 x 到 F20，F21 200 旧 tick 4 用仍有效的 Helper Wave 取消到 1000，无新手势。对应松开 x 的 F17 样本只有 430→200。
 3. **自然恢复入口**。空挥 F19、命中 F30 的 430 旧 tick 14 由 `var(2)=1` 正常进入 1000，`var(1)=0` 且原状态仍未提交 `ctrl=1`。命中样本 Helper F45 出生、F46 命中。空挥 F19 先前走进入 20，F20 新手势由常规控制权进入 1000。模式 2 同样的 F19 自然输入进延期 1050。
+## 连续格挡补充对照
+
+保留 132 场主体矩阵。四个独立控制场使用同一固定原引擎和种子，排程由 `tools/Stage25Reference/GuardControls.json` 提供。首次 F8 格挡后，F22 的新 430／400 实例于 F25 再接触。F22 或 F24 松开后方向但保持下方向时，F25 仍格挡且零削血。目标在 F26 重新进入 State 152／Action 151，F46 恢复控制。F22 只松开下方向则先前 Action 151 保持到 F25，第二次低段接触转为命中 44 HP、停顿 11／13。F26 切至站姿 State 5000／Action 5010，F49 恢复控制。当前方向和锁存显示姿态在新接触时分别判断。补充日志位于 `local-mugen/stage25-native-guard-controls-check.log`。
+
+```powershell
+& tools/Stage14Reference/Run-Reference.ps1 -CaptureProfile Stage25 -Stage25GuardControls -LastFrame 85 `
+  -RunDirectory local-mugen/stage25-native-guard-controls-repro `
+  -PreparedEngineDirectory local-mugen/stage25-native-repro/engine
+py tools/Stage25Reference/Check-Traces.py local-mugen/stage25-native-guard-controls-repro/results --guard-controls
+```

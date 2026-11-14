@@ -358,6 +358,9 @@ public sealed class AttackDto
     [JsonPropertyName("rejectsFallingTargets")]
     public bool RejectsFallingTargets { get; set; }
 
+    [JsonPropertyName("retainsGroundGuardOnFollowup")]
+    public bool RetainsGroundGuardOnFollowup { get; set; }
+
     [JsonPropertyName("launchGravity")]
     public FractionDto? LaunchGravity { get; set; }
 

@@ -119,6 +119,7 @@ public sealed class BattleSimulation
         public Facing Facing;
         public bool UpHeld;
         public bool BackHeld;
+        public bool DownHeld;
         public int Health;
         public int StunRemainingFrames;
         public int MoveStartedFrame;
@@ -210,6 +211,7 @@ public sealed class BattleSimulation
             //    N 帧停顿 = 冻结后续 N 个逻辑帧，第 N+1 帧恢复（计数器逐帧 −1）。
             if (fighter.HitstopRemainingFrames > 0 || state.PendingThrow is not null)
             {
+                RelativeInput frozenInput = DirectionResolver.Resolve(bits, fighter.Facing);
                 RecognitionState frozenRecognition = fighter.RecognitionState.Advance(
                     bits, fighter.Facing, state.Frame, i, definition.Commands,
                     useCommandPriority: definition.UseCommandPriority, inHitPause: fighter.HitstopRemainingFrames > 0);
@@ -229,7 +231,8 @@ public sealed class BattleSimulation
                     Facing = fighter.Facing,
                     UpHeld = fighter.UpHeldLastFrame,
                     // 防御资格仍按本帧输入解析（停顿不额外授予/剥夺防御）。
-                    BackHeld = DirectionResolver.Resolve(bits, fighter.Facing).Back,
+                    BackHeld = frozenInput.Back,
+                    DownHeld = frozenInput.Down,
                     Health = fighter.Health,
                     StunRemainingFrames = fighter.StunRemainingFrames,
                     MoveStartedFrame = fighter.MoveStartedFrame,
@@ -275,6 +278,7 @@ public sealed class BattleSimulation
                     Facing = reaction.Facing,
                     UpHeld = resolved.Up,
                     BackHeld = resolved.Back,
+                    DownHeld = resolved.Down,
                     Health = reaction.Health,
                     StunRemainingFrames = reaction.StunRemainingFrames,
                     MoveStartedFrame = -1,
@@ -461,6 +465,7 @@ public sealed class BattleSimulation
                 Facing = fighter.Facing,
                 UpHeld = resolved.Up,
                 BackHeld = resolved.Back,
+                DownHeld = resolved.Down,
                 Health = fighter.Health,
                 StunRemainingFrames = stunRemaining,
                 MoveStartedFrame = tick.MoveStartedFrame,
@@ -572,8 +577,7 @@ public sealed class BattleSimulation
             ApplyStrikeClash(nextFighters, _roster);
 
         var outcomes = new CombatSettlement?[2];
-        ApplyCombatSettlement(state.Frame, nextFighters, contacts,
-            candidates[0].BackHeld, candidates[1].BackHeld, outcomes);
+        ApplyCombatSettlement(state.Frame, nextFighters, contacts, candidates, outcomes);
 
         // ── 第 6b 阶段：投技仲裁与结算（D97）——必须晚于打击结算：有效打击会中断投技。
         PendingThrow? pending = state.PendingThrow;
@@ -875,8 +879,7 @@ public sealed class BattleSimulation
         int frame,
         FighterState[] fighters,
         IReadOnlyList<AttackContact> contacts,
-        bool backHeldP1,
-        bool backHeldP2,
+        FighterCandidate[] candidates,
         CombatSettlement?[] outcomes)
     {
         if (contacts.Count == 0)
@@ -885,9 +888,8 @@ public sealed class BattleSimulation
         // 同时性：先解析双方结果（此时数组仍是结算前状态），再统一应用。
         // （CombatSettlement 含 string 引用，不可 stackalloc；接触帧才到达此处，2 元素分配可忽略。）
         for (int defender = 0; defender < fighters.Length; defender++)
-            outcomes[defender] = ResolveSettlement(
-                defender, fighters, contacts,
-                defender == 0 ? backHeldP1 : backHeldP2);
+            outcomes[defender] = ResolveSettlement(defender, fighters, contacts,
+                candidates[defender].BackHeld, candidates[defender].DownHeld);
 
         for (int defender = 0; defender < fighters.Length; defender++)
         {
@@ -928,7 +930,8 @@ public sealed class BattleSimulation
                 fighters[defender] = defenderState with
                 {
                     LogicState = defenderState.LogicState.IsAirborneLike() ? FighterLogicState.AirBlockstun : FighterLogicState.Blockstun,
-                    GroundGuardCrouching = ResolveGroundGuard(defenderState, _roster.Fighter(defender)),
+                    GroundGuardCrouching = settled.FollowupGuardCrouching ??
+                        ResolveGroundGuard(defenderState, _roster.Fighter(defender)),
                     MoveId = null,
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
@@ -1022,7 +1025,8 @@ public sealed class BattleSimulation
                 fighters[defender] = defenderState with
                 {
                     LogicState = FighterLogicState.Hitstun,
-                    GroundReaction = ResolveGroundReaction(defenderState, _roster.Fighter(defender), settled.GroundReaction),
+                    GroundReaction = ResolveGroundReaction(defenderState, _roster.Fighter(defender),
+                        settled.GroundReaction, settled.FollowupGuardCrouching),
                     MoveId = null,
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
@@ -1884,7 +1888,8 @@ public sealed class BattleSimulation
         int defender,
         FighterState[] fighters,
         IReadOnlyList<AttackContact> contacts,
-        bool backHeld)
+        bool backHeld,
+        bool downHeld)
     {
         FighterState attackerState = fighters[1 - defender];
         if (attackerState.MoveStartedFrame < 0 || attackerState.MoveId is not { } moveId ||
@@ -1903,20 +1908,24 @@ public sealed class BattleSimulation
             uint group = attack.ContactGroup == 0 ? 0 : 1u << (attack.ContactGroup - 1);
             if (sameInstance && (group == 0 || (priorGroups & group) != 0))
                 continue;
-            return ResolveAttack(attack, moveId, attackerState, defenderState, backHeld, priorGroups, group,
+            return ResolveAttack(attack, moveId, attackerState, defenderState, backHeld, downHeld, priorGroups, group,
                 _roster.Fighter(1 - defender).DamageRules, _roster.Fighter(defender).DamageRules);
         }
         return null;
     }
 
     private static CombatSettlement ResolveAttack(AttackDefinition attack, string moveId,
-        FighterState attackerState, FighterState defenderState, bool backHeld, uint priorGroups, uint group,
+        FighterState attackerState, FighterState defenderState, bool backHeld, bool downHeld, uint priorGroups, uint group,
         DynamicDamageRules? attackerRules, DynamicDamageRules? defenderRules)
     {
         // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
         // D131：正常 Airborne 可防 High/Mid，AirHitstun 与动作状态没有防御资格。
-        bool guarding = CanGuard(defenderState.LogicState, backHeld, attack.Height) ||
-            (priorGroups != 0 && defenderState.LogicState == FighterLogicState.Blockstun && attack.Height == AttackHeight.Mid);
+        bool? followupGuardCrouching = attack.RetainsGroundGuardOnFollowup && defenderState.LogicState == FighterLogicState.Blockstun
+            ? downHeld : null;
+        bool guarding = followupGuardCrouching is { } crouching
+            ? GuardCovers(attack.Height, crouching ? FighterLogicState.Crouching : FighterLogicState.Standing)
+            : CanGuard(defenderState.LogicState, backHeld, attack.Height) ||
+                (priorGroups != 0 && defenderState.LogicState == FighterLogicState.Blockstun && attack.Height == AttackHeight.Mid);
 
         // 击退/击飞方向（D92/D93）：按<b>命中时双方的权威相对位置</b>决定「远离攻击者」；
         // 位置完全相同时退化为攻击者的朝向（确定性平局规则）。
@@ -1941,7 +1950,7 @@ public sealed class BattleSimulation
                 KnockbackX: knockbackX, KnockbackFriction: friction,
                 LaunchVelocityX: FixedPoint.Zero, LaunchVelocityY: FixedPoint.Zero,
                 KnockdownFrames: 0, WakeupFrames: 0,
-                Hitstop: attack.ResolveMeleeHitstop(blocked: true));
+                Hitstop: attack.ResolveMeleeHitstop(blocked: true), FollowupGuardCrouching: followupGuardCrouching);
         }
 
         bool launches = attack.Launches;
@@ -1965,16 +1974,17 @@ public sealed class BattleSimulation
             Hitstop: attack.ResolveMeleeHitstop(blocked: false),
             GroundReaction: attack.GroundReaction,
             LaunchGravity: attack.LaunchGravity,
-            LaunchReaction: attack.LaunchReaction);
+            LaunchReaction: attack.LaunchReaction,
+            FollowupGuardCrouching: followupGuardCrouching);
     }
 
     private static GroundHitReactionState ResolveGroundReaction(
-        FighterState defender, FighterDefinition definition, GroundHitReaction reaction)
+        FighterState defender, FighterDefinition definition, GroundHitReaction reaction, bool? posture = null)
     {
         bool crouching = definition.GroundHurtboxes?.HitReactionTimeline(reaction, crouching: true) is not null &&
             reaction is GroundHitReaction.Heavy or GroundHitReaction.CrouchingLight or GroundHitReaction.HeavyLow or GroundHitReaction.LightLow &&
-            (defender.LogicState == FighterLogicState.Crouching || defender.GroundReaction.Crouching ||
-             defender.IsInMove && definition.FindMoveById(defender.MoveId!)?.AllowedFrom == MoveAllowedStates.Crouching);
+            (posture ?? (defender.LogicState == FighterLogicState.Crouching || defender.GroundReaction.Crouching ||
+             defender.IsInMove && definition.FindMoveById(defender.MoveId!)?.AllowedFrom == MoveAllowedStates.Crouching));
         return definition.GroundHurtboxes?.HitReactionTimeline(reaction, crouching) is null
             ? default : new GroundHitReactionState(reaction, crouching, 1);
     }
@@ -2276,7 +2286,8 @@ public sealed class BattleSimulation
         HitstopPair Hitstop,
         GroundHitReaction GroundReaction = GroundHitReaction.Standard,
         FixedPoint? LaunchGravity = null,
-        LaunchReactionProfile? LaunchReaction = null);
+        LaunchReactionProfile? LaunchReaction = null,
+        bool? FollowupGuardCrouching = null);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。

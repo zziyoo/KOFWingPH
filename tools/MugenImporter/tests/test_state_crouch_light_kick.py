@@ -80,9 +80,9 @@ class OriginalCrouchLightKickTests(unittest.TestCase):
         fighter, _ = kick.build_profile(self.audit, native, *self.frozen('default'), 'default')
         by_id = {move['moveId']: move for move in fighter['moves']}
         crouch_kick = by_id['TerryCrouchLightKick430']
-        self.assertEqual({'TerryStandLightPunch200', 'TerryStandLightPunch205',
-                          'TerryCrouchLightPunch400', 'TerryCrouchLightKick430'},
-                         {route['targetMoveId'] for route in crouch_kick['cancels']})
+        self.assertEqual(['TerryStandLightPunch205', 'TerryStandLightPunch200',
+                          'TerryCrouchLightPunch400', 'TerryCrouchLightKick430'],
+                         [route['targetMoveId'] for route in crouch_kick['cancels']])
         for route in crouch_kick['cancels']:
             self.assertEqual((6, 13, 'Active,Recovery', 2, False, False, True), tuple(route[key] for key in
                              ('windowFirstFrame', 'windowLastFrame', 'phases', 'maximumInputAge',
@@ -100,6 +100,10 @@ class OriginalCrouchLightKickTests(unittest.TestCase):
                          sorted((key for key in command_order if command_order[key] >= -1),
                                 key=command_order.get, reverse=True))
         self.assertGreater(command_order['2C'], command_order['2D'])
+        for move in fighter['moves']:
+            for attack in move['attacks']:
+                self.assertEqual(move['moveId'] in ('TerryCrouchLightPunch400', kick.MOVE),
+                                 attack.get('retainsGroundGuardOnFollowup', False))
         frozen_wave = [(move['moveId'], c) for move in self.frozen('default')[0]['moves'] for c in move['cancels']
                        if c['targetMoveId'] == wave.MOVE_ID]
         self.assertEqual(frozen_wave, [(move['moveId'], c) for move in fighter['moves'] for c in move['cancels']
