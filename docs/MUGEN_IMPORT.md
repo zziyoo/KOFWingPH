@@ -344,3 +344,32 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_standing_ligh
 ```
 
 固定轨迹可来自多个完整批次，每个 `results` 通过一个 `--reference` 传入。核对可重现性时在独立输出目录用同一批次重新生成，并比较六份 JSON SHA-256。 [本轮验收与证据](STAGE26_ACCEPTANCE.md)
+
+## 阶段 27 站重脚与近远选招
+
+`state_standing_heavy_kicks` 从阶段 26 两套冻结预设生成独立预设。导入器逐一校验六份基础 JSON 的 SHA-256，并对照 Terry 原包、Manifest 与 IKEMEN GO 逐帧轨迹。`5D` 接替站重脚占位，按出招时的身体距依次检查近身 245（≤48）和远身 240。站、蹲重脚共同使用原版 b 的根指令和 Helper 时钟。角色 HitPause 保留根命令，全局 Pause 允许 Helper 锁存和衰减。 [原引擎参考](STAGE27_REFERENCE.md)
+
+默认远重脚绑定 Action 240，共 38 tick。模式 2 的 State 240 使用 Action 241，共 43 tick。两种 Action 的 `PosAdd` 由 `positionSteps` 数据表达并逐项核对原版轨迹。两套预设的近重脚均为 Action 245，共 29 tick，使用 5002／5007 站姿和 5022／5027 蹲姿重受击。默认 245 在旧 tick 4–8 复用弱 Wave 取消，模式 2 保留同一窗口的 1050 候选。阶段 27 的扫倒 440 启用既有 `walkOnCrouchRecovery`。
+
+地面 y+b 保留 250，身体距 ≤11 时前／后＋b 对可投地面目标保留 805。两个预设均保留这些 CMD 候选的条件与顺序，250、805 本体延期。245 的显式窗口允许既有 300／310 候选保留。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+$env:NEWKOF_TERRY_AUDIT = (Get-Location).Path
+$base = 'data/imported-characters/terry98-stage26-final'
+$profile = 'data/imported-characters/terry98-stage27-final'
+$source = @('local-mugen/terry.zip','data/imported-characters/terry98/manifest.json')
+$native = 'local-mugen/stage27-native-canonical'
+$batches = Get-Content tools/Stage27Reference/Batches.json -Raw | ConvertFrom-Json -AsHashtable
+$refs = @($batches.Keys | ForEach-Object { '--reference'; "$native/$_/results" })
+py -m mugen_importer.state_standing_heavy_kicks @source --base $base @refs --output $profile
+if ($LASTEXITCODE) { throw 'Stage 27 conversion failed' }
+foreach ($mode in 'default','mode2') {
+  py tools/Stage14Validation/stage_assets.py --binding "$profile/$mode.binding.json" `
+    --destination "data/imported-characters/terry98-stage27-$mode"
+  if ($LASTEXITCODE) { throw "Stage 27 $mode visual staging failed" }
+}
+py -m unittest discover -s tools/MugenImporter/tests -p test_state_standing_heavy_kicks.py
+```
+
+完整转换要求原版本体、移动和输入路径门禁齐全。可用 `--body-only` 和新输出目录独立生成站重脚本体验证预设，视觉别名为 `terry98-stage27-body-default` 和 `terry98-stage27-body-mode2`。转换重复执行应选择空目录，随后比较六份 JSON 的 SHA-256。 [原引擎采集和复现](../tools/Stage27Reference/README.md) · [阶段验收](STAGE27_ACCEPTANCE.md)
