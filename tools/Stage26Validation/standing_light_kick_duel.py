@@ -121,7 +121,9 @@ def verify_recovery_boundary(name, phases, moves):
     return {'nativeFrame': recovered, 'nativeP2X': native_p2, 'hostP2X': [raw / Q16 for raw in host_p2]}
 
 
-def wave_attempts(profile, phases, commands):
+def wave_attempts(profile, phases, commands, *, lengths=LENGTH, explicit_windows=None):
+    if explicit_windows is None:
+        explicit_windows = {235: range(5, 9)}
     wave_ids = {item['commandId'] for item in profile['commands'] if item.get('matchHeldMotion')}
     mirror = phases['before-command'][0]['chars'][0]['facing'] < 0
     host = indexed(commands['buffer'])
@@ -129,7 +131,7 @@ def wave_attempts(profile, phases, commands):
     for frame, world in phases['after-command'].items():
         for native_seat, fighter in enumerate(world['chars']):
             state = fighter['state']
-            if state not in KICKS or not fighter['powerWaveCommand']:
+            if state not in lengths or not fighter['powerWaveCommand']:
                 continue
             seat, logic = native_seat ^ mirror, frame + 14
             row = host[seat, logic]
@@ -139,20 +141,25 @@ def wave_attempts(profile, phases, commands):
             if fresh_x:
                 assert_equal(True, any(item[0] in wave_ids and item[2] == str(logic) for item in candidates),
                              f'host recognizes the native root Wave gesture at F{frame}')
-            if fighter['time'] < LENGTH[state] and (state == 230 or not 5 <= fighter['time'] <= 8):
+            if fighter['time'] < lengths[state] and fighter['time'] not in explicit_windows.get(state, ()):
                 assert_equal(False, row['committed'] == NATIVE_MOVES[1000], f'no direct Wave permission at F{frame}')
             attempts.append({'frame': frame, 'seat': seat, 'source': state, 'sourceTick': fighter['time'],
                              'helperWave': fighter['helperWave'], 'host': row})
     return attempts
 
 
-def verify_body(profile, changes, name, scene, phases, events, moves, reentry, lines):
-    attacks = {move['moveId']: move['attacks'][0] for move in profile['moves'] if move['moveId'] in KICKS.values()}
+def verify_body(profile, changes, name, scene, phases, events, moves, reentry, lines, *,
+                states=KICKS, lengths=LENGTH, active=ACTIVE, reservations=DEFERRED, native_moves=NATIVE_MOVES,
+                explicit_windows=None, selection_check=verify_selection, recovery_boundary=verify_recovery_boundary,
+                wave_launch_check=check_wave_launch):
+    if explicit_windows is None:
+        explicit_windows = {235: range(5, 9)}
+    attacks = {move['moveId']: move['attacks'][0] for move in profile['moves'] if move['moveId'] in states.values()}
     damage = indexed(audit_rows(lines, 'DamageAudit'))
     assert_equal(set(moves), set(damage), 'complete damage audit')
     assert_equal(set(moves), set(reentry), 'complete attack instance audit')
     check_rng(profile, damage, lines)
-    commands = verify_commands(profile, scene, phases, changes, events, moves, damage, lines, reservations=DEFERRED,
+    commands = verify_commands(profile, scene, phases, changes, events, moves, damage, lines, reservations=reservations,
                                sweep_kick_targets=(430, *KICKS))
     commits = {(commit['native']['hostSeat'], int(commit['host']['logic'])): commit['host']
                for commit in commands['commits']}
@@ -162,22 +169,22 @@ def verify_body(profile, changes, name, scene, phases, events, moves, reentry, l
         native_x = initial[seat ^ mirror]['pos'][0]
         assert_equal(round(native_x * Q16), int(moves[seat, 13]['x']), 'exact native initial coordinate')
     last = min(max(phases['after-collision']) + 14, max(logic for _, logic in moves))
-    comparable_end = min((change['frame'] + 13 for change in changes if change['to'] in DEFERRED), default=last)
+    comparable_end = min((change['frame'] + 13 for change in changes if change['to'] in reservations), default=last)
     samples = []
     for entry in scene.moves:
-        if entry['to'] not in KICKS:
+        if entry['to'] not in states:
             continue
         state, start, seat = entry['to'], entry['frame'] + 14, entry['hostSeat']
         compared_through = start - 1
         for logic in range(start, min(last, comparable_end) + 1):
             row = moves[seat, logic]
-            if row['move'] != KICKS[state] or reentry[seat, logic]['started'] != str(start):
+            if row['move'] != states[state] or reentry[seat, logic]['started'] != str(start):
                 break
             source = phases['after-collision'][logic - 14]['chars'][seat ^ mirror]
             elapsed = int(row['elapsed'])
             assert_equal((state, 1, elapsed + 1), (source['state'], source['stateType'], source['time']),
                          f'native standing kick clock at L{logic}')
-            assert_equal(elapsed in ACTIVE[state], bool(row['attacks']), f'State {state} active window at L{logic}')
+            assert_equal(elapsed in active[state], bool(row['attacks']), f'State {state} active window at L{logic}')
             assert_equal(native_boxes(source, 'clsn1'), local_boxes(row, 'attacks'), f'State {state} Clsn1 at L{logic}')
             assert_equal(native_boxes(source, 'clsn2'), local_boxes(row, 'hurt'), f'State {state} Clsn2 at L{logic}')
             compared_through = logic
@@ -204,30 +211,30 @@ def verify_body(profile, changes, name, scene, phases, events, moves, reentry, l
 
     exits = []
     for change in changes:
-        if change['from'] not in KICKS:
+        if change['from'] not in states:
             continue
         logic, seat, target = change['frame'] + 14, (change['seat'] - 1) ^ mirror, change['to']
         assert_equal(True, logic <= last, 'standing kick exit covered')
         if target in (0, 10, 20):
             next_state = 'Crouching' if target == 10 else 'Standing'
-            assert_equal((LENGTH[change['from']], next_state), (change['stateTime'], moves[seat, logic]['state']),
+            assert_equal((lengths[change['from']], next_state), (change['stateTime'], moves[seat, logic]['state']),
                          'natural standing kick exit')
         if target in REACTIONS:
             assert_equal(('-', ''), (moves[seat, logic]['move'], moves[seat, logic]['attacks']), 'interruption clears attack')
-        if target in NATIVE_MOVES:
+        if target in native_moves:
             assert_equal(change['stateTime'], int(moves[seat, logic - 1]['elapsed']) + 1, 'source effective move tick')
             assert_equal(('0', '1', ''), (commits[seat, logic]['hitpause'], damage[seat, logic]['divisor'],
                                           moves[seat, logic]['attacks']), 'new action clears the previous instance')
         if target in (1000, 1050):
             source = change['from']
             tick = change['stateTime']
-            natural = tick == LENGTH[source]
+            natural = tick == lengths[source]
             assert_equal((0, 1) if natural else (1, 0), (change['var1'], change['var2']), 'Wave permission source')
             if not natural:
-                assert_equal((235, True), (source, 5 <= tick <= 8), 'only the authored near active window permits Wave')
+                assert_equal(True, tick in explicit_windows.get(source, ()), 'only the authored active window permits Wave')
             assert_equal(True, change['powerWaveCommand'] or change['helperWave'] > 0, 'Wave command or Helper buffer')
         assert_equal([], [event for event in events if event['frame'] == logic and event['source'] == seat and
-                          event['kind'] in CONTACTS and event['move'] == KICKS[change['from']]], 'no stale kick contact')
+                          event['kind'] in CONTACTS and event['move'] == states[change['from']]], 'no stale kick contact')
         exits.append({'logic': logic, 'seat': seat, 'source': change['from'], 'sourceTick': change['stateTime'],
                       'nativeDestination': target, 'explicitWavePermission': change['var1'],
                       'naturalPermission': change['var2']})
@@ -235,23 +242,24 @@ def verify_body(profile, changes, name, scene, phases, events, moves, reentry, l
                                                               if helper['moveContact'] == 0]}
                                          for char in world['chars']]} for frame, world in phases['end'].items()}
     return {'kickWindows': samples, 'kickContacts': contacts, 'kickExits': exits, 'commands': commands,
-            'distanceSelections': verify_selection(profile, phases, moves, commands, name),
-            'recoveryMovement': verify_recovery_boundary(name, phases, moves),
-            'standingWaveAttempts': wave_attempts(profile, phases, commands),
-            'waveLaunch': check_wave_launch(name, scene, phases, moves, lines),
+            'distanceSelections': selection_check(profile, phases, moves, commands, name),
+            'recoveryMovement': recovery_boundary(name, phases, moves),
+            'standingWaveAttempts': wave_attempts(profile, phases, commands, lengths=lengths,
+                                                 explicit_windows=explicit_windows),
+            'waveLaunch': wave_launch_check(name, scene, phases, moves, lines),
             'waveEligibility': check_wave_eligibility({**phases, 'end': eligible}, lines)}
 
 
-def kick_contacts(scene, phases):
+def kick_contacts(scene, phases, *, states=KICKS):
     mirror = phases['before-command'][0]['chars'][0]['facing'] < 0
     return (row for row in scene.contacts if row['kind'] in ('Hit', 'Blocked') and
-            phases['after-collision'][row['frame']]['chars'][row['source'] ^ mirror]['state'] in KICKS)
+            phases['after-collision'][row['frame']]['chars'][row['source'] ^ mirror]['state'] in states)
 
 
-def check_recovery(deferred_frame, scene, phases, moves):
-    result = verify_grounded_wave_recovery(scene, phases, moves, crouch_recovery=True)
+def check_recovery(deferred_frame, scene, phases, moves, *, states=KICKS, contact_origins=None, wave_origins=None):
+    result = verify_grounded_wave_recovery(scene, phases, moves, crouch_recovery=True, contact_origins=wave_origins)
     mirror = phases['before-command'][0]['chars'][0]['facing'] < 0
-    for contact in kick_contacts(scene, phases):
+    for contact in kick_contacts(scene, phases, states=states):
         first, seat = contact['frame'], contact['target']
         defender = seat ^ mirror
         if phases['before-command'][first]['chars'][defender]['stateType'] == 4:
@@ -260,20 +268,21 @@ def check_recovery(deferred_frame, scene, phases, moves):
                                              if row['frame'] > first and row['target'] == seat),
                                             max(phases['end']) + 1))
         blocked = contact['kind'] == 'Blocked'
+        x_offset = 0 if contact_origins is None else contact_origins(phases, moves, first, seat)
         for frame in range(first, following):
             native = phases['end'][frame]['chars'][defender]
             actual = moves[seat, frame + 14]
             state = ('Crouching' if native['stateType'] == 2 else 'Standing') if native['ctrl'] else (
                 'Blockstun' if blocked else 'Hitstun')
             assert_equal(state, actual['state'], f'standing kick defender at F{frame}')
-            error = abs(native['pos'][0] - int(actual['x']) / Q16)
+            error = abs(native['pos'][0] + x_offset - int(actual['x']) / Q16)
             if error > 0.005:
                 raise ValueError(f'standing kick defender X differs at F{frame} by {error}')
             if frame > first and not native['ctrl'] and native['state'] in REACTIONS:
                 assert_equal(native_boxes(native, 'clsn2'), local_boxes(actual, 'hurt'), f'reaction Clsn2 at F{frame}')
             if native['ctrl']:
                 result.append({'contact': first, 'recovered': frame, 'seat': seat, 'nativeState': native['state'],
-                               'positionErrorX': error})
+                               'positionErrorX': error, **({'legacyContactXOffset': x_offset} if x_offset else {})})
                 break
         else:
             if following > max(phases['end']):
@@ -281,10 +290,11 @@ def check_recovery(deferred_frame, scene, phases, moves):
     return result
 
 
-def check_poses(phases, deferred_frame, scene, events, committed, timelines, modes):
-    windows = fighter_poses(scene, events, committed, timelines, modes, actions=ACTIONS)
+def check_poses(phases, deferred_frame, scene, events, committed, timelines, modes, *,
+                states=KICKS, actions=ACTIONS, reactions=(150, 151, 5010, 5015, 5020, 5025)):
+    windows = fighter_poses(scene, events, committed, timelines, modes, actions=actions)
     mirror = phases['before-command'][0]['chars'][0]['facing'] < 0
-    for event in kick_contacts(scene, phases):
+    for event in kick_contacts(scene, phases, states=states):
         first, seat = event['frame'], event['target']
         following = min(deferred_frame, next((row['frame'] for row in scene.contacts
                                              if row['frame'] > first and row['target'] == seat),
@@ -292,7 +302,7 @@ def check_poses(phases, deferred_frame, scene, events, committed, timelines, mod
         for frame in range(first + 1, following):
             native = phases['after-collision'][frame]['chars'][seat ^ mirror]
             rendered = committed.get((seat, frame + 15))
-            if rendered is None or native['anim'] not in (150, 151, 5010, 5015, 5020, 5025):
+            if rendered is None or native['anim'] not in reactions:
                 break
             assert_equal((str(native['anim']), ','.join(map(str, native['frame']['sprite']))),
                          (rendered['action'], rendered['sprite']), f'standing kick defender image at F{frame}')
@@ -300,21 +310,22 @@ def check_poses(phases, deferred_frame, scene, events, committed, timelines, mod
     return windows
 
 
-def verify_captured_actions(path, scene):
+def verify_captured_actions(path, scene, states):
     trace = json.loads(path.read_bytes())
     captured = {int(fighter['action']) for image in trace['captures'] for fighter in image['fighters']
                 if fighter['action'].isdigit()}
-    for number in {entry['to'] for entry in scene.moves} & KICKS.keys():
-        if number not in captured:
-            raise ValueError(f'no actual Vulkan image includes Action {number}; select its render window')
+    needed = {entry['to'] for entry in scene.moves} & states.keys()
+    for state in needed:
+        if (action := states[state]) not in captured:
+            raise ValueError(f'no actual Vulkan image includes Action {action}; select its render window')
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def validation_options(description, profile_dir):
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument('--godot', required=True, type=Path)
     parser.add_argument('--reference', required=True, type=Path, action='append')
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--profile-dir', default=PROFILE)
+    parser.add_argument('--profile-dir', default=profile_dir)
     parser.add_argument('--mode', choices=('default', 'mode2'), default='default')
     parser.add_argument('--visual-alias', help='Local alias for the selected profile and mode')
     parser.add_argument('--scene', required=True, action='append')
@@ -345,47 +356,65 @@ def main():
     options.realtime_tail_frames = 150
     options.realtime_input_spacing = 1
     options.realtime_window = (options.realtime_render, options.realtime_render)
+    return parser, options
+
+
+def run_validation(parser, options, *, family, capture_profile, alias, native_moves, reservations, actions, states,
+                   body_check, recovery_check, pose_check, contact_check=None, deferred_followups=None):
+    fixed = options.fps == 'fixed'
     manifest = json.loads((ROOT / 'data/imported-characters/terry98/manifest.json').read_bytes())
-    timelines = {action: visual_timeline(manifest, action) for action in (*sorted(set(ACTIONS.values())), 210, 211, 1000, 1020)}
+    timelines = {action: visual_timeline(manifest, action)
+                 for action in (*sorted(set(actions.values())), 210, 211, 1000, 1020)}
     profile = json.loads((ROOT / options.profile_dir / f'{options.mode}.fighter.json').read_bytes())
-    alias = options.visual_alias or f'terry98-stage26-{options.mode}'
     failures = []
     for name in options.scene:
         try:
-            reference = locate(options.reference, options.mode, name, FAMILY)
-            scene, phases, changes = fixture(reference, name, capture_profile='Stage26',
-                                             native_moves=NATIVE_MOVES, reservations=DEFERRED)
+            reference = locate(options.reference, options.mode, name, family)
+            scene, phases, changes = fixture(reference, name, capture_profile=capture_profile,
+                                             native_moves=native_moves, reservations=reservations,
+                                             deferred_followups=deferred_followups)
             if not fixed:
-                sparse_realtime(options, name, scene, alias, timelines, actions=ACTIONS, sample_actions=tuple(KICKS))
+                sparse_realtime(options, name, scene, alias, timelines, actions=actions,
+                                sample_actions=tuple(states.values()))
                 continue
-            kick_frames = [row['frame'] for row in scene.moves if row['to'] in KICKS]
+            kick_frames = [row['frame'] for row in scene.moves if row['to'] in states]
             first = min(kick_frames, default=5)
             last = max((row['frame'] for row in scene.moves if row['frame'] >= first), default=first)
-            # Begin at the first relevant pose and keep readback away from unrelated source moves.
+            # Capture key poses locally, while retaining full audit through the final contact and recovery.
             captures = tuple(options.fixed_window or (first + 23, min(first + 100, last + 52)))
             scene = replace(scene, captures=captures)
-            deferred_frame = min((row['frame'] for row in changes if row['to'] in DEFERRED),
+            deferred_frame = min((row['frame'] for row in changes if row['to'] in reservations),
                                  default=max(phases['after-collision']) + 1)
             run_case(options, name, reference, timelines, profile, mode=options.mode, alias=alias,
-                     prepared_scene=(scene, phases, changes), fixed_checks=partial(verify_body, profile, changes, name),
-                     recovery_check=partial(check_recovery, deferred_frame),
-                     pose_check=partial(check_poses, phases, deferred_frame), partial_capture=True,
+                     prepared_scene=(scene, phases, changes), fixed_checks=partial(body_check, profile, changes, name),
+                     recovery_check=partial(recovery_check, deferred_frame, name),
+                     pose_check=partial(pose_check, phases, deferred_frame), partial_capture=True,
                      allow_interrupted_spawn=True, minimum_render_frames=max(phases['after-collision']) + 24,
-                     extra_arguments=('--command-audit',), extra_authority=EXTRA_AUTHORITY)
-            verify_captured_actions(options.output / name / 'sprite/trace.json', scene)
+                     extra_arguments=('--command-audit',), extra_authority=EXTRA_AUTHORITY,
+                     **({'contact_check': partial(contact_check, name)} if contact_check else {}))
+            verify_captured_actions(options.output / name / 'sprite/trace.json', scene, states)
             if options.repeat_from:
                 prefixes = (*AUTHORITY, *EXTRA_AUTHORITY)
                 old, new = ([row for row in (folder / name / 'sprite/duel.log').read_bytes().splitlines()
                              if row.startswith(prefixes)] for folder in (options.repeat_from, options.output))
                 if not old:
                     raise ValueError('baseline repeat has no authority records')
-                require_same(old, new, f'Stage 26 same-seed {name}')
+                require_same(old, new, f'{capture_profile} same-seed {name}')
                 print(f'{name}: {len(old)} same-seed authority rows', flush=True)
         except (ValueError, KeyError, IndexError, OSError, StopIteration, TimeoutExpired) as error:
             failures.append(name)
             print(f'{name}: FAIL {error!r}', flush=True)
     if failures:
         parser.exit(1, 'Failed: ' + ', '.join(failures) + '\n')
+
+
+def main():
+    parser, options = validation_options(__doc__, PROFILE)
+    run_validation(parser, options, family=FAMILY, capture_profile='Stage26',
+                   alias=options.visual_alias or f'terry98-stage26-{options.mode}',
+                   native_moves=NATIVE_MOVES, reservations=DEFERRED, actions=ACTIONS,
+                   states={state: state for state in KICKS}, body_check=verify_body,
+                   recovery_check=lambda deferred, name, *args: check_recovery(deferred, *args), pose_check=check_poses)
 
 
 if __name__ == '__main__':

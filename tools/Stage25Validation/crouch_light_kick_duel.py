@@ -32,7 +32,8 @@ RESERVATIONS = {230: 'ReservedStandLightKick', 235: 'ReservedStandLightKick', 24
 REACTIONS = {5000, 5001, 5010, 5011, 5070}
 
 
-def fixture(reference, name, *, capture_profile='Stage25', native_moves=NATIVE, reservations=RESERVATIONS):
+def fixture(reference, name, *, capture_profile='Stage25', native_moves=NATIVE, reservations=RESERVATIONS,
+            deferred_followups=None):
     run = json.loads((reference.parent / 'run-metadata.json').read_bytes())
     meta = json.loads(reference.with_name(f'{reference.stem}-metadata.json').read_bytes())
     assert_equal(capture_profile, run['capture_profile'], 'native capture profile')
@@ -59,8 +60,12 @@ def fixture(reference, name, *, capture_profile='Stage25', native_moves=NATIVE, 
     deferred = [change for change in changes if change['to'] in reservations]
     if deferred:
         first = min(row['frame'] for row in deferred)
-        assert_equal([], [row for row in scene.moves if row['frame'] > first], 'no later in-scope move after deferred entry')
-        scene = replace(scene, contacts=tuple(row for row in scene.contacts if row['frame'] < first),
+        later = [row for row in scene.moves if row['frame'] > first]
+        assert_equal((deferred_followups or {}).get(name, []),
+                     [(row['frame'] - first, row['from'], row['to']) for row in later],
+                     'reviewed moves after deferred entry')
+        scene = replace(scene, moves=tuple(row for row in scene.moves if row['frame'] <= first),
+                        contacts=tuple(row for row in scene.contacts if row['frame'] < first),
                         differences=tuple(f'native-state-{state}-deferred' for state in sorted({r['to'] for r in deferred})))
         if any(row['to'] == 1050 for row in deferred):
             # Stop native Pause and entity comparisons at the reserved mode 2 entry.

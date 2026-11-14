@@ -257,7 +257,7 @@ def check_recovery(scene, phases, moves):
     return results
 
 
-def check_wave_launch(name, scene, phases, moves, lines, *, camera_clip=None):
+def check_wave_launch(name, scene, phases, moves, lines, *, camera_clip=None, camera_direction=-1):
     """Pair every post-Wave launch tick to its original phase and position."""
     active = indexed(audit_rows(lines, 'LaunchReactionAudit'))
     mirror = phases['before-command'][0]['chars'][0]['facing'] < 0
@@ -294,14 +294,15 @@ def check_wave_launch(name, scene, phases, moves, lines, *, camera_clip=None):
             expected_x = original['pos'][0] + x_offset
             expected_y = max(0, -original['pos'][1])
             if first_camera_clip is not None and tick >= first_camera_clip:
-                vx = -27 * Q16 // 8
+                step = camera_direction * 27 / 8
+                vx = int(step * Q16)
                 if ballistics_x is None:
                     ballistics_x = int(moves[seat, logic - 1]['x'])
                 if phase == 'Bounce':
                     native_step = original['pos'][0] - phases['end'][tick - 1]['chars'][seat ^ mirror]['pos'][0]
-                    assert_equal(-3.375, original['vel'][0], 'native retained bounce velocity')
+                    assert_equal(-3.375, original['vel'][0], 'native retained facing-relative bounce velocity')
                     assert_equal(vx, int(row['vx']), 'host retained bounce velocity')
-                    if not -3.375 < native_step <= 0:
+                    if not 0 <= camera_direction * native_step < abs(step):
                         raise ValueError(f'native camera clamp not observed at F{tick}: dx={native_step}')
                     ballistics_x += vx
                 assert_equal(ballistics_x, int(row['x']), f'host bounce and rest X at F{tick}')
