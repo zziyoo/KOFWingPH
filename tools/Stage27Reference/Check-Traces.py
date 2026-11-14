@@ -153,12 +153,36 @@ def body_contract(cases, prefix, label, action):
     return {'hit': hit, 'guard': guard, 'groundReactions': {'standing': standing, 'crouching': crouching}}
 
 
+def verify_mode2_guard_entry(cases):
+    for crouching, name in ((False, 'far-guard'), (True, 'far-crouch-guard')):
+        case = cases.get(MODE2 + name)
+        if case is None:
+            return False
+        phases = case[0]
+        start = 11 if crouching else 20
+        standing_guard = 131 if crouching else 130
+        expected = [start, 120, 120, 120] + [standing_guard] * 4
+        positions = [49] * 8 if crouching else [
+            52.16797, 54.86074, 57.149597, 59.095127, 60.748825, 62.15447, 63.349266, 64.364845,
+        ]
+        defender = [char_at(phases, frame, 1) for frame in range(5, 13)]
+        assert [row['state'] for row in defender] == expected, name
+        assert [row['anim'] for row in defender[1:4]] == [121 if crouching else 120] * 3, name
+        assert [row['pos'][0] for row in defender] == positions, name
+        assert defender[-1]['vel'][0] == 0, name
+        attacker = char_at(phases, 5)
+        assert (attacker['state'], attacker['anim'], attacker['moveType'], attacker['hitDef']['attr']) == (
+            240, 241, 131072, 0), name
+    return True
+
+
 def verify_cases(cases):
     for name, case in cases.items():
         verify_case(name, case)
     moves = {action: contract for label, action in (('near', 245), ('far', 240))
              if (contract := body_contract(cases, PREFIX, label, action)) is not None}
     mode2_far = body_contract(cases, MODE2, 'far', 241)
+    mode2_guard_entry = verify_mode2_guard_entry(cases)
     poses = {}
     for prefix, label, action in ((PREFIX, 'far', 240), (MODE2, 'far', 241), (PREFIX, 'near', 245)):
         name = prefix + f'{label}-whiff'
@@ -179,7 +203,7 @@ def verify_cases(cases):
     routes = verify_routes(cases)
     return {'moves': moves, 'mode2Far': mode2_far, 'posAdds': poses, 'positionStepsVerified': sorted(poses),
             'bodyVerified': body_verified, **routes,
-            'completeVerified': body_verified and set(poses) == MOVES.keys() and all(routes.values())}
+            'completeVerified': body_verified and mode2_guard_entry and set(poses) == MOVES.keys() and all(routes.values())}
 
 
 def verify_routes(cases):
