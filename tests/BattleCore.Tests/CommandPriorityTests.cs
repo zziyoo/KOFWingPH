@@ -132,6 +132,40 @@ public sealed class CommandPriorityTests
         Assert.All(result.Recognition.Buffer, item => Assert.True(item.Consumed));
     }
 
+    [Theory]
+    [InlineData(LaunchReactionPhase.Wakeup, true)]
+    [InlineData(LaunchReactionPhase.Lying, false)]
+    [InlineData(LaunchReactionPhase.Fall, false)]
+    public void GroundReservationUsesTheTargetAuthoredReactionPhase(LaunchReactionPhase phase, bool reserved)
+    {
+        var reservation = new CommandDefinition("CloseThrow", [CommandDirection.Forward], InputBits.HeavyKick,
+            buttonToleranceFrames: 0, priority: 3, bufferLifetimeFrames: 0,
+            reserveGroundInput: true, groundReservationTarget: new GroundReservationTarget(11, true));
+        var kick = new CommandDefinition("Kick", [], InputBits.HeavyKick);
+        var attacker = new FighterDefinition("Attacker", [reservation, kick],
+            [new MoveDefinition(Heavy, kick.CommandId, 3, 4, 5)], useCommandPriority: true);
+        var defender = new FighterDefinition("Defender", [], []);
+        var simulation = new BattleSimulation(new FightRoster(attacker, defender));
+        var profile = new LaunchReactionProfile(4, 1, 4, 1, 13, 25, 8, 3, 2);
+        var reaction = new LaunchReactionState(profile, phase, Ticks: 1);
+        FighterState source = FighterState.Create(0, 1000, 0, Facing.Right);
+        FighterState target = FighterState.Create(1, 1000, 8, Facing.Left) with
+        {
+            LogicState = reaction.LogicState,
+            LaunchReaction = reaction,
+            PositionY = phase == LaunchReactionPhase.Fall ? 10 : 0,
+            StunRemainingFrames = phase == LaunchReactionPhase.Fall ? 0 : 8,
+            HitLaunchGravity = phase == LaunchReactionPhase.Fall ? 1 : null,
+        };
+        var initial = new BattleState(0, [source, target], BattleState.CreateDefault().StateVersion);
+
+        BattleState result = simulation.Step(initial, new FrameInput(0, InputBits.Right | InputBits.HeavyKick,
+            InputBits.None)).State;
+
+        Assert.Equal(reserved ? null : Heavy, result.Fighter(0).MoveId);
+        Assert.All(result.Fighter(0).RecognitionState.Buffer, result => Assert.True(result.Consumed));
+    }
+
     [Fact]
     public void DeferredButtonChordUsesRootAndHelperClocksWithoutConsumingNewerButtons()
     {

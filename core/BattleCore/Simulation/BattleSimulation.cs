@@ -329,7 +329,8 @@ public sealed class BattleSimulation
                 opponentDistance,
                 OpponentBodyDistance(fighter, opponent, opponentX, definition, _roster.Fighter(opponentSeat)),
                 fighter.CrouchReturnTicks, fighter.GroundReaction.Crouching,
-                !opponent.LogicState.IsAirborneLike() && !HasHitMoveType(opponent.LogicState));
+                !opponent.LogicState.IsAirborneLike() && (!HasHitMoveType(opponent.LogicState) ||
+                    opponent.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup));
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
