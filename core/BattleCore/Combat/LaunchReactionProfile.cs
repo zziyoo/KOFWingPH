@@ -33,7 +33,8 @@ public sealed record LaunchReactionProfile
     public LaunchReactionProfile(int impactFrames, FixedPoint bounceHorizontalRetention,
         FixedPoint bounceVerticalVelocity, FixedPoint bounceGravity, int lieDownFrames, int wakeupFrames,
         int riseFrames, int lieImpactFrames, int transitionGravitySteps, bool startInFall = false,
-        GroundTechProfile? groundTech = null, bool suppressOwnerProjectilesDuringFall = false)
+        GroundTechProfile? groundTech = null, bool suppressOwnerProjectilesDuringFall = false,
+        bool allowOwnerProjectilesOnCounter = false)
     {
         if (impactFrames < 1 || riseFrames < 1 || lieDownFrames < 2 || wakeupFrames < 1 ||
             lieImpactFrames < 1 || lieImpactFrames >= lieDownFrames)
@@ -46,9 +47,9 @@ public sealed record LaunchReactionProfile
             throw new ArgumentOutOfRangeException(nameof(bounceVerticalVelocity));
         if (transitionGravitySteps is < 1 or > 4)
             throw new ArgumentOutOfRangeException(nameof(transitionGravitySteps));
-        if (suppressOwnerProjectilesDuringFall && !startInFall)
-            throw new ArgumentException("The air follow-up restriction requires a reaction that starts in fall.",
-                nameof(suppressOwnerProjectilesDuringFall));
+        if (allowOwnerProjectilesOnCounter && !suppressOwnerProjectilesDuringFall)
+            throw new ArgumentException("A counter exception requires an air follow-up restriction.",
+                nameof(allowOwnerProjectilesOnCounter));
 
         ImpactFrames = impactFrames;
         BounceHorizontalRetention = bounceHorizontalRetention;
@@ -62,6 +63,7 @@ public sealed record LaunchReactionProfile
         StartInFall = startInFall;
         GroundTech = groundTech;
         SuppressOwnerProjectilesDuringFall = suppressOwnerProjectilesDuringFall;
+        AllowOwnerProjectilesOnCounter = allowOwnerProjectilesOnCounter;
     }
 
     public int ImpactFrames { get; }
@@ -76,4 +78,5 @@ public sealed record LaunchReactionProfile
     public bool StartInFall { get; }
     public GroundTechProfile? GroundTech { get; }
     public bool SuppressOwnerProjectilesDuringFall { get; }
+    public bool AllowOwnerProjectilesOnCounter { get; }
 }

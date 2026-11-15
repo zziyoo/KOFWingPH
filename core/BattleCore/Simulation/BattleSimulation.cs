@@ -587,7 +587,8 @@ public sealed class BattleSimulation
         IReadOnlyList<AttackContact> contacts = state.PendingThrow is not null ? Array.Empty<AttackContact>() : HitDetection.Detect(
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1),
             state.Fighters[0].LogicState, state.Fighters[1].LogicState,
-            candidates[0].ProtectStrike, candidates[1].ProtectStrike);
+            candidates[0].ProtectStrike, candidates[1].ProtectStrike,
+            state.Fighters[0].LaunchReaction, state.Fighters[1].LaunchReaction);
 
         // ── 第 6a 阶段：攻击相杀（D98）——两个攻击实例的攻击框正面积重叠，
         //    且双方都<b>没有</b>打中对方受击框（攻击在空中对撞）。任一方真正命中的帧
@@ -1012,8 +1013,7 @@ public sealed class BattleSimulation
                     LandingWakeupFrames = settled.WakeupFrames,
                     HitLaunchGravity = settled.LaunchGravity,
                     LaunchReaction = settled.LaunchReaction is { } profile
-                        ? new LaunchReactionState(profile, LaunchReactionPhase.Shake, 0,
-                            LaunchOwner: profile.SuppressOwnerProjectilesDuringFall ? attacker : -1) : null,
+                        ? LaunchReactionState.Begin(profile, attacker, settled.CounterHit) : null,
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     LastHitContactGroups = settled.ContactGroups,
                     MoveStartedFrame = -1,
@@ -1677,7 +1677,7 @@ public sealed class BattleSimulation
         bool defenderAirborne = defender.LogicState.IsAirborneLike();
 
         AttackDefinition hit = span?.Hit ?? definition.Hit;
-        bool guarding = CanGuard(defender.LogicState, backHeld, hit.Height) ||
+        bool guarding = CanGuard(defender.LogicState, backHeld, hit.Height, hit.GroundGuardOnly) ||
             (span is not null && hit.Height == AttackHeight.Mid && _roster.Fighter(target).RetainProjectileGuard &&
              (defender.LogicState == FighterLogicState.Blockstun || defender.ProjectileGuardRecoveryRemaining > 0));
         HitstopByOutcome? stop = hit.HitstopByOutcome;
@@ -1723,9 +1723,11 @@ public sealed class BattleSimulation
         }
 
         int damage = hit.Damage;
+        bool counterHit = IsAttacking(defender.LogicState);
         if (span?.DynamicDamage is { } dynamic)
         {
             int owner = projectile.OwnerFighterId;
+            counterHit = waveInputs![owner].DamageScript.CounterAge > 0;
             damage = _roster.Fighter(owner).DamageRules!.ComputeEntity(dynamic, waveInputs![owner].DamageScript,
                 _roster.Fighter(target).DamageRules, HasHitMoveType(waveInputs[target].LogicState));
         }
@@ -1756,8 +1758,7 @@ public sealed class BattleSimulation
                 LandingWakeupFrames = hit.WakeupFrames,
                 HitLaunchGravity = span?.LaunchGravity,
                 LaunchReaction = span?.LaunchReaction is { } launchReaction
-                    ? new LaunchReactionState(launchReaction, LaunchReactionPhase.Shake, 0,
-                        LaunchOwner: launchReaction.SuppressOwnerProjectilesDuringFall ? projectile.OwnerFighterId : -1)
+                    ? LaunchReactionState.Begin(launchReaction, projectile.OwnerFighterId, counterHit)
                     : null,
                 MoveStartedFrame = -1,
                 MoveElapsedFrames = 0,
@@ -1954,7 +1955,7 @@ public sealed class BattleSimulation
             ? downHeld : null;
         bool guarding = followupGuardCrouching is { } crouching
             ? GuardCovers(attack.Height, crouching ? FighterLogicState.Crouching : FighterLogicState.Standing)
-            : CanGuard(defenderState.LogicState, backHeld, attack.Height) ||
+            : CanGuard(defenderState.LogicState, backHeld, attack.Height, attack.GroundGuardOnly) ||
                 (priorGroups != 0 && defenderState.LogicState == FighterLogicState.Blockstun && attack.Height == AttackHeight.Mid);
 
         // 击退/击飞方向（D92/D93）：按<b>命中时双方的权威相对位置</b>决定「远离攻击者」；
@@ -1984,10 +1985,12 @@ public sealed class BattleSimulation
         }
 
         bool launches = attack.Launches;
+        bool counterHit = attack.DynamicDamage is not null ? attackerState.DamageScript.CounterAge > 0
+            : IsAttacking(defenderState.LogicState);
         int damage = attack.DynamicDamage is { } dynamic
             ? attackerRules!.Compute(dynamic, attackerState.DamageScript, defenderRules, HasHitMoveType(defenderState.LogicState))
             : priorGroups != 0 && attack.DamageAfterPriorContact is { } afterContact ? afterContact
-            : IsAttacking(defenderState.LogicState) ? attack.CounterDamage ?? attack.Damage : attack.Damage;
+            : counterHit ? attack.CounterDamage ?? attack.Damage : attack.Damage;
         return new CombatSettlement(
             Blocked: false, Damage: damage, StunFrames: attack.HitstunFrames,
             MoveId: moveId, AttackStartFrame: attackerState.MoveStartedFrame,
@@ -2005,7 +2008,8 @@ public sealed class BattleSimulation
             GroundReaction: attack.GroundReaction,
             LaunchGravity: attack.LaunchGravity,
             LaunchReaction: attack.LaunchReaction,
-            FollowupGuardCrouching: followupGuardCrouching);
+            FollowupGuardCrouching: followupGuardCrouching,
+            CounterHit: counterHit);
     }
 
     private static GroundHitReactionState ResolveGroundReaction(
@@ -2026,9 +2030,9 @@ public sealed class BattleSimulation
                 : defender.LogicState == FighterLogicState.Crouching;
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
-    private static bool CanGuard(FighterLogicState state, bool backHeld, AttackHeight height) =>
+    private static bool CanGuard(FighterLogicState state, bool backHeld, AttackHeight height, bool groundGuardOnly) =>
         backHeld && (state == FighterLogicState.Airborne
-            ? height is AttackHeight.High or AttackHeight.Mid
+            ? !groundGuardOnly && height is (AttackHeight.High or AttackHeight.Mid)
             : state is FighterLogicState.Standing or FighterLogicState.Crouching && GuardCovers(height, state));
 
     private static bool GuardCovers(AttackHeight height, FighterLogicState guardState) => height switch
@@ -2317,7 +2321,8 @@ public sealed class BattleSimulation
         GroundHitReaction GroundReaction = GroundHitReaction.Standard,
         FixedPoint? LaunchGravity = null,
         LaunchReactionProfile? LaunchReaction = null,
-        bool? FollowupGuardCrouching = null);
+        bool? FollowupGuardCrouching = null,
+        bool CounterHit = false);
 
     /// <summary>
     /// 双人最小间距统一求解（D71 修订，05 专项补修 P1）。

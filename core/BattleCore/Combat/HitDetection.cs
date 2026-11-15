@@ -62,6 +62,8 @@ public static class FighterBoxes
         if (fighter.LaunchReaction is { Profile.StartInFall: true, Phase: LaunchReactionPhase.Shake or LaunchReactionPhase.Fall } trip &&
             definition.GroundHurtboxes?.TripFall is { } timeline)
             local = GroundHurtboxes.BoxesAt(timeline, trip.Ticks) ?? timeline[^1].Boxes;
+        if (fighter.LaunchReaction is { Profile.StartInFall: false, IsInInitialFlight: true })
+            local ??= definition.GroundHurtboxes?.LaunchAir;
         if (fighter.GroundGuardCrouching is { } crouching && definition.GroundHurtboxes is { } guards)
         {
             if (fighter.LogicState == FighterLogicState.Blockstun)
@@ -269,16 +271,18 @@ public static class HitDetection
         FighterLogicState? previous0 = null,
         FighterLogicState? previous1 = null,
         bool protectTarget0 = false,
-        bool protectTarget1 = false)
+        bool protectTarget1 = false,
+        LaunchReactionState? previousLaunch0 = null,
+        LaunchReactionState? previousLaunch1 = null)
     {
         ArgumentNullException.ThrowIfNull(definition0);
         ArgumentNullException.ThrowIfNull(definition1);
 
         List<AttackContact>? contacts = null;
         if (!protectTarget1)
-            Collect(fighter0, fighter1, definition0, definition1, previous1, 0, ref contacts);
+            Collect(fighter0, fighter1, definition0, definition1, previous1, previousLaunch1, 0, ref contacts);
         if (!protectTarget0)
-            Collect(fighter1, fighter0, definition1, definition0, previous0, 1, ref contacts);
+            Collect(fighter1, fighter0, definition1, definition0, previous0, previousLaunch0, 1, ref contacts);
 
         // 只读包装（D34/D61 同一先例）：快照附属数据不得暴露可变 List。
         return contacts is null
@@ -292,6 +296,7 @@ public static class HitDetection
         FighterDefinition attackerDefinition,
         FighterDefinition targetDefinition,
         FighterLogicState? previousTargetState,
+        LaunchReactionState? previousTargetLaunch,
         int attackerId,
         ref List<AttackContact>? contacts)
     {
@@ -302,12 +307,14 @@ public static class HitDetection
         IReadOnlyList<FixedRect> hurtboxes = FighterBoxes.GetHurtboxes(target, targetDefinition, previousTargetState);
         string moveId = attacker.MoveId!; // Nonempty hitboxes require a configured active move.
         MoveDefinition move = attackerDefinition.FindMoveById(moveId)!;
+        bool restrictFollowup = (previousTargetLaunch ?? target.LaunchReaction)?.RestrictsAirFollowupFrom(attackerId) == true;
 
         for (int i = 0; i < hitboxes.Count; i++)
         {
             ActiveHitbox hitbox = hitboxes[i];
             AttackDefinition attack = move.Attacks[hitbox.AttackIndex];
-            if (CanHitTarget(attack, target) && hurtboxes.Any(hurt => attack.ContactOnEdge
+            if (!(restrictFollowup && attack.RespectsAirFollowupRestriction) && CanHitTarget(attack, target) &&
+                hurtboxes.Any(hurt => attack.ContactOnEdge
                     ? hitbox.Box.IntersectsOrTouches(hurt) : hitbox.Box.Overlaps(hurt)))
             {
                 contacts ??= new List<AttackContact>(4);

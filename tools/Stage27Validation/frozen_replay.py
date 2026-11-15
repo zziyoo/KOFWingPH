@@ -209,11 +209,7 @@ def run_logged(command, log):
         with log.open('wb') as stream:
             result = subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, timeout=60)
         data = log.read_bytes()
-        shutdown_crash = any(
-            line.startswith((b'ERROR:', b'SCRIPT ERROR:', b'Vulkan ', b'Fatal error.'))
-            for line in data.splitlines())
-        if (result.returncode == 0 and data.startswith(b'Godot Engine v4.7.2.stable.mono.') and
-                not shutdown_crash):
+        if result.returncode == 0 and valid_headless_log(data):
             return data
         # A Godot Mono finalizer race can crash the process at exit after every authority row
         # was already written; one bounded retry separates that transient from real mismatches.
@@ -225,6 +221,30 @@ def run_logged(command, log):
             print(f'Retrying one Godot Mono shutdown error: {log}', flush=True)
             continue
         raise ValueError(f'headless Godot execution failed: {log}')
+
+
+def valid_headless_log(data):
+    return data.startswith(b'Godot Engine v4.7.2.stable.mono.') and not any(
+        line.startswith((b'ERROR:', b'SCRIPT ERROR:', b'Vulkan ', b'Fatal error.')) for line in data.splitlines())
+
+
+def resume_headless_log(options, stage, scene, variant, saved, archived):
+    verified = f'{scene.as_posix()}/{variant} <- {saved}'
+    for root, records in options.resume_runs:
+        log = root / f'stage{stage}' / scene / variant / 'duel.log'
+        if verified not in records or not log.is_file():
+            continue
+        data = log.read_bytes()
+        if not valid_headless_log(data):
+            continue
+        tokens = shlex.split(log.with_suffix('.args.txt').read_text(encoding='utf-8-sig'), posix=False)
+        args = [token.strip('"') for token in tokens]
+        marker = args.index('--fixed-fps') if '--fixed-fps' in args else len(args)
+        if '--headless' not in args or args[marker + 1:marker + 2] != ['60']:
+            raise ValueError(f'invalid resumed headless replay arguments: {log}')
+        verify_headless_keys(saved, archived, data.splitlines(), args)
+        return log, data
+    return None
 
 
 def verify_headless_keys(saved, archived, lines, args):
@@ -254,7 +274,12 @@ def replay_stage(options, stage, output):
                 if options.reuse and stage == 14:
                     log, data = archived_variant((options.reuse / 'stage14',), scene, variant)
                 elif options.headless_authority:
-                    log, data = replay_headless(options, saved, archived, output / scene / variant)
+                    resumed = resume_headless_log(options, stage, scene, variant, saved, archived)
+                    if resumed is None:
+                        log, data = replay_headless(options, saved, archived, output / scene / variant)
+                    else:
+                        log, data = resumed
+                        print(f'Reused verified replay: {log}', flush=True)
                 else:
                     folder = output / scene / variant
                     comparison = SimpleNamespace(godot=options.godot, resolution='320x180')
@@ -277,6 +302,8 @@ def main():
     parser.add_argument('--stage', choices=STAGES, action='append')
     parser.add_argument('--hold-file', type=Path, help='pause before the next Godot launch while this file exists')
     parser.add_argument('--reuse', type=Path, help='reuse completed Stage 14 output with the identical build fingerprint')
+    parser.add_argument('--resume-headless-from', type=Path, action='append', default=[],
+                        help='reuse previously matched headless variants from a same-build output directory and its log')
     parser.add_argument('--headless-authority', action='store_true', help='replay Stage 14–26 fixed inputs without frame readback')
     options = parser.parse_args()
     if options.godot and options.output is None:
@@ -286,6 +313,9 @@ def main():
         parser.error('use the original Stage 13C verifier for its ZIP archive-only check')
     if options.headless_authority and options.archive_only:
         parser.error('headless authority needs Godot')
+    if options.resume_headless_from and (not options.headless_authority or options.reuse):
+        parser.error('--resume-headless-from requires --headless-authority and a new --output')
+    options.resume_runs = []
     try:
         hashes = None
         if options.godot:
@@ -300,6 +330,12 @@ def main():
                 previous_log = options.reuse.with_suffix('.log')
                 if previous_log.read_text(encoding='utf-8-sig').splitlines()[0] != identity:
                     raise ValueError('cannot reuse Stage 14 logs from a different Godot Debug build')
+            for source in options.resume_headless_from:
+                source = source.resolve(strict=True)
+                previous = source.with_suffix('.log').read_text(encoding='utf-8-sig').splitlines()
+                if not previous or previous[0] != identity:
+                    raise ValueError('cannot resume headless logs from a different Godot Debug build')
+                options.resume_runs.append((source, set(previous[1:])))
             print(identity, flush=True)
         for stage in requested:
             output = options.output / f'stage{stage.lower()}' if options.godot else None

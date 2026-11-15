@@ -121,7 +121,8 @@ public static class FighterDataLoader
                     "groundHurtboxes.lowHeavyHitstun", BuildMoveHurtboxSpan),
                 GuardBoxes(boxes.StandingGuard, "standingGuard"), GuardBoxes(boxes.CrouchingGuard, "crouchingGuard"),
                 GuardBoxes(boxes.StandingGuardReady, "standingGuardReady"), GuardBoxes(boxes.CrouchingGuardReady, "crouchingGuardReady"),
-                boxes.TripFall is null ? null : BuildArray(boxes.TripFall, sourceName, "groundHurtboxes.tripFall", BuildMoveHurtboxSpan)),
+                boxes.TripFall is null ? null : BuildArray(boxes.TripFall, sourceName, "groundHurtboxes.tripFall", BuildMoveHurtboxSpan),
+                GuardBoxes(boxes.LaunchAir, "launchAir")),
                 sourceName, "groundHurtboxes")
             : null;
 
@@ -329,7 +330,9 @@ public static class FighterDataLoader
             launchReaction: dto.LaunchReaction is { } launch ? BuildLaunchReaction(launch, source, path + ".launchReaction") : null,
             rejectsLyingTargets: dto.RejectsLyingTargets,
             rejectsFallingTargets: dto.RejectsFallingTargets,
-            retainsGroundGuardOnFollowup: dto.RetainsGroundGuardOnFollowup),
+            retainsGroundGuardOnFollowup: dto.RetainsGroundGuardOnFollowup,
+            groundGuardOnly: dto.GroundGuardOnly,
+            respectsAirFollowupRestriction: dto.RespectsAirFollowupRestriction),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>
@@ -445,7 +448,7 @@ public static class FighterDataLoader
             RequiredInt(dto.LieImpactFrames, source, path + ".lieImpactFrames"),
             RequiredInt(dto.TransitionGravitySteps, source, path + ".transitionGravitySteps"), dto.StartInFall,
             dto.GroundTech is { } tech ? BuildGroundTech(tech, source, path + ".groundTech") : null,
-            dto.SuppressOwnerProjectilesDuringFall),
+            dto.SuppressOwnerProjectilesDuringFall, dto.AllowOwnerProjectilesOnCounter),
         source, path);
 
     private static GroundTechProfile BuildGroundTech(GroundTechDto dto, string source, string path) => Guard(

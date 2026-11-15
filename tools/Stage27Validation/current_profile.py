@@ -44,7 +44,7 @@ def verify_waves(data, sources, case, sprites):
                                    '235 authored Wave edge')
 
 
-def replay(options):
+def replay(options, *, compare_shared=sweep_history.require_same, stage_label='Stage 27'):
     fighter = Path(options.profile) / 'default.fighter.json'
     fighter_id = json.loads((ROOT / fighter).read_bytes())['fighterId']
     reference_id = json.loads((ROOT / 'data/imported-characters/terry98-stage26-final/default.fighter.json')
@@ -71,18 +71,17 @@ def replay(options):
             _, current = sweep_history.rows(output, data)
             if sources := WAVE_CASES.get((batch, name)):
                 verify_waves(data, sources, scene, sprites=variant == 'sprite')
-            sweep_history.require_same(shared, sweep_history.shared_wave_rows(current, fighter_id,
-                                                                                wave_audited=wave_audited),
-                                       f'{scene} shared Stage 27 authority {variant}')
+            compare_shared(shared, sweep_history.shared_wave_rows(current, fighter_id, wave_audited=wave_audited),
+                           f'{scene} shared {stage_label} authority {variant}')
             shared_count = len(shared)
             actual.append(current)
-        sweep_history.require_same(*actual, f'{scene} Stage 27 sprite/plain authority')
+        sweep_history.require_same(*actual, f'{scene} {stage_label} sprite/plain authority')
         total_frames += length
         shared_records += shared_count
         current_records += len(actual[0])
         print(f'{scene.as_posix()}: {length} logic frames, {shared_count} shared rows, '
               f'{len(actual[0])} current authority rows', flush=True)
-    print(f'Matched {len(scene_list)} Stage 27 compatibility pairs, {total_frames} frames, '
+    print(f'Matched {len(scene_list)} {stage_label} compatibility pairs, {total_frames} frames, '
           f'{shared_records} shared rows and {current_records} current authority rows; '
           f'{len({state for source in WAVE_CASES.values() for state in source})} old Wave sources', flush=True)
 

@@ -1682,3 +1682,10 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 阶段 28 预设位于 `data/imported-characters/terry98-stage28-final`，视觉别名为 `terry98-stage28-default`／`terry98-stage28-mode2`。物理前＋轻拳对应 P1 `D`＋`J`、P2 `Right`＋`KP1`。核对入口时同时保留按键、消费、`MoveStarted` 和图像提交记录。 [生成与安装](MUGEN_IMPORT.md#阶段-28-前轻拳state-300) · [运行时场景](../tools/Stage28Validation/README.md)
 - 300 的方向锁存语义在消费期求值（根组合或 Helper 的 OR）；识别期只认当帧按键边沿且保留原方向门（按住 DF+x 不产生候选，冻结对照否决过移除方案）。已实现来源的取消窗口见[阶段 28 验收](STAGE28_ACCEPTANCE.md)，430/230/240 无窗口、250 延期。 [原版与范围](STAGE28_REFERENCE.md)
 - 阶段 28 正式 PASS，28A–28G 全过。最终构建（`NewKOF.dll` 99607d79…、`NewKOF.BattleCore.dll` 4b1233ab…，同源重建指纹 6c99bc6c…，仅 72 字节来源差异、IL 一致）回放阶段 14–26 共 542 对、65,069 逻辑帧、538,586 条权威记录逐条一致，13C Vulkan 复验通过（首跑一次实时抖动已复跑排除）；运行时 6 场景在最终构建复跑通过；`NewKOF.csproj` 补 `EnableDefaultEmbeddedResourceItems=false` 修复 MSB3552。逐阶段数字见[阶段 28 验收](STAGE28_ACCEPTANCE.md)。
+
+### 阶段 29 站立双键吹飞攻击
+
+- 实验预设为 `data/imported-characters/terry98-stage29-final`，使用各席显式载入和独立视觉别名 `terry98-stage29-default`／`terry98-stage29-mode2`。同帧物理 `y+b` 对应 P1 `K+I`、P2 `KP2+KP5` 或 `.+;`。生成及图集导入步骤见本阶段验证说明。 [复现命令](../tools/Stage29Validation/README.md)
+- State 250 旧 tick 24–25 的两模式共有 300／310 候选，默认模式弱 Wave 1000 与模式 2 占位 1050 分别求值。旧 tick 49 的自然开招单独计。查追击时同时看 250 接触的反击上下文、目标击飞阶段、Helper 1020 有效窗口和 `WaveRestrictionAudit`。 [原版与边界](STAGE29_REFERENCE.md)
+- 阶段 29 正式 PASS（7/7）。原版 75 个签名场景和 23 个命令探针，最终 44 对固定 Vulkan、实时 30／60 FPS、同种子和像素夹具通过。最终构建的 13C Vulkan、14–26 共 542 对权威回放及 27／28 定向门禁均已通过。 [验收证据](STAGE29_ACCEPTANCE.md)
+- 下一候选可从 310 的实际本体及 `var(1)`／接触窗口取证开始。阶段 29 只保留 310 的候选和实测许可。 [原版与范围](STAGE29_REFERENCE.md)

@@ -126,6 +126,9 @@ public sealed class GroundHurtboxesDto
     [JsonPropertyName("tripFall")]
     public List<MoveHurtboxSpanDto>? TripFall { get; set; }
 
+    [JsonPropertyName("launchAir")]
+    public List<HurtboxDto>? LaunchAir { get; set; }
+
     [JsonPropertyName("standingOnCrouchEntry")]
     public bool StandingOnCrouchEntry { get; set; }
 
@@ -403,6 +406,12 @@ public sealed class AttackDto
     [JsonPropertyName("retainsGroundGuardOnFollowup")]
     public bool RetainsGroundGuardOnFollowup { get; set; }
 
+    [JsonPropertyName("groundGuardOnly")]
+    public bool GroundGuardOnly { get; set; }
+
+    [JsonPropertyName("respectsAirFollowupRestriction")]
+    public bool RespectsAirFollowupRestriction { get; set; }
+
     [JsonPropertyName("launchGravity")]
     public FractionDto? LaunchGravity { get; set; }
 
@@ -676,6 +685,9 @@ public sealed class LaunchReactionDto
 {
     [JsonPropertyName("suppressOwnerProjectilesDuringFall")]
     public bool SuppressOwnerProjectilesDuringFall { get; set; }
+
+    [JsonPropertyName("allowOwnerProjectilesOnCounter")]
+    public bool AllowOwnerProjectilesOnCounter { get; set; }
 
     [JsonPropertyName("startInFall")]
     public bool StartInFall { get; set; }

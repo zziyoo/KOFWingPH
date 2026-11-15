@@ -768,3 +768,10 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - `groundReservationTarget` 让配置中的延期地面候选在消费时核对身体距与对手状态。候选失去资格时可回落同一物理边沿的合法普通技。带独立根／Helper 时钟的保留候选只消费匹配边沿，其他边沿继续按各自时钟衰减。`helperRunsDuringGlobalPause` 独立控制 Helper 是否可在全局 Pause 锁存和衰减，默认关闭。角色 HitPause 仍由根命令的自身策略处理。
 - 阶段 27 的 440 通过既有 `walkOnCrouchRecovery` 在自然退出时响应前后方向。新招式优先，持下或中立可回蹲。复用现有运动和阶段 26 的身体距离选招，物理位置与视觉仍从同一提交状态读取。 [阶段 27 原版](STAGE27_REFERENCE.md)
 - `holdGroundBlockstunExitPosition` 保留 Blockstun 自然退到站立当帧的位置，下一帧恢复步行。只影响地面位移，模式 2 用它表达原版 State 140 的过渡，不启用独立的飞行道具防御续期。
+
+### 阶段 29 站立双键与吹飞
+
+- `GroundBlowback` 使用已有的已绑定地面保留候选，保留多个物理按键同帧边沿、根和 Helper 两条时钟、消费时方向判断。State 250 的动作时钟驱动帧数据和 `positionSteps`，HitDef 复用已有独立停顿、动态伤害和 `LaunchReactionProfile`。
+- 250→300 由绑定真实目标的 `reservedCancels` 建立新攻击实例。默认弱 Wave 走 `CancelDefinition`，与 300 自身第二段接触后的 Wave 许可分别求值。Mode 2 的 1050 和两模式的 310 延期保留。 [原版合同](STAGE29_REFERENCE.md) · [阶段验收](STAGE29_ACCEPTANCE.md)
+- `groundGuardOnly` 允许以 `guardflag=M` 生成站防、蹲防均可格挡的地面招式，并拒绝空中格挡。阶段 29 的 300 根据相同原版判据保留地面续防，`ground.type` 继续描述被命中后的反应。
+- `groundHurtboxes.launchAir` 为击飞初段提供受击框。启用 `suppressOwnerProjectilesDuringFall` 的反应从命中震停延续至首次触地，作用于攻击者自己的已启用 `respectsAirFollowupRestriction` 的近战及实体。`allowOwnerProjectilesOnCounter` 允许配置在反击结算时保留后续接触资格。帧开始的反应快照决定是否限制接触，动画、实体位移和寿命各自照常推进。

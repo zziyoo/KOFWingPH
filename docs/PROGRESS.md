@@ -2708,3 +2708,10 @@ HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本�
 - C# 专项 21/21、全量 1,513/1,513；Python 专项 5/5、全量 125 通过；原生探针 82 用例 completeVerified=true；真实 Godot 运行时 6 场景通过；六份 JSON 两轮生成逐字节一致。 [运行时场景](../tools/Stage28Validation/README.md)
 - 28G 冻结门禁收口：最终构建（`NewKOF.dll` 99607d79…、`NewKOF.BattleCore.dll` 4b1233ab…，同源重建指纹 6c99bc6c… 仅来源字节差异、IL 一致）回放阶段 14–26 共 542 对、65,069 逻辑帧、538,586 条权威记录逐条一致，13C Vulkan 复验通过；识别还原曾否决一次"移除方向门"的中间实现并按冻结对照回退。运行时 6 场景在最终构建复跑通过；`NewKOF.csproj` 补 `EnableDefaultEmbeddedResourceItems=false` 修复 MSB3552（仓库无 resx）。 [逐阶段数字](STAGE28_ACCEPTANCE.md#冻结门禁阶段-13c27)
 
+### 阶段 29 站立双键吹飞攻击
+
+- State 250 使用 Action 250，双模式共用 49 个有效 tick（23／3／23）。同帧 `y+b` 迁移到真实的地面保留候选，Helper 99999 的 `var(7)` 从写入后 2 逐 tick 递减。命中以 16／18 为普通／反击伤害基数，施攻／受击停顿 11／13。站防与蹲防停顿 11／11，零削血。 [原版合同](STAGE29_REFERENCE.md)
+- 旧 tick 24–25 的提前取消可进入 State 300 与默认弱 Wave。旧 tick 49 是自然恢复入口。310 和模式 2 的 1050 保留指令。普通命中限制本席已配置的追击，反击例外与阶段 29 的 300 地面续防均有原版和 Godot 定向对照。 [验收与证据](STAGE29_ACCEPTANCE.md)
+- 最终候选的 C# 专项 302/302、全量 1,544/1,544，Python 专项 6/6、全量 131/131。两轮独立生成的六份 JSON 逐字节一致。13C 的 323 帧角色／实体及 69 帧取消记录已在最终构建的 Vulkan 中对齐。 [复现命令](../tools/Stage29Validation/README.md)
+- 阶段 29 正式 PASS（7/7）。原版标准 75/75、只读命令 23/23，固定 Vulkan 44 对、6,244 逻辑帧、58,580 条开关视觉记录、2,172 张提交图像，实时 30／60 FPS。阶段 14–26 同构建冻结回放 542 对、65,069 帧、538,586 条权威记录对齐。阶段 27／28 的定向门禁与八条旧 Wave 来源复验通过。 [验收及取证](STAGE29_ACCEPTANCE.md)
+

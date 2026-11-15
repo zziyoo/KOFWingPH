@@ -25,8 +25,21 @@ public readonly record struct LaunchReactionState(LaunchReactionProfile Profile,
     public bool IsLying => Phase is LaunchReactionPhase.Impact or LaunchReactionPhase.Bounce or
         LaunchReactionPhase.LyingImpact or LaunchReactionPhase.Lying or LaunchReactionPhase.Wakeup;
 
+    public bool IsInInitialFlight => Phase is LaunchReactionPhase.Shake or LaunchReactionPhase.Lift or
+        LaunchReactionPhase.Rise or LaunchReactionPhase.Fall;
+
+    /// <summary>Checks the launch owner's eligibility for an opted-in follow-up during initial flight.</summary>
     public bool RestrictsAirFollowupFrom(int owner) => Profile.SuppressOwnerProjectilesDuringFall &&
-        LaunchOwner == owner && Phase is LaunchReactionPhase.Shake or LaunchReactionPhase.Fall;
+        LaunchOwner == owner && IsInInitialFlight;
+
+    internal static LaunchReactionState Begin(LaunchReactionProfile profile, int owner, bool counterHit) =>
+        new(profile, LaunchReactionPhase.Shake, 0,
+            LaunchOwner: profile.SuppressOwnerProjectilesDuringFall && !(counterHit && profile.AllowOwnerProjectilesOnCounter)
+                ? owner : -1);
+
+    internal bool HasValidOwner(int defender) => Profile.SuppressOwnerProjectilesDuringFall
+        ? LaunchOwner == 1 - defender || Profile.AllowOwnerProjectilesOnCounter && LaunchOwner == -1
+        : LaunchOwner == -1;
 
     public FighterLogicState LogicState => Phase switch
     {

@@ -403,3 +403,9 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_forward_light
 ```
 
 转换重复执行应选择空目录，随后比较六份 JSON 的 SHA-256（两轮逐字节一致）。 [原生探针核对与运行时场景](../tools/Stage28Validation/README.md) · [阶段验收](STAGE28_ACCEPTANCE.md)
+
+## 阶段 29 站立双键吹飞攻击（State 250）
+
+`state_ground_blowback` 用 Terry 原包、Manifest、签名原版轨迹和阶段 28 的六份冻结 JSON 生成独立预设。原 `ReservedGroundBlowback` 在新预设中迁移到绑定真实招式 `TerryGroundBlowback250` 的 `GroundBlowback`。CMD 候选顺序、同帧双键和根／Helper 时钟沿用已有地面保留指令。消费时读取非下方向的地面资格。旧配置仍可按各自的冻结命令回放。 [原版依据](STAGE29_REFERENCE.md)
+
+两套预设采用 `terry98-stage29-default`／`terry98-stage29-mode2` 视觉别名。Action 250、`positionSteps`、判定框与 LaunchReaction 由有效招式时钟驱动。出边窗口从原版 AIR 元素与 State −2 谓词换算，250→300 和默认弱 Wave 复用原有真实目标。310 和模式 2 的 1050 仍为保留候选。完整生成、安装图集和对局命令见本阶段验证说明。 [生成与验证](../tools/Stage29Validation/README.md)
