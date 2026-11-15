@@ -1,7 +1,7 @@
 param(
     [string]$IkemenRoot = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Ikemen-GO'),
     [switch]$Prepare,
-    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')]
+    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')]
     [string]$CaptureProfile = 'Stage14',
     [string]$RunDirectory = 'local-mugen/stage14-reference',
     [ValidateRange(1, 2147483646)]
@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ($LastFrame -ne 75 -and $CaptureProfile -notin @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+if ($LastFrame -ne 75 -and $CaptureProfile -notin @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     throw 'Extended reference traces are only enabled for Stage19 through Stage27'
 }
 $commit = '5dac5caf9a02a9b81bf2264e88a1bbf68e21bba0'
@@ -350,12 +350,15 @@ if ($Stage25GuardControls -and $Stage25MotionControls) {
     throw 'Choose one Stage 25 supplemental case batch per run'
 }
 $physicalCases = $null
-if ($CaptureProfile -in @('Stage25', 'Stage26', 'Stage27')) {
+if ($CaptureProfile -in @('Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     $captureDir = Join-Path $root 'tools/Stage15Reference'
     $caseFile = if ($Stage25GuardControls) { 'GuardControls.json' }
         elseif ($Stage25MotionControls) { 'MotionControls.json' } else { 'Cases.json' }
-    $physicalCases = Get-Content -LiteralPath (Join-Path $root "tools/${CaptureProfile}Reference/$caseFile") -Raw |
-        ConvertFrom-Json -AsHashtable
+    $physicalCases = [ordered]@{}
+    foreach ($property in (Get-Content -LiteralPath (Join-Path $root "tools/${CaptureProfile}Reference/$caseFile") -Raw |
+            ConvertFrom-Json).PSObject.Properties) {
+        $physicalCases[$property.Name] = $property.Value
+    }
     $distances = [ordered]@{}
     foreach ($case in $physicalCases.GetEnumerator()) { $distances[$case.Key] = $case.Value.distance }
 }
@@ -372,19 +375,19 @@ $expectedSourceHashes = @{
     'Terry.cmd' = 'ee57ffe1d6d4a2770b47590ab69177de79b24ccfc0153702dd3602f633507b59'
     'Terry.air' = '252646cc2940f776e94df0b7b7fd3772e098d75fda6e9b781135eaa36e0fd851'
 }
-if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     $expectedSourceHashes['Terry-2-3.cns'] = '90b83cdacd33a3800a825ee42bdbd6502b7989f4dec358126587edeb4495fdc4'
 }
-if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     $expectedSourceHashes['Helper.cns'] = 'b2d683f70a3c6dd76587edee1a54f0638f9c6e006d5c70af598ff9b0163dd62a'
 }
-if ($CaptureProfile -in @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+if ($CaptureProfile -in @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     $expectedSourceHashes['Terry-S.cns'] = '60171bf640c7e8316d34e2b0ab001f663472bfd14dc66d174dcf5a8eebd8dc21'
 }
-if ($CaptureProfile -in @('Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+if ($CaptureProfile -in @('Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     $expectedSourceHashes['Constants.cns'] = 'f2dec82cca8857f78a702ee03149642c632a2efa2a70f01ac2129ca82fa98c55'
 }
-if ($CaptureProfile -in @('Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+if ($CaptureProfile -in @('Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     $expectedSourceHashes['common_kof.cns'] = '3b934b5390e0b805df549db35601b4882d6c28b9165b56e3dcff72d3bd86c65b'
 }
 
@@ -466,7 +469,7 @@ $metadata = [ordered]@{
     scenario_distance = $distances
 }
 if ($CaptureProfile -ne 'Stage14') { $metadata.capture_profile = $CaptureProfile }
-if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     $metadata.rng_seed = $Seed
     $metadata.executed_cases = @($Cases)
 }
@@ -477,10 +480,10 @@ if ($LastFrame -ne 75) {
 foreach ($caseName in $Cases) {
     $env:RESEARCH_CASE = $caseName
     $env:RESEARCH_DISTANCE = $distances[$caseName].ToString([Globalization.CultureInfo]::InvariantCulture)
-    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
         $env:RESEARCH_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
     }
-    if ($CaptureProfile -in @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) {
+    if ($CaptureProfile -in @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
         $env:RESEARCH_LAST_FRAME = $LastFrame.ToString([Globalization.CultureInfo]::InvariantCulture)
     }
     if ($physicalCases) {
@@ -496,13 +499,19 @@ foreach ($caseName in $Cases) {
     }
     $process = Start-Process -FilePath $exe -WorkingDirectory $engine -ArgumentList $caseArguments -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $results "$caseName-stdout.txt") -RedirectStandardError $stderr
-    $timeout = if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) { 90000 } else { 45000 }
+    $timeout = if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) { 90000 } else { 45000 }
     if (!$process.WaitForExit($timeout)) {
         Stop-Process -Id $process.Id
         throw "Reference case $caseName timed out. Inspect $stderr"
     }
     $process.Refresh()
-    if ($process.ExitCode -ne 0 -or (Get-Content -LiteralPath $stderr -Raw) -notmatch "COMBAT_RESEARCH_DONE $caseName") {
+    # Windows PowerShell 5.1 does not populate Start-Process -PassThru ExitCode for redirected
+    # processes; the DONE marker on stderr is the engine's os.Exit(0) proof, so an unreadable
+    # exit code alone must not fail a completed case.
+    $exitCode = $null
+    try { $exitCode = $process.ExitCode } catch { $exitCode = $null }
+    if ((Get-Content -LiteralPath $stderr -Raw) -notmatch "COMBAT_RESEARCH_DONE $caseName" -or
+        ($null -ne $exitCode -and $exitCode -ne 0)) {
         throw "Reference case $caseName did not complete. Inspect $stderr"
     }
     $trace = Get-FileHash -LiteralPath $env:RESEARCH_TRACE
@@ -514,7 +523,7 @@ foreach ($caseName in $Cases) {
         trace_sha256 = $trace.Hash.ToLowerInvariant()
     }
     if ($CaptureProfile -ne 'Stage14') { $caseMetadata.arguments = $caseArguments }
-    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27')) { $caseMetadata.rng_seed = $Seed }
+    if ($CaptureProfile -in @('Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) { $caseMetadata.rng_seed = $Seed }
     if ($physicalCases) { $caseMetadata.physical_inputs = $physicalCases[$caseName] }
     [IO.File]::WriteAllText((Join-Path $results "$caseName-metadata.json"), ($caseMetadata | ConvertTo-Json -Depth 6) + [char]10, $enc)
     $trace

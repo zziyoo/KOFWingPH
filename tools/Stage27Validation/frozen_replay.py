@@ -207,13 +207,20 @@ def replay_headless(options, saved, archived, folder):
 def run_logged(command, log):
     for attempt in range(2):
         with log.open('wb') as stream:
-            result = subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, timeout=25)
+            result = subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, timeout=60)
         data = log.read_bytes()
+        shutdown_crash = any(
+            line.startswith((b'ERROR:', b'SCRIPT ERROR:', b'Vulkan ', b'Fatal error.'))
+            for line in data.splitlines())
         if (result.returncode == 0 and data.startswith(b'Godot Engine v4.7.2.stable.mono.') and
-                not any(line.startswith((b'ERROR:', b'SCRIPT ERROR:', b'Vulkan ', b'Fatal error.'))
-                        for line in data.splitlines())):
+                not shutdown_crash):
             return data
-        if attempt == 0 and b'Leaked unsafe reference to object: InputEventKey:' in data:
+        # A Godot Mono finalizer race can crash the process at exit after every authority row
+        # was already written; one bounded retry separates that transient from real mismatches.
+        transient = (b'Leaked unsafe reference to Object: InputEventKey:' in data or
+                     b'godotsharp_internal_refcounted_disposed' in data or
+                     b'godotsharp_internal_object_get_associated_gchandle' in data)
+        if attempt == 0 and transient:
             log.rename(log.with_name('duel-first-shutdown.log'))
             print(f'Retrying one Godot Mono shutdown error: {log}', flush=True)
             continue

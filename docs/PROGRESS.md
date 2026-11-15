@@ -2699,3 +2699,12 @@ HUD 的 `Event:` 行仍显示「最近一帧」的 `LastEvents`（调试文本�
 - 站姿 `b` 按消费时的身体距选招，48 及以内为 245，超出为 240。默认远身用 Action 240，模式 2 远身用 Action 241 并按原版逐次位移。近身均用 Action 245，默认旧 tick 4–8 可直接取消至弱 Wave。模式 2 保留 1050 的候选。 [原版依据](STAGE27_REFERENCE.md)
 - 440 自然退出当帧使用已有步行恢复配置。沿用阶段 26 原失败输入，F56 位移恢复到原版的 `3.16796875`，F95 正确选 205。旧配置与原始黄金记录继续用于冻结回放。 [阶段 27 验收](STAGE27_ACCEPTANCE.md)
 - 27G 冻结门禁收口：最终候选构建（`NewKOF.dll` 5a3970…、`NewKOF.BattleCore.dll` d59689…）回放阶段 14–26 共 542 对、65,069 逻辑帧、538,586 条视觉开关权威记录逐条一致，13C Vulkan 复验通过；Stage 18 初次失败为工具路径问题，已修复复验。阶段 27 正式 PASS，7/7。 [逐阶段日志](STAGE27_ACCEPTANCE.md#27g-冻结回放)
+
+### 阶段 28 前轻拳（State 300）
+
+- State 300（Back Knuckle）＝ Action 300，47 tick（11/9/27），双段 HitDef（stateTime 11–13 High / 17–19 Low，ID=30）加 MoveHitReset 的真实双段命中，`contactGroup` 1/2 承载、内核零改动。入口为「根 x＋前＋非下 OR Helper var(40)（4 起始、3 tick 存活）」，权限 ctrl/100-101/var(2)≥1/var(1)=1；出边为 var(1)=2 接触窗口（stateTime 18–19）的全部特殊技（默认弱 Wave、模式 2 无状态变化）。 [原版依据](STAGE28_REFERENCE.md)
+- 共享命令能力从占位迁到真实动作：识别期方向门控按原版证据保留（冻结重放否决了"移除后按住 DF+x 也产生候选"的中间实现，已回退）、OR 判据在消费期求值、保留指令可绑定至多一个真实招式、自由入口与 TryPriorityCancel 对绑定保留指令发动新攻击实例。根 `command="x"` 为单 tick（age-1 否定样本），延迟方向由 Helper 承担。 [C# 专项](../tests/BattleCore.Tests/ForwardLightPunchTests.cs)
+- 八个 var(1)=1 来源（200/205/215/235/245/400/410/440）的取消窗口全部原生验证并接入配置（stateTime 单位：4–6/4–6/4–12/5–8/4–8/4–4/6–12/11–17）；430/230/240 无窗口、250 延期。命令 ID 由 `ReservedForwardLightPunch` 迁移为 `ForwardLightPunch`。 [阶段 28 验收](STAGE28_ACCEPTANCE.md)
+- C# 专项 21/21、全量 1,513/1,513；Python 专项 5/5、全量 125 通过；原生探针 82 用例 completeVerified=true；真实 Godot 运行时 6 场景通过；六份 JSON 两轮生成逐字节一致。 [运行时场景](../tools/Stage28Validation/README.md)
+- 28G 冻结门禁收口：最终构建（`NewKOF.dll` 99607d79…、`NewKOF.BattleCore.dll` 4b1233ab…，同源重建指纹 6c99bc6c… 仅来源字节差异、IL 一致）回放阶段 14–26 共 542 对、65,069 逻辑帧、538,586 条权威记录逐条一致，13C Vulkan 复验通过；识别还原曾否决一次"移除方向门"的中间实现并按冻结对照回退。运行时 6 场景在最终构建复跑通过；`NewKOF.csproj` 补 `EnableDefaultEmbeddedResourceItems=false` 修复 MSB3552（仓库无 resx）。 [逐阶段数字](STAGE28_ACCEPTANCE.md#冻结门禁阶段-13c27)
+

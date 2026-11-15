@@ -375,3 +375,31 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_standing_heav
 ```
 
 完整转换要求原版本体、移动和输入路径门禁齐全。可用 `--body-only` 和新输出目录独立生成站重脚本体验证预设，视觉别名为 `terry98-stage27-body-default` 和 `terry98-stage27-body-mode2`。转换重复执行应选择空目录，随后比较六份 JSON 的 SHA-256。 [原引擎采集和复现](../tools/Stage27Reference/README.md) · [阶段验收](STAGE27_ACCEPTANCE.md)
+
+## 阶段 28 前轻拳（State 300）
+
+`state_forward_light_punch` 从阶段 27 两套冻结预设生成独立预设。占位命令 `ReservedForwardLightPunch` 迁移为真实 `ForwardLightPunch`（priority 4 不变、根缓冲单 tick、Helper 4/1/1 且全局 Pause 照常运行），并绑定真实招式 `TerryBackKnuckle300`（State 300＝Action 300，47 tick 双段）。八个 var(1)=1 来源（200/205/215/235/245/400/410/440）的 `reservedCancels` 全部指向真实 300；430/230/240 无窗口，250/805/310/720 占位不变。 [原版依据](STAGE28_REFERENCE.md)
+
+默认模式的 300 在接触窗口（旧 tick 18–19，需 seg2 接触）可取消至弱 Wave；模式 2 无 1000/1050 变化。命令 JSON 不携带 `sourceLines`（严格 DTO）。
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+$env:NEWKOF_TERRY_AUDIT = (Get-Location).Path
+$base = 'data/imported-characters/terry98-stage27-final'
+$profile = 'data/imported-characters/terry98-stage28-final'
+$source = @('local-mugen/terry.zip','data/imported-characters/terry98/manifest.json')
+$names = @('probe3','probe4','probe5','probe5b','probe5c','probe5d','probe6','probe6b','probe6c','probe6d','probe6e',
+           'probe7','probe7b','probe7c','probe7d','probe7e','probe7f','probe7g','probe8','probe8b','probe8c','probe8d',
+           'probe8e','probe9','probe9b','probe9c')
+$refs = @($names | ForEach-Object { '--reference'; "local-mugen/stage28-native-$_/results" })
+py -m mugen_importer.state_forward_light_punch @source --base $base @refs --output $profile
+if ($LASTEXITCODE) { throw 'Stage 28 conversion failed' }
+foreach ($mode in 'default','mode2') {
+  py tools/Stage14Validation/stage_assets.py --binding "$profile/$mode.binding.json" `
+    --destination "data/imported-characters/terry98-stage28-$mode"
+  if ($LASTEXITCODE) { throw "Stage 28 $mode visual staging failed" }
+}
+py -m unittest discover -s tools/MugenImporter/tests -p test_state_forward_light_punch.py
+```
+
+转换重复执行应选择空目录，随后比较六份 JSON 的 SHA-256（两轮逐字节一致）。 [原生探针核对与运行时场景](../tools/Stage28Validation/README.md) · [阶段验收](STAGE28_ACCEPTANCE.md)

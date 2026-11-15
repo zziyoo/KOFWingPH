@@ -14,6 +14,12 @@
       显式关闭默认收集并手动指定源码目录，保证编译边界明确。
     -->
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!--
+      仓库内没有任何 .resx；Godot SDK 组合下默认 EmbeddedResource 通配
+      （**/*.resx）会把未展开的字面量传给 GenerateResource（MSB3552）。
+      与上面同理，显式关闭，编译边界保持明确。
+    -->
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
   </PropertyGroup>
 
   <ItemGroup>

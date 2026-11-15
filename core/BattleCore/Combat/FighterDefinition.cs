@@ -210,8 +210,10 @@ public sealed class FighterDefinition
                     $"角色 {fighterId} 的指令 ID 重复：{command.CommandId}（同一角色内同一指令" +
                     "映射到多个招式会产生歧义）。", nameof(commands));
         }
-        if (reserved.Count > 0 && (!useCommandPriority || moveCopy.Any(move => reserved.ContainsKey(move.CommandId))))
-            throw new ArgumentException("保留的地面指令需要优先级选招且不可绑定招式。", nameof(commands));
+        // 保留指令仍要求优先级选招；阶段 28 起允许绑定<b>恰好一个</b>真实招式
+        // （State 300 Back Knuckle），未绑定的保留指令维持占位消费语义。
+        if (reserved.Count > 0 && !useCommandPriority)
+            throw new ArgumentException("保留的地面指令需要优先级选招。", nameof(commands));
         ReservedGroundCommands = reserved;
 
         var moveIds = new HashSet<string>(StringComparer.Ordinal);
@@ -287,6 +289,10 @@ public sealed class FighterDefinition
         foreach (var group in moveCopy.GroupBy(move => move.CommandId, StringComparer.Ordinal))
         {
             MoveDefinition[] variants = group.ToArray();
+            if (ReservedGroundCommands.ContainsKey(group.Key) && variants.Length > 1)
+                throw new ArgumentException(
+                    $"角色 {fighterId} 的保留指令 {group.Key} 只能绑定一个真实招式（收到 {variants.Length} 个）。",
+                    nameof(moves));
             if (variants.Any(move => move.MaximumStartBodyDistance.HasValue) && groundBodyWidths is null)
                 throw new ArgumentException($"指令 {group.Key} 的身体距离条件需要 groundBodyWidths。", nameof(moves));
             foreach (MoveAllowedStates stance in new[] { MoveAllowedStates.Standing, MoveAllowedStates.Crouching })

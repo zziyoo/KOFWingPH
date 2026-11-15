@@ -1676,3 +1676,9 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - 阶段 27 预设位于 `data/imported-characters/terry98-stage27-final`，视觉别名为 `terry98-stage27-default`／`terry98-stage27-mode2`。物理 `b` 对应 P1 `I`、P2 `KP5` 或 `;`。核对身体距边界时同时保留按键、消费、`MoveStarted` 和图像提交记录。 [生成与安装](MUGEN_IMPORT.md#阶段-27-站重脚与近远选招) · [图形复现](../tools/Stage27Validation/README.md)
 - 追踪 440 的自然步行时看 F56／L70。当帧合法新招式优先于步行。命令审计把角色 HitPause 的根命令和全局 Pause 中运行的按钮 Helper 分开。250、805、300／310、720、1050 仍属于保留候选。 [原版与范围](STAGE27_REFERENCE.md)
 - 阶段 27 正式 PASS，7/7。最终候选构建（`NewKOF.dll` 5a3970…、`NewKOF.BattleCore.dll` d59689…）以 `--headless-authority` 回放阶段 14–26 共 542 对、65,069 逻辑帧、538,586 条权威记录逐条一致，13C Vulkan 复验通过；Stage 18 初次失败为工具路径问题，已修复复验。逐阶段日志与执行记录见[阶段 27 收口交接](STAGE27_HANDOFF.md)与[阶段 27 验收](STAGE27_ACCEPTANCE.md)。
+
+### 阶段 28 前轻拳（State 300）
+
+- 阶段 28 预设位于 `data/imported-characters/terry98-stage28-final`，视觉别名为 `terry98-stage28-default`／`terry98-stage28-mode2`。物理前＋轻拳对应 P1 `D`＋`J`、P2 `Right`＋`KP1`。核对入口时同时保留按键、消费、`MoveStarted` 和图像提交记录。 [生成与安装](MUGEN_IMPORT.md#阶段-28-前轻拳state-300) · [运行时场景](../tools/Stage28Validation/README.md)
+- 300 的方向锁存语义在消费期求值（根组合或 Helper 的 OR）；识别期只认当帧按键边沿且保留原方向门（按住 DF+x 不产生候选，冻结对照否决过移除方案）。已实现来源的取消窗口见[阶段 28 验收](STAGE28_ACCEPTANCE.md)，430/230/240 无窗口、250 延期。 [原版与范围](STAGE28_REFERENCE.md)
+- 阶段 28 正式 PASS，28A–28G 全过。最终构建（`NewKOF.dll` 99607d79…、`NewKOF.BattleCore.dll` 4b1233ab…，同源重建指纹 6c99bc6c…，仅 72 字节来源差异、IL 一致）回放阶段 14–26 共 542 对、65,069 逻辑帧、538,586 条权威记录逐条一致，13C Vulkan 复验通过（首跑一次实时抖动已复跑排除）；运行时 6 场景在最终构建复跑通过；`NewKOF.csproj` 补 `EnableDefaultEmbeddedResourceItems=false` 修复 MSB3552。逐阶段数字见[阶段 28 验收](STAGE28_ACCEPTANCE.md)。

@@ -150,11 +150,15 @@ def verify_native_references(directories, audit, *, reference_stage=20, include_
                     all(source_hashes.get(name) == sha for name, sha in hashes.items()),
                     'native reference source mismatch')
             names = []
+            superseded = checker.get('SUPERSEDED_CASES', {})
             for case, data in checker['read_cases'](directory):
                 require(case not in cases, f'duplicate native case {case}')
                 cases[case] = data
                 names.append(case)
-            require(names == metadata['executed_cases'], 'native metadata and checked case names differ')
+            expected = [case for case in metadata['executed_cases']
+                        if not (case in superseded and
+                                metadata.get('last_frame', 75) < superseded[case])]
+            require(names == expected, 'native metadata and checked case names differ')
             references.append({'metadataSha256': state200.archive_digest(metadata_path), 'cases': names})
         checked = checker['verify_cases'](cases)
     return (references, checked) if include_contract else references

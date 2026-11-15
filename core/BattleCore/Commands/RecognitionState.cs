@@ -536,6 +536,10 @@ public sealed class RecognitionState
 
         if (definition.ReserveGroundInput && !definition.MatchHeldMotion)
         {
+            // The original CMD gate (x + holdfwd + !holddown, or the latched frozen direction)
+            // decides candidate creation; the helper latch extends it at consumption time in
+            // AllowsReservation. Deferred placeholders without the edge flag keep the
+            // immediate direction gate below.
             if (definition.ReserveOnEdgeDirection
                 ? !inHitPause && !sequence.Contains(rootDirection)
                 : definition.BufferLifetimeFrames == 0 && definition.BufferPolicy is null &&

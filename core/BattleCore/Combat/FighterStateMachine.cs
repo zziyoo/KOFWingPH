@@ -260,11 +260,17 @@ public static class FighterStateMachine
             {
                 if (!AllowsReservation(recognition, reservation, result, opponentBodyDistance, opponentGroundedNonHitstun))
                     continue;
-                recognition = reservation.MatchHeldMotion || reservation.ReserveOnEdgeDirection ||
-                    reservation.BufferPolicy is not null || reservation.GroundReservationTarget is not null
-                    ? recognition.WithResultConsumed(match.RecognizedFrame)
-                    : recognition.WithReservedGroundInputConsumed(match.RecognizedFrame, frame);
-                break;
+                if (definition.FindMoves(match.CommandId).Count == 0)
+                {
+                    // 延期占位（805／310／720／250）：只占用输入，不产生招式或攻击实例。
+                    recognition = reservation.MatchHeldMotion || reservation.ReserveOnEdgeDirection ||
+                        reservation.BufferPolicy is not null || reservation.GroundReservationTarget is not null
+                        ? recognition.WithResultConsumed(match.RecognizedFrame)
+                        : recognition.WithReservedGroundInputConsumed(match.RecognizedFrame, frame);
+                    break;
+                }
+                // 阶段 28：绑定真实招式的保留指令（State 300）继续走下方与普通技相同的
+                // 姿态/距离/发动流程——AllowsReservation 已表达原版「根组合或 Helper」判据。
             }
             MoveAllowedStates required = idle == FighterLogicState.Crouching
                 ? MoveAllowedStates.Crouching
@@ -459,10 +465,22 @@ public static class FighterStateMachine
                 AllowsReservation(recognition, reservation, result, opponentBodyDistance, opponentGroundedNonHitstun) &&
                 move.ReservedCancels.Any(rule => rule.CommandId == match.CommandId && rule.IsOpen(state, elapsed)))
             {
+                IReadOnlyList<MoveDefinition> reservedTargets = definition.FindMoves(match.CommandId);
+                if (reservedTargets.Count == 0)
+                {
+                    // 延期占位：占用输入后原动作继续运行。
+                    if (rejectedStandingInputs is not null)
+                        ConsumeRejected(ref recognition, rejectedStandingInputs, match.RecognizedFrame);
+                    recognition = recognition.WithResultConsumed(match.RecognizedFrame);
+                    return null;
+                }
+                // 阶段 28：真实保留目标（State 300）作为新的独立攻击实例发动——
+                // 旧实例当帧尚未提交的接触与位移步进不再结算，已结算结果不重复。
                 if (rejectedStandingInputs is not null)
                     ConsumeRejected(ref recognition, rejectedStandingInputs, match.RecognizedFrame);
-                recognition = recognition.WithResultConsumed(match.RecognizedFrame);
-                return null;
+                return new FighterActionTick(FighterLogicState.Startup, reservedTargets[0].MoveId,
+                    reservedTargets[0].StartupFrames, recognition.WithResultConsumed(match.RecognizedFrame),
+                    match, MoveStartedFrame: frame, MoveElapsedFrames: 0);
             }
             foreach (CancelDefinition cancel in move.Cancels)
             {
