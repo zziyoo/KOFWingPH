@@ -409,3 +409,21 @@ py -m unittest discover -s tools/MugenImporter/tests -p test_state_forward_light
 `state_ground_blowback` 用 Terry 原包、Manifest、签名原版轨迹和阶段 28 的六份冻结 JSON 生成独立预设。原 `ReservedGroundBlowback` 在新预设中迁移到绑定真实招式 `TerryGroundBlowback250` 的 `GroundBlowback`。CMD 候选顺序、同帧双键和根／Helper 时钟沿用已有地面保留指令。消费时读取非下方向的地面资格。旧配置仍可按各自的冻结命令回放。 [原版依据](STAGE29_REFERENCE.md)
 
 两套预设采用 `terry98-stage29-default`／`terry98-stage29-mode2` 视觉别名。Action 250、`positionSteps`、判定框与 LaunchReaction 由有效招式时钟驱动。出边窗口从原版 AIR 元素与 State −2 谓词换算，250→300 和默认弱 Wave 复用原有真实目标。310 和模式 2 的 1050 仍为保留候选。完整生成、安装图集和对局命令见本阶段验证说明。 [生成与验证](../tools/Stage29Validation/README.md)
+
+## 阶段 30 前下重拳（State 310）
+
+`state_rising_upper` 核对固定 Terry ZIP、DEF 的 State 文件映射、CMD、Helper、State −2 与 Manifest。转换要求六份阶段 29 父 JSON 命中各自冻结哈希，并取得九条入边、两模式接触许可、自然恢复、地面续防和全局 Pause 输入的签名轨迹。使用新目录保存六份输出。 [原版参考](STAGE30_REFERENCE.md)
+
+```powershell
+$env:PYTHONPATH = 'tools/MugenImporter'
+$env:NEWKOF_TERRY_AUDIT = (Get-Location).Path
+$refs = @('pilot','input','routes','wave','wave-edge','contact','tackle') |
+  ForEach-Object { '--reference'; "local-mugen/stage30-native-$_/results" }
+$profile = 'data/imported-characters/terry98-stage30-final'
+py -3.11 -m mugen_importer.state_rising_upper local-mugen/terry.zip `
+  data/imported-characters/terry98/manifest.json --base data/imported-characters/terry98-stage29-final `
+  @refs --output $profile
+if ($LASTEXITCODE) { throw 'Stage 30 conversion failed' }
+```
+
+新预设用 `RisingUpper` 替换 310 占位，保留 DF+y 的识别期方向门与根／Helper 两路时钟。两模式的真实 310 使用独立视觉别名 `terry98-stage30-default`／`terry98-stage30-mode2`。默认弱 Wave 复用 State 1000 与 Helper 1020，较早的弱 Rising Tackle 只保留竞争资格。模式 2 的 1050 独立保留输入。图集安装、二次生成哈希和 Vulkan 验收方法见验证说明。 [导入图集和执行](../tools/Stage30Validation/README.md)

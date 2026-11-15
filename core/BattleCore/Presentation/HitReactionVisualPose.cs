@@ -1,6 +1,6 @@
 namespace NewKOF.BattleCore.Presentation;
 
-/// <summary>Read-only projection of the most recent committed hit during grounded hitstun.</summary>
+/// <summary>Read-only projection of the most recent committed hit during a reaction.</summary>
 public sealed class HitReactionVisualPose
 {
     public string? MoveId { get; private set; }

@@ -112,7 +112,8 @@ public sealed class AttackDefinition
         bool rejectsFallingTargets = false,
         bool retainsGroundGuardOnFollowup = false,
         bool groundGuardOnly = false,
-        bool respectsAirFollowupRestriction = false)
+        bool respectsAirFollowupRestriction = false,
+        bool launchOnAirborneOnly = false)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -183,6 +184,8 @@ public sealed class AttackDefinition
             throw new ArgumentException("受击重力需要有效的击飞速度和重力。", nameof(launchGravity));
         if (launchReaction is not null && launchGravity is null)
             throw new ArgumentException("击飞反应需要受击重力。", nameof(launchReaction));
+        if (launchOnAirborneOnly && launchVelocityY <= FixedPoint.Zero)
+            throw new ArgumentException("Airborne-only launch requires launch velocity.", nameof(launchOnAirborneOnly));
         GroundReaction = lightGroundReaction ? GroundHitReaction.Light : groundHitReaction;
         OffsetForward = offsetForward;
         OffsetUp = offsetUp;
@@ -201,6 +204,7 @@ public sealed class AttackDefinition
         LaunchVelocityY = launchVelocityY;
         LaunchGravity = launchGravity;
         LaunchReaction = launchReaction;
+        LaunchOnAirborneOnly = launchOnAirborneOnly;
         RejectsLyingTargets = rejectsLyingTargets;
         RejectsFallingTargets = rejectsFallingTargets;
         RetainsGroundGuardOnFollowup = retainsGroundGuardOnFollowup;
@@ -222,6 +226,7 @@ public sealed class AttackDefinition
     public GroundHitReaction GroundReaction { get; }
     public FixedPoint? LaunchGravity { get; }
     public LaunchReactionProfile? LaunchReaction { get; }
+    public bool LaunchOnAirborneOnly { get; }
     public bool RejectsLyingTargets { get; }
     public bool RejectsFallingTargets { get; }
     public bool RetainsGroundGuardOnFollowup { get; }
@@ -297,8 +302,9 @@ public sealed class AttackDefinition
         ? (blocked ? outcome.Block : outcome.Hit)
         : new HitstopPair(HitstopFrames, HitstopFrames);
 
-    /// <summary>这一击是否会击飞（垂直初速 &gt; 0）。</summary>
+    /// <summary>这一击是否配置了击飞（垂直初速 &gt; 0）。</summary>
     public bool Launches => LaunchVelocityY > FixedPoint.Zero;
+    internal bool LaunchesAgainst(bool airborne) => Launches && (!LaunchOnAirborneOnly || airborne);
 
     /// <summary>单帧击退/摩擦配置上限（健全性边界）。</summary>
     public const int MaxKnockbackUnits = 32;

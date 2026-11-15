@@ -72,7 +72,9 @@ public MoveDefinition(
     bool returnsToCrouch = false,
     IReadOnlyList<ReservedCancelDefinition>? reservedCancels = null,
     bool walkOnCrouchRecovery = false,
-    IReadOnlyList<MovePositionStep>? positionSteps = null)
+    IReadOnlyList<MovePositionStep>? positionSteps = null,
+    bool faceOpponentOnStart = false,
+    bool deferCrouchOnNaturalExit = false)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -108,6 +110,11 @@ public MoveDefinition(
         AllowedFrom = allowedFrom;
         ReturnsToCrouch = returnsToCrouch;
         WalkOnCrouchRecovery = walkOnCrouchRecovery;
+        FaceOpponentOnStart = faceOpponentOnStart;
+        if (deferCrouchOnNaturalExit && returnsToCrouch)
+            throw new ArgumentException("Deferring crouch conflicts with recovery directly into crouch.",
+                nameof(deferCrouchOnNaturalExit));
+        DeferCrouchOnNaturalExit = deferCrouchOnNaturalExit;
         MinimumStartDistance = minimumStartDistance;
         MaximumStartBodyDistance = maximumStartBodyDistance;
         GuardThreatFrames = guardThreatFrames;
@@ -152,6 +159,8 @@ public MoveDefinition(
         if (reservedCopy.Any(rule => rule is null || rule.WindowLastFrame >= (long)startupFrames + activeFrames + recoveryFrames))
             throw new ArgumentException("Reserved cancel windows must end before natural move recovery.", nameof(reservedCancels));
         ReservedCancels = Array.AsReadOnly(reservedCopy);
+        TracksContactAge = Cancels.Any(rule => rule.MaximumContactAge.HasValue) ||
+            reservedCopy.Any(rule => rule.MaximumContactAge.HasValue);
 
         // 投技定义（D97）：生效帧窗口必须在 Active 阶段内，ThrowId 在本招式内唯一。
         ThrowDefinition[] throwCopy = (throws ?? Array.Empty<ThrowDefinition>()).ToArray();
@@ -207,6 +216,9 @@ public MoveDefinition(
     public MoveAllowedStates AllowedFrom { get; }
     public bool ReturnsToCrouch { get; }
     public bool WalkOnCrouchRecovery { get; }
+    public bool FaceOpponentOnStart { get; }
+    public bool DeferCrouchOnNaturalExit { get; }
+    internal bool TracksContactAge { get; }
 
     public FixedPoint MinimumStartDistance { get; }
     public FixedPoint? MaximumStartBodyDistance { get; }

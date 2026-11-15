@@ -669,7 +669,7 @@ public sealed class RecognitionState
             if (frame - directions[end].Frame > definition.MaxSequenceFrames)
                 break;
             if (directions[end].Direction == sequence[^1] &&
-                MatchHeldDirections(directions, sequence, end, matched))
+                MatchHeldDirections(directions, sequence, end, matched, definition.MatchInitialCardinalRelease))
             {
                 // The newest completed motion owns the button, including when it was already used.
                 if (frame - matched[0] > definition.MaxSequenceFrames || consumedEndFrames.Contains(matched[^1]))
@@ -687,20 +687,33 @@ public sealed class RecognitionState
     }
 
     private static bool MatchHeldDirections(List<DirectionEntry> directions, IReadOnlyList<CommandDirection> sequence,
-        int cursor, int[] matched)
+        int cursor, int[] matched, bool matchInitialCardinalRelease)
     {
         for (int element = sequence.Count - 1; element >= 0; element--)
         {
             while (cursor >= 0 && directions[cursor].Direction == CommandDirection.Neutral)
                 cursor--;
-            if (cursor < 0 || directions[cursor].Direction != sequence[element])
+            if (cursor < 0)
                 return false;
             DirectionEntry direction = directions[cursor--];
+            bool initialRelease = element == 0 && matchInitialCardinalRelease;
+            if (direction.Direction != sequence[element] &&
+                !(initialRelease && IncludesCardinal(direction.Direction, sequence[element])))
+                return false;
             // The first source step is a release. Its timer starts when the held interval ends.
             matched[element] = element == 0 ? direction.EndFrame + 1 : direction.Frame;
         }
         return true;
     }
+
+    private static bool IncludesCardinal(CommandDirection held, CommandDirection cardinal) => cardinal switch
+    {
+        CommandDirection.Forward => held is CommandDirection.DownForward or CommandDirection.UpForward,
+        CommandDirection.Back => held is CommandDirection.DownBack or CommandDirection.UpBack,
+        CommandDirection.Down => held is CommandDirection.DownForward or CommandDirection.DownBack,
+        CommandDirection.Up => held is CommandDirection.UpForward or CommandDirection.UpBack,
+        _ => false,
+    };
 
     /// <summary>检查压缩历史的 <paramref name="endIndex"/> 结尾是否恰好等于序列的最后
     /// <paramref name="elementCount"/> 个元素（蓄力 = 尾段，普通 = 完整序列）。</summary>

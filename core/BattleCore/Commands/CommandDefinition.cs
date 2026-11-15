@@ -110,7 +110,8 @@ public sealed class CommandDefinition
         bool reserveGroundInput = false,
         bool matchCompletedMotion = false,
         bool reserveOnEdgeDirection = false,
-        GroundReservationTarget? groundReservationTarget = null)
+        GroundReservationTarget? groundReservationTarget = null,
+        bool matchInitialCardinalRelease = false)
     {
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("指令 ID 不能为空。", nameof(commandId));
@@ -172,6 +173,10 @@ public sealed class CommandDefinition
                 nameof(matchHeldMotion));
         if (matchCompletedMotion && !matchHeldMotion)
             throw new ArgumentException("A completed motion uses the held-motion direction parser.", nameof(matchCompletedMotion));
+        if (matchInitialCardinalRelease && (!matchHeldMotion || sequence[0] is not
+            (CommandDirection.Forward or CommandDirection.Back or CommandDirection.Up or CommandDirection.Down)))
+            throw new ArgumentException("A cardinal release requires a held motion starting with a cardinal direction.",
+                nameof(matchInitialCardinalRelease));
         if (bufferPolicy is { HelperTicks: > 0 } && requiredButtons == InputBits.None)
             throw new ArgumentException("A helper command buffer requires attack buttons.", nameof(bufferPolicy));
         if (reserveOnEdgeDirection && (!reserveGroundInput || matchHeldMotion || bufferPolicy is not { HelperTicks: > 0 }))
@@ -201,6 +206,7 @@ public sealed class CommandDefinition
         MatchCompletedMotion = matchCompletedMotion;
         ReserveOnEdgeDirection = reserveOnEdgeDirection;
         GroundReservationTarget = groundReservationTarget;
+        MatchInitialCardinalRelease = matchInitialCardinalRelease;
     }
 
     /// <summary>唯一标识，如 <c>236A</c>。</summary>
@@ -242,6 +248,8 @@ public sealed class CommandDefinition
     public CommandBufferPolicy? BufferPolicy { get; }
     public bool ReserveGroundInput { get; }
     public bool MatchCompletedMotion { get; }
+    /// <summary>Allows the motion's initial released cardinal direction to come from a diagonal hold.</summary>
+    public bool MatchInitialCardinalRelease { get; }
     /// <summary>Latch directions and button edges separately for the root and qualify the helper on the physical edge.</summary>
     public bool ReserveOnEdgeDirection { get; }
 

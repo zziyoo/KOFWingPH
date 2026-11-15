@@ -1,7 +1,7 @@
 # AGENT_HANDOFF.md — Agent 交接说明
 
 > **每一位 Agent 在修改代码前必须先读本文件，并核对文档与实际代码是否一致。**
-> 最后更新：2026-11-08（阶段12确定性AI；Debug/Release各1172项通过；StateVersion15/CoreVersion16保持）
+> 最后更新：2026-11-15（阶段 30 Terry State 310，见文末交接）
 
 > 2026-11-10 阶段补记：13C-A 动作审查/浏览器交互预览通过（Python30项、独立有窗口Edge35项），详见 PROGRESS.md 最终13C-A记录及 MUGEN_IMPORT.md。13C-B/C和完整13C尚未通过，不沿用浏览器验收当作Godot战斗图形验收。
 >
@@ -1689,3 +1689,11 @@ HUD 全部只读权威状态且与注入日志的推演时间线逐帧吻合。
 - State 250 旧 tick 24–25 的两模式共有 300／310 候选，默认模式弱 Wave 1000 与模式 2 占位 1050 分别求值。旧 tick 49 的自然开招单独计。查追击时同时看 250 接触的反击上下文、目标击飞阶段、Helper 1020 有效窗口和 `WaveRestrictionAudit`。 [原版与边界](STAGE29_REFERENCE.md)
 - 阶段 29 正式 PASS（7/7）。原版 75 个签名场景和 23 个命令探针，最终 44 对固定 Vulkan、实时 30／60 FPS、同种子和像素夹具通过。最终构建的 13C Vulkan、14–26 共 542 对权威回放及 27／28 定向门禁均已通过。 [验收证据](STAGE29_ACCEPTANCE.md)
 - 下一候选可从 310 的实际本体及 `var(1)`／接触窗口取证开始。阶段 29 只保留 310 的候选和实测许可。 [原版与范围](STAGE29_REFERENCE.md)
+
+### 阶段 30 前下重拳与接触后许可
+
+- 两种实验预设位于 `data/imported-characters/terry98-stage30-final`，视觉别名为 `terry98-stage30-default` 和 `terry98-stage30-mode2`。同一物理组合按各席当前朝向解析。P1 为 `S`＋前方向＋`K`，P2 为 `Down`＋前方向＋`KP2` 或 `.`。按候选审计区分根组合、Helper 41、实际 `MoveStarted` 和冻结期间的有效时钟。 [配置生成与 Vulkan 复现](../tools/Stage30Validation/README.md) · [源规则](STAGE30_REFERENCE.md)
+- State／Action 310 有六个 AIR 元素，旧 tick 3–8 的两个攻击框共享一个接触组。九个普通技入边使用各自源窗口。310 的接触后许可使用接触后的首个有效 tick，旧 tick 33 则经自然恢复许可。默认弱 Wave 继续用 1000／1020，模式 2 的 1050 和默认弱 Rising Tackle 1200 只保留候选。 [窗口与优先级](STAGE30_REFERENCE.md#地面入口与权限)
+- 如需核查 F104 的世界 Pause，使用签名长轨迹比较新物理 DF+y 与 F103 保留到 F104 的 Helper 输入。图像从 `FramePostDraw` 的提交版本读取。复合空战样本中，旧 205 对较低抛物线提前接触的差异已有阶段 29 配置对照，独立 310 对空与地面延后接触分别有证据。 [验收](STAGE30_ACCEPTANCE.md) · [图像和日志](../tools/Stage30Validation/EVIDENCE.md)
+- 阶段 30 正式 PASS，30A–30G 共 7/7。交付 DLL 的哈希、固定 Vulkan 和实时证据在验收索引。13C 的 323 帧角色／实体和 69 帧取消记录，以及阶段 14–26 同构建的 542 对、65,069 逻辑帧、538,586 条权威记录均逐条匹配。复跑使用独立目录，四次 Mono 退出异常的首跑日志与复验并存。 [最终门禁](STAGE30_ACCEPTANCE.md#阶段-1426-冻结回放)
+- 下一候选可静态审查弱 Rising Tackle 的 ReversalDef、状态文件与视觉依赖。阶段 30 到此停止，延期本体仍按独立阶段取证和验收。 [原版反制样本](STAGE30_REFERENCE.md#接触许可与自然恢复的对照)

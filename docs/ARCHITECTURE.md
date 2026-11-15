@@ -775,3 +775,12 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - 250→300 由绑定真实目标的 `reservedCancels` 建立新攻击实例。默认弱 Wave 走 `CancelDefinition`，与 300 自身第二段接触后的 Wave 许可分别求值。Mode 2 的 1050 和两模式的 310 延期保留。 [原版合同](STAGE29_REFERENCE.md) · [阶段验收](STAGE29_ACCEPTANCE.md)
 - `groundGuardOnly` 允许以 `guardflag=M` 生成站防、蹲防均可格挡的地面招式，并拒绝空中格挡。阶段 29 的 300 根据相同原版判据保留地面续防，`ground.type` 继续描述被命中后的反应。
 - `groundHurtboxes.launchAir` 为击飞初段提供受击框。启用 `suppressOwnerProjectilesDuringFall` 的反应从命中震停延续至首次触地，作用于攻击者自己的已启用 `respectsAirFollowupRestriction` 的近战及实体。`allowOwnerProjectilesOnCounter` 允许配置在反击结算时保留后续接触资格。帧开始的反应快照决定是否限制接触，动画、实体位移和寿命各自照常推进。
+
+### 阶段 30 前下重拳与接触年龄
+
+- `RisingUpper` 绑定真实地面招式，沿用既有地面保留候选和九个源窗口。识别期保留相对前下门控，消费期读取根组合或独立的 Helper 时钟。带 `faceOpponentOnStart` 的新实例在消费命令后朝向对手。帧开始的朝向仍用于解析本帧物理输入。
+- `deferCrouchOnNaturalExit` 只处理自然恢复当帧未选择其他动作的持下情况。该帧提交站立并保持位置。新招式、前后步行和起跳继续依已有规则在自然恢复当帧处理。
+- `resetPauseClockOnCrouchEntry` 表达原版基本蹲姿在 CMD 和 State −2 之前求值的时间口径。已有脚本 Pause 计数时，站立持下的临时蹲起时间为 0，随后才跟随已提交的新动作时钟。冻结期通过 Helper 保留的 DF+y 若消费时已松下，则不会触发这一归零。此选项只影响已有 Pause 请求的状态时钟读取。
+- `maximumContactAge` 为真实和保留取消增加可选的有效接触年龄。结算在启用该能力的攻击实例快照中保存最近一次命中／格挡所在的动作 tick，冻结期保持。换招、打断和退出会随确认清除。窗口继续由现有取消执行器检查。310 只允许接触后的第一个有效 tick，旧配置维持原确认窗口语义。
+- `matchInitialCardinalRelease` 在可选的独立按键手势中允许从包含该分量的斜方向释放，手势时钟从释放时起算。默认预设用它保留 1200 对同帧弱 Wave 的原版优先级。1200 没有可执行本体。
+- `launchOnAirborneOnly` 在空中命中时使用已有击飞参数，地面命中仍读取地面硬直和击退。310 接触检测沿用 250 的帧开始禁追快照及反击例外。`zeroBasedLaunchClock` 可按造成击飞的招式声明受击 AIR 采样从相位第 0 tick 开始，投影层从权威反应状态读时钟。 [原版参数](STAGE30_REFERENCE.md) · [验收边界](STAGE30_ACCEPTANCE.md)

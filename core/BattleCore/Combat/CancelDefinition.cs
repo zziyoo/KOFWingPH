@@ -59,7 +59,8 @@ public sealed class CancelDefinition
         bool allowSameMove = false,
         bool standingInputOnly = false,
         int? maximumInputAge = null,
-        bool retainBufferedMotionHelper = false)
+        bool retainBufferedMotionHelper = false,
+        int? maximumContactAge = null)
     {
         if (string.IsNullOrWhiteSpace(targetMoveId))
             throw new ArgumentException("取消目标招式 ID 不能为空。", nameof(targetMoveId));
@@ -77,6 +78,9 @@ public sealed class CancelDefinition
                 nameof(allowWhiff));
         if (maximumInputAge < 0)
             throw new ArgumentOutOfRangeException(nameof(maximumInputAge), "按键年龄不能为负。");
+        if (maximumContactAge is <= 0 || maximumContactAge.HasValue && allowWhiff)
+            throw new ArgumentOutOfRangeException(nameof(maximumContactAge),
+                "Contact age requires a confirmed contact and at least one effective tick.");
 
         TargetMoveId = targetMoveId;
         WindowFirstFrame = windowFirstFrame;
@@ -89,6 +93,7 @@ public sealed class CancelDefinition
         StandingInputOnly = standingInputOnly;
         MaximumInputAge = maximumInputAge;
         RetainBufferedMotionHelper = retainBufferedMotionHelper;
+        MaximumContactAge = maximumContactAge;
     }
 
     /// <summary>目标招式 ID（同角色配置内）。</summary>
@@ -115,6 +120,8 @@ public sealed class CancelDefinition
     public bool StandingInputOnly { get; }
     public int? MaximumInputAge { get; }
     public bool RetainBufferedMotionHelper { get; }
+    /// <summary>Optional age of the most recent contact in effective move ticks, excluding freeze.</summary>
+    public int? MaximumContactAge { get; }
 
     /// <summary>阶段是否允许（纯函数，供状态机与测试共用）。</summary>
     public bool AllowsPhase(FighterLogicState state) => AllowsPhase(Phases, state);
@@ -131,43 +138,63 @@ public sealed class CancelDefinition
     /// </summary>
     /// <param name="frame">当前逻辑帧号。</param>
     /// <param name="attackStartFrame">当前攻击实例的发动帧（确认必须属于同一实例）。</param>
-    public bool ConfirmSatisfied(int frame, int hitConfirmFrame, int blockConfirmFrame, int attackStartFrame)
-    {
-        if (AllowWhiff)
-            return true;
-
-        bool hitOk = RequiresHitConfirm
-            && hitConfirmFrame >= attackStartFrame
-            && frame > hitConfirmFrame;
-        bool blockOk = RequiresBlockConfirm
-            && blockConfirmFrame >= attackStartFrame
-            && frame > blockConfirmFrame;
-
-        return hitOk || blockOk;
-    }
+    public bool ConfirmSatisfied(int frame, int hitConfirmFrame, int blockConfirmFrame, int attackStartFrame,
+        int elapsed = 0, int? lastContactMoveTick = null) => AllowWhiff ||
+        ContactConfirmation.Allows(RequiresHitConfirm, RequiresBlockConfirm, MaximumContactAge,
+            frame, hitConfirmFrame, blockConfirmFrame, attackStartFrame, elapsed, lastContactMoveTick);
 }
 
-/// <summary>A source window for a real command whose target move is outside the loaded profile.</summary>
+/// <summary>A source window for a reserved command, whether or not its target is loaded.</summary>
 public sealed class ReservedCancelDefinition
 {
-    public ReservedCancelDefinition(string commandId, int windowFirstFrame, int windowLastFrame, MoveCancelPhases phases)
+    public ReservedCancelDefinition(string commandId, int windowFirstFrame, int windowLastFrame, MoveCancelPhases phases,
+        bool requiresHitConfirm = false, bool requiresBlockConfirm = false, int? maximumContactAge = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(commandId);
         if (windowFirstFrame < 0 || windowLastFrame < windowFirstFrame)
             throw new ArgumentOutOfRangeException(nameof(windowFirstFrame), "Reserved cancel requires a valid action window.");
         if (phases == MoveCancelPhases.None || (phases & ~(MoveCancelPhases.Active | MoveCancelPhases.Recovery)) != 0)
             throw new ArgumentOutOfRangeException(nameof(phases), "Reserved cancel requires an active or recovery phase.");
+        if (maximumContactAge is <= 0 || maximumContactAge.HasValue && !requiresHitConfirm && !requiresBlockConfirm)
+            throw new ArgumentOutOfRangeException(nameof(maximumContactAge),
+                "Contact age requires a confirmed contact and at least one effective tick.");
         CommandId = commandId;
         WindowFirstFrame = windowFirstFrame;
         WindowLastFrame = windowLastFrame;
         Phases = phases;
+        RequiresHitConfirm = requiresHitConfirm;
+        RequiresBlockConfirm = requiresBlockConfirm;
+        MaximumContactAge = maximumContactAge;
     }
 
     public string CommandId { get; }
     public int WindowFirstFrame { get; }
     public int WindowLastFrame { get; }
     public MoveCancelPhases Phases { get; }
+    public bool RequiresHitConfirm { get; }
+    public bool RequiresBlockConfirm { get; }
+    public int? MaximumContactAge { get; }
 
     internal bool IsOpen(FighterLogicState state, int elapsed) =>
         elapsed >= WindowFirstFrame && elapsed <= WindowLastFrame && CancelDefinition.AllowsPhase(Phases, state);
+
+    internal bool ConfirmSatisfied(int frame, int hitConfirmFrame, int blockConfirmFrame, int attackStartFrame,
+        int elapsed, int? lastContactMoveTick) => !RequiresHitConfirm && !RequiresBlockConfirm ||
+        ContactConfirmation.Allows(RequiresHitConfirm, RequiresBlockConfirm, MaximumContactAge,
+            frame, hitConfirmFrame, blockConfirmFrame, attackStartFrame, elapsed, lastContactMoveTick);
+}
+
+internal static class ContactConfirmation
+{
+    internal static bool Allows(bool requiresHit, bool requiresBlock, int? maximumAge,
+        int frame, int hitFrame, int blockFrame, int startFrame, int elapsed, int? lastContactMoveTick)
+    {
+        bool hit = requiresHit && hitFrame >= startFrame && frame > hitFrame;
+        bool block = requiresBlock && blockFrame >= startFrame && frame > blockFrame;
+        if (maximumAge is not int limit)
+            return hit || block;
+        if (lastContactMoveTick is not int tick || elapsed - tick < 1 || elapsed - tick > limit)
+            return false;
+        return (hit && hitFrame >= blockFrame) || (block && blockFrame >= hitFrame);
+    }
 }

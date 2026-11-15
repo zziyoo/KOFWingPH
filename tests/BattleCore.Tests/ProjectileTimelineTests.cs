@@ -168,6 +168,24 @@ public sealed class ProjectileTimelineTests
     }
 
     [Theory]
+    [InlineData(false, FighterLogicState.Hitstun)]
+    [InlineData(true, FighterLogicState.AirHitstun)]
+    public void AirborneOnlyLaunchAlsoAppliesToEntityContact(bool airborne, FighterLogicState expected)
+    {
+        var simulation = CreateSimulation(launchOnAirborneOnly: true);
+        BattleState cast = Cast(simulation, Duel(60), both: false);
+        FighterState target = cast.Fighter(1);
+        if (airborne)
+            target = target with { LogicState = FighterLogicState.Airborne, PositionY = 10, JumpKind = JumpKind.HighJump };
+        BattleState before = new(cast.Frame, [cast.Fighter(0), target], cast.StateVersion, cast.Round,
+            cast.Projectiles, cast.NextProjectileId);
+        var result = simulation.Step(before, FrameInput.Empty(before.Frame));
+        Assert.Contains(result.Events, eventRow => eventRow.Type == BattleEventType.ProjectileHit);
+        Assert.Equal(expected, result.State.Fighter(1).LogicState);
+        Assert.Equal(airborne ? FixedPoint.FromRaw(425984) : FixedPoint.Zero, result.State.Fighter(1).VelocityY);
+    }
+
+    [Theory]
     [InlineData(false, true, false)]
     [InlineData(true, true, false)]
     [InlineData(false, false, true)]
@@ -382,7 +400,7 @@ public sealed class ProjectileTimelineTests
     }
 
     private static BattleSimulation CreateSimulation(bool varyDamage = false, bool scriptedLaunch = false, bool farJab = false,
-        bool respectsRestriction = false)
+        bool respectsRestriction = false, bool launchOnAirborneOnly = false)
     {
         AttackDefinition Hit(bool launch) => new(
             0, 0, 1, 1, height: AttackHeight.Mid, hitstunFrames: 18, blockstunFrames: 17,
@@ -391,7 +409,8 @@ public sealed class ProjectileTimelineTests
             launchVelocityX: launch ? FixedPoint.FromRaw(294912) : FixedPoint.Zero,
             launchVelocityY: launch ? FixedPoint.FromRaw(425984) : FixedPoint.Zero,
             knockdownFrames: launch ? 10 : 0, wakeupFrames: launch ? 8 : 0,
-            hitstopByOutcome: new HitstopByOutcome(new HitstopPair(0, 13), new HitstopPair(0, 11)));
+            hitstopByOutcome: new HitstopByOutcome(new HitstopPair(0, 13), new HitstopPair(0, 11)),
+            launchOnAirborneOnly: launch && launchOnAirborneOnly);
         var damage = new DynamicAttackDamage(varyDamage ? 7 : 5, varyDamage ? 7 : 5, false);
         var reaction = scriptedLaunch ? new LaunchReactionProfile(4, FixedPoint.FromFraction(3, 4),
             FixedPoint.FromFraction(7, 2), FixedPoint.FromFraction(1, 2), 13, 25,

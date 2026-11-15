@@ -1,7 +1,7 @@
 param(
     [string]$IkemenRoot = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Ikemen-GO'),
     [switch]$Prepare,
-    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28', 'Stage29')]
+    [ValidateSet('Stage14', 'Stage15', 'Stage16', 'Stage17', 'Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28', 'Stage29', 'Stage30')]
     [string]$CaptureProfile = 'Stage14',
     [string]$RunDirectory = 'local-mugen/stage14-reference',
     [ValidateRange(1, 2147483646)]
@@ -15,9 +15,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$traceProfile = if ($CaptureProfile -eq 'Stage29') { 'Stage28' } else { $CaptureProfile }
+$traceProfile = if ($CaptureProfile -in @('Stage29', 'Stage30')) { 'Stage28' } else { $CaptureProfile }
 if ($LastFrame -ne 75 -and $traceProfile -notin @('Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
-    throw 'Extended reference traces are only enabled for Stage19 through Stage29'
+    throw 'Extended reference traces are only enabled for Stage19 through Stage30'
 }
 $commit = '5dac5caf9a02a9b81bf2264e88a1bbf68e21bba0'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -391,8 +391,11 @@ if ($traceProfile -in @('Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', '
 if ($traceProfile -in @('Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage28')) {
     $expectedSourceHashes['common_kof.cns'] = '3b934b5390e0b805df549db35601b4882d6c28b9165b56e3dcff72d3bd86c65b'
 }
-if ($CaptureProfile -eq 'Stage29') {
+if ($CaptureProfile -in @('Stage29', 'Stage30')) {
     $expectedSourceHashes['Terry.cns'] = 'd1c25e17949ce0322742dd41cc4aa5a5490bf123a85803dfb5c2576460eb7fc1'
+}
+if ($CaptureProfile -eq 'Stage30') {
+    $expectedSourceHashes['Terry-KOF98.def'] = 'eb6507b8e5fed6e4f71107a539616c7c6f0d4a568e67f7b9c8fc5cd7445471d7'
 }
 
 if ((Get-FileHash -LiteralPath $archive).Hash -ne $terryHash) {
@@ -437,14 +440,17 @@ if ($Prepare) {
     if ($index -lt 0) { throw 'Cannot find HitDef finalization in pinned source' }
     $source = $source.Insert($index + $before.Length, [string][char]9 + 'researchHitDef(crun)' + $newline)
     [IO.File]::WriteAllText($bytecode, $source)
-    if ($CaptureProfile -in @('Stage17', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage29')) {
+    if ($CaptureProfile -in @('Stage17', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage29', 'Stage30')) {
         & (Join-Path $root 'tools/Stage17Reference/Install-TraceHooks.ps1') -Engine $engine
     }
-    if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage29')) {
+    if ($CaptureProfile -in @('Stage18', 'Stage19', 'Stage20', 'Stage21', 'Stage22', 'Stage23', 'Stage24', 'Stage25', 'Stage26', 'Stage27', 'Stage29', 'Stage30')) {
         & (Join-Path $root 'tools/Stage18Reference/Install-TraceHooks.ps1') -Engine $engine
     }
     if ($CaptureProfile -eq 'Stage29') {
         & (Join-Path $root 'tools/Stage29Reference/Install-TraceHooks.ps1') -Engine $engine
+    }
+    if ($CaptureProfile -eq 'Stage30') {
+        & (Join-Path $root 'tools/Stage30Reference/Install-TraceHooks.ps1') -Engine $engine
     }
     $env:MSYSTEM = 'MINGW64'
     $env:GOFLAGS = '-buildvcs=false'

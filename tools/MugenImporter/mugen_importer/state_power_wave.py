@@ -108,7 +108,7 @@ def source_action(actions, number, *, hold_last=False):
     return action, durations
 
 
-def launch_reaction(common, selected, attack):
+def launch_reaction(common, selected, attack, *, fall_field='fall'):
     sections = state_reentry.script_sections(common)
     _, impact = move_scope(sections, 5100)
     _, bounce = move_scope(sections, 5101)
@@ -121,8 +121,9 @@ def launch_reaction(common, selected, attack):
     (wait,) = number_in(leave_lie.one('trigger1'), r'sysvar\(2\)>=(\d+)&&time>0', 'lie-down duration')
     add = unique((item for item in lie if normalized(item.one('sysvar(2)', '')) == '1'), 'lie-down timer increment')
     require(normalized(add.one('trigger1')) == 'time>=0', 'unsupported lie-down timer')
-    require(attack.one('fall') == '1' and (attack.one('fall.recover'), attack.one('fall.recovertime')) == ('1', '600'),
-            'unsupported Power Wave air recovery')
+    require(attack.one(fall_field) == '1' and
+            (attack.one('fall.recover'), attack.one('fall.recovertime')) == ('1', '600'),
+            'unsupported launch recovery')
     return {'impactFrames': sum(selected[5100][1]),
             'bounceHorizontalRetention': fraction(retain.one('x')),
             'bounceVerticalVelocity': fraction(-Fraction(attack.one('fall.yvelocity'))),

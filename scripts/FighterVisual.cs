@@ -85,7 +85,7 @@ public sealed class FighterVisual
                     LaunchReactionPhase.Shake or LaunchReactionPhase.Lift => 0,
                     LaunchReactionPhase.Tech => reaction.Ticks - 1,
                     _ when reaction.Profile.StartInFall => reaction.Ticks - 1,
-                    _ => reaction.Ticks,
+                    _ => _sprite.LaunchReactionTick(_hitReaction.MoveId, reaction.Ticks),
                 });
         }
         if (fighter.LogicState == FighterLogicState.Hitstun &&
@@ -162,7 +162,7 @@ public sealed class FighterVisual
             directions.Count > 0 ? directions[^1].Direction : null, blocked);
         string? incoming = frame.Events.FirstOrDefault(e => e.TargetFighterId == fighterIndex
             && e.Type is BattleEventType.Hit or BattleEventType.ProjectileHit).MoveId;
-        _hitReaction.Observe(after.LogicState == FighterLogicState.Hitstun, frozen, incoming);
+        _hitReaction.Observe(after.LogicState == FighterLogicState.Hitstun || after.LaunchReaction.HasValue, frozen, incoming);
         (string clip, int? tick) = SpriteClip(after, AnimationResolver.ResolveClipName(after, _set, _walkDirection));
         _clock.Observe(
             frame.LogicFrame,

@@ -60,6 +60,9 @@ public sealed class FighterDocumentDto
     [JsonPropertyName("holdGroundBlockstunExitPosition")]
     public bool HoldGroundBlockstunExitPosition { get; set; }
 
+    [JsonPropertyName("resetPauseClockOnCrouchEntry")]
+    public bool ResetPauseClockOnCrouchEntry { get; set; }
+
     [JsonPropertyName("moves")]
     public List<MoveDto>? Moves { get; set; }
 
@@ -280,6 +283,9 @@ public sealed class CommandDto
     [JsonPropertyName("matchCompletedMotion")]
     public bool MatchCompletedMotion { get; set; }
 
+    [JsonPropertyName("matchInitialCardinalRelease")]
+    public bool MatchInitialCardinalRelease { get; set; }
+
     [JsonPropertyName("bufferPolicy")]
     public CommandBufferPolicyDto? BufferPolicy { get; set; }
 
@@ -361,6 +367,12 @@ public sealed class MoveDto
     [JsonPropertyName("walkOnCrouchRecovery")]
     public bool WalkOnCrouchRecovery { get; set; }
 
+    [JsonPropertyName("faceOpponentOnStart")]
+    public bool FaceOpponentOnStart { get; set; }
+
+    [JsonPropertyName("deferCrouchOnNaturalExit")]
+    public bool DeferCrouchOnNaturalExit { get; set; }
+
     [JsonPropertyName("attacks")]
     public List<AttackDto>? Attacks { get; set; }
 
@@ -397,6 +409,9 @@ public sealed class MovePositionStepDto
 
 public sealed class AttackDto
 {
+    [JsonPropertyName("launchOnAirborneOnly")]
+    public bool LaunchOnAirborneOnly { get; set; }
+
     [JsonPropertyName("rejectsLyingTargets")]
     public bool RejectsLyingTargets { get; set; }
 
@@ -549,6 +564,9 @@ public sealed class CancelDto
     [JsonPropertyName("maximumInputAge")]
     public int? MaximumInputAge { get; set; }
 
+    [JsonPropertyName("maximumContactAge")]
+    public int? MaximumContactAge { get; set; }
+
     [JsonPropertyName("retainBufferedMotionHelper")]
     public bool RetainBufferedMotionHelper { get; set; }
 }
@@ -566,6 +584,15 @@ public sealed class ReservedCancelDto
 
     [JsonPropertyName("phases")]
     public string? Phases { get; set; }
+
+    [JsonPropertyName("requiresHitConfirm")]
+    public bool RequiresHitConfirm { get; set; }
+
+    [JsonPropertyName("requiresBlockConfirm")]
+    public bool RequiresBlockConfirm { get; set; }
+
+    [JsonPropertyName("maximumContactAge")]
+    public int? MaximumContactAge { get; set; }
 }
 
 public sealed class ThrowDto

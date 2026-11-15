@@ -79,7 +79,8 @@ public readonly record struct FighterState(
     int ProjectileGuardRecoveryRemaining = 0,
     int CrouchReturnTicks = 0,
     GroundHitReactionState GroundReaction = default,
-    bool? GroundGuardCrouching = null)
+    bool? GroundGuardCrouching = null,
+    int? LastContactMoveTick = null)
 {
     public int LightGroundReactionTick => GroundReaction.Kind == GroundHitReaction.Light ? GroundReaction.Tick : 0;
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
@@ -381,6 +382,10 @@ public readonly record struct FighterState(
         if (BlockConfirmFrame < -1)
             throw new InvalidOperationException(
                 $"角色 {Id} 的防御确认帧非法：{BlockConfirmFrame}（必须 ≥ -1）。");
+        if (LastContactMoveTick is { } contactTick &&
+            (!IsInMove || contactTick < 0 || contactTick > MoveElapsedFrames ||
+             HitConfirmFrame < 0 && BlockConfirmFrame < 0))
+            throw new InvalidOperationException($"角色 {Id} 的接触动作 tick {contactTick} 与当前攻击实例不符。");
 
         if (IsInMove)
         {

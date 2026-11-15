@@ -330,7 +330,8 @@ public sealed class BattleSimulation
                 OpponentBodyDistance(fighter, opponent, opponentX, definition, _roster.Fighter(opponentSeat)),
                 fighter.CrouchReturnTicks, fighter.GroundReaction.Crouching,
                 !opponent.LogicState.IsAirborneLike() && (!HasHitMoveType(opponent.LogicState) ||
-                    opponent.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup));
+                    opponent.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup),
+                fighter.LastContactMoveTick);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -340,12 +341,16 @@ public sealed class BattleSimulation
             FixedPoint vy = FixedPoint.Zero;
             FighterLogicState logic = tick.State;
             JumpKind jumpKind = JumpKind.None;
+            Facing facing = fighter.Facing;
 
             if (tick.MoveId is { } runningMove && definition.FindMoveById(runningMove) is { } authoredMove)
             {
+                // CMD has already consumed input relative to the prior facing.
+                if (authoredMove.FaceOpponentOnStart && tick.MoveStartedFrame == state.Frame && opponent.PositionX != x)
+                    facing = opponent.PositionX > x ? Facing.Right : Facing.Left;
                 // The committed instance owns the tick. Freeze and interruption leave no deferred movement.
                 FixedPoint step = authoredMove.PositionStepAt(tick.MoveElapsedFrames);
-                Int128 offset = (Int128)step.RawValue * (fighter.Facing == Facing.Right ? 1 : -1);
+                Int128 offset = (Int128)step.RawValue * (facing == Facing.Right ? 1 : -1);
                 x = FixedPoint.FromRaw((long)Int128.Clamp((Int128)x.RawValue + offset, long.MinValue, long.MaxValue));
             }
 
@@ -462,7 +467,7 @@ public sealed class BattleSimulation
                 bool guardThreat = resolved.Back && HasForwardGuardThreat(state, i);
                 bool enteringGuardRecovery = fighter.LogicState == FighterLogicState.Blockstun &&
                     (definition.HoldGroundBlockstunExitPosition || definition.ProjectileGuardRecoveryFrames > 0);
-                if (!guardThreat && !enteringGuardRecovery && !orderedGroundHitstunExit)
+                if (!guardThreat && !enteringGuardRecovery && !orderedGroundHitstunExit && !tick.DeferredCrouch)
                     x = GroundMovement.StepX(tick.State, fighter.PositionX, fighter.Facing, resolved, definition.Movement);
                 if (definition.PreserveGuardEntryMomentum && resolved.Back)
                 {
@@ -488,7 +493,7 @@ public sealed class BattleSimulation
                 GuardWalkMomentum = guardWalkMomentum,
                 VelocityY = vy,
                 JumpKind = jumpKind,
-                Facing = fighter.Facing,
+                Facing = facing,
                 UpHeld = resolved.Up,
                 BackHeld = resolved.Back,
                 DownHeld = resolved.Down,
@@ -667,6 +672,8 @@ public sealed class BattleSimulation
         {
             FighterState fighter = NormalizeLandingPlan(NormalizeSpawnMask(
                 nextFighters[i], state.Fighters[i].MoveStartedFrame));
+            if (fighter.LastContactMoveTick.HasValue)
+                fighter = NormalizeConfirms(fighter);
             if (fighter.DamageScript.RandomState != 0 && !fighter.IsInMove)
                 fighter = fighter with { DamageScript = ClearDamageMove(fighter.DamageScript) };
             if ((fighter.CrouchReturnTicks < 0 && fighter.LogicState != FighterLogicState.Crouching) ||
@@ -756,7 +763,8 @@ public sealed class BattleSimulation
             nextRound.IsFinished ? projectileStep.Projectiles.Where(p => p.SpawnFacing is null).ToArray()
                 : projectileStep.Projectiles,
             projectileStep.NextProjectileId, timerAfter, nextRound.IsFinished ? null : pending,
-            nextRound.IsFinished || !_hasScriptedPause ? default : AdvanceScriptedPause(state, projectileStep.Events));
+            nextRound.IsFinished || !_hasScriptedPause ? default
+                : AdvanceScriptedPause(state, candidates, projectileStep.Events));
 
         var clashEvents = events.Where(e => e.Type == BattleEventType.ProjectileClash).ToArray();
         var clashPositions = projectileStep.Events.Where(e => e.Type == BattleEventType.ProjectileClash).ToArray();
@@ -822,7 +830,8 @@ public sealed class BattleSimulation
         }
     }
 
-    private static ScriptedPauseState AdvanceScriptedPause(BattleState state, List<ProjectileEvent> events)
+    private ScriptedPauseState AdvanceScriptedPause(BattleState state, FighterCandidate[] candidates,
+        List<ProjectileEvent> events)
     {
         bool request = false;
 
@@ -843,7 +852,11 @@ public sealed class BattleSimulation
                 if (counter > 0 && (target.HitstopRemainingFrames == 0 || targetShakeEndsEarlier))
                     counter++;
 
-                request |= counter >= 2 && previous.LogicStateTicks % 2 == 0;
+                // The native basic crouch transition resets State Time before the Pause controller
+                // reads it, even when a command replaces the intermediate state on the same tick.
+                bool crouchEntry = _roster.Fighter(seat).ResetPauseClockOnCrouchEntry &&
+                    previous.LogicState == FighterLogicState.Standing && candidates[seat].DownHeld;
+                request |= counter >= 2 && (crouchEntry || previous.LogicStateTicks % 2 == 0);
             }
 
             return events.Any(e => e.Source == seat && e.RequestPauseOnHit) ? 1 : counter;
@@ -939,6 +952,8 @@ public sealed class BattleSimulation
                 fighters[attacker] = settled.Blocked
                     ? attackerState with { BlockConfirmFrame = frame }
                     : attackerState with { HitConfirmFrame = frame };
+                if (_roster.Fighter(attacker).FindMoveById(settled.MoveId) is { TracksContactAge: true })
+                    fighters[attacker] = fighters[attacker] with { LastContactMoveTick = attackerState.MoveElapsedFrames };
                 if (attackerState.DamageScript.RandomState != 0)
                     fighters[attacker] = fighters[attacker] with
                     {
@@ -1739,7 +1754,7 @@ public sealed class BattleSimulation
         ComboState comboAfter = ComboState.AfterHit(
             defender.Combo, projectile.OwnerFighterId, defender.LogicState.IsHitReaction());
 
-        if (hit.Launches)
+        if (hit.LaunchesAgainst(defenderAirborne))
         {
             fighters[target] = defender with
             {
@@ -1899,19 +1914,13 @@ public sealed class BattleSimulation
     /// </summary>
     private static FighterState NormalizeConfirms(FighterState fighter)
     {
-        if (!fighter.IsInMove)
-        {
-            return fighter.HitConfirmFrame == -1 && fighter.BlockConfirmFrame == -1
-                ? fighter
-                : fighter with { HitConfirmFrame = -1, BlockConfirmFrame = -1 };
-        }
+        int hit = fighter.IsInMove && fighter.HitConfirmFrame >= fighter.MoveStartedFrame ? fighter.HitConfirmFrame : -1;
+        int block = fighter.IsInMove && fighter.BlockConfirmFrame >= fighter.MoveStartedFrame ? fighter.BlockConfirmFrame : -1;
+        int? contactTick = hit == -1 && block == -1 ? null : fighter.LastContactMoveTick;
 
-        int hit = fighter.HitConfirmFrame >= fighter.MoveStartedFrame ? fighter.HitConfirmFrame : -1;
-        int block = fighter.BlockConfirmFrame >= fighter.MoveStartedFrame ? fighter.BlockConfirmFrame : -1;
-
-        return hit == fighter.HitConfirmFrame && block == fighter.BlockConfirmFrame
+        return hit == fighter.HitConfirmFrame && block == fighter.BlockConfirmFrame && contactTick == fighter.LastContactMoveTick
             ? fighter
-            : fighter with { HitConfirmFrame = hit, BlockConfirmFrame = block };
+            : fighter with { HitConfirmFrame = hit, BlockConfirmFrame = block, LastContactMoveTick = contactTick };
     }
 
     /// <summary>单名被击者的结算解析（不修改状态；null = 本帧不被结算）。</summary>
@@ -1984,7 +1993,8 @@ public sealed class BattleSimulation
                 Hitstop: attack.ResolveMeleeHitstop(blocked: true), FollowupGuardCrouching: followupGuardCrouching);
         }
 
-        bool launches = attack.Launches;
+        bool airborne = defenderState.LogicState.IsAirborneLike();
+        bool launches = attack.LaunchesAgainst(airborne);
         bool counterHit = attack.DynamicDamage is not null ? attackerState.DamageScript.CounterAge > 0
             : IsAttacking(defenderState.LogicState);
         int damage = attack.DynamicDamage is { } dynamic
@@ -1996,7 +2006,7 @@ public sealed class BattleSimulation
             MoveId: moveId, AttackStartFrame: attackerState.MoveStartedFrame,
             ContactGroups: priorGroups | group,
             UsesContactDivisor: attack.DynamicDamage?.UseContactDivisor == true,
-            AirHit: defenderState.LogicState.IsAirborneLike(), Launch: launches,
+            AirHit: airborne, Launch: launches,
             KnockbackX: launches ? FixedPoint.Zero : knockbackX,
             KnockbackFriction: launches ? FixedPoint.Zero : friction,
             LaunchVelocityX: launches ? (direction > 0 ? attack.LaunchVelocityX : -attack.LaunchVelocityX)
@@ -2006,8 +2016,8 @@ public sealed class BattleSimulation
             WakeupFrames: launches ? attack.WakeupFrames : 0,
             Hitstop: attack.ResolveMeleeHitstop(blocked: false),
             GroundReaction: attack.GroundReaction,
-            LaunchGravity: attack.LaunchGravity,
-            LaunchReaction: attack.LaunchReaction,
+            LaunchGravity: launches ? attack.LaunchGravity : null,
+            LaunchReaction: launches ? attack.LaunchReaction : null,
             FollowupGuardCrouching: followupGuardCrouching,
             CounterHit: counterHit);
     }

@@ -19,7 +19,7 @@ public sealed record SpriteClipBinding(int Action, bool MoveClock, int StartTick
 public sealed class SpriteBinding
 {
     private sealed record ReactionClips(string Initial, string Followup, int FollowupTick);
-    private sealed record HitReactionBinding(ReactionClips Standing, ReactionClips? Crouching);
+    private sealed record HitReactionBinding(ReactionClips Standing, ReactionClips? Crouching, bool ZeroBasedLaunchClock);
 
     public string VisualId { get; private init; } = "";
     public double Scale { get; private init; }
@@ -46,6 +46,10 @@ public sealed class SpriteBinding
             ? (poses.Initial, Math.Max(0, elapsed - 1))
             : (poses.Followup, elapsed - poses.FollowupTick);
     }
+
+    public int ResolveLaunchTick(string? moveId, int reactionTicks) =>
+        moveId is not null && _hitReactions.TryGetValue(moveId, out var reaction) && reaction.ZeroBasedLaunchClock
+            ? Math.Max(1, reactionTicks) - 1 : reactionTicks;
     public static bool ValidId(string id) => id.Length is > 0 and <= 80 && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
     public static string SelectVisualId(string fighterId, string? visualOverride, string? onlyFighter) =>
         visualOverride is not null && (onlyFighter is null || onlyFighter == fighterId) ? visualOverride : fighterId;
@@ -119,7 +123,8 @@ public sealed class SpriteBinding
                     throw new ArgumentException($"Invalid hit reaction binding for {item.Name}.");
                 reactions.Add(item.Name, new HitReactionBinding(ParseReactionClips(reaction, clips, item.Name),
                     reaction.TryGetProperty("crouching", out var crouch)
-                        ? ParseReactionClips(crouch, clips, item.Name + ".crouching") : null));
+                        ? ParseReactionClips(crouch, clips, item.Name + ".crouching") : null,
+                    reaction.TryGetProperty("zeroBasedLaunchClock", out var clock) && clock.GetBoolean()));
             }
         }
         var states = new Dictionary<string, string>(StringComparer.Ordinal);

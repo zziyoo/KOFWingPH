@@ -144,7 +144,7 @@ public static class FighterDataLoader
                 dto.ForwardGuardDistance is { } guard ? Fraction(guard, sourceName, "forwardGuardDistance") : null,
                 dto.RetainProjectileGuard, dto.PreserveGuardEntryMomentum, dto.ProjectileGuardRecoveryFrames,
                 dto.ProtectGroundHitstunExit, dto.UseOrderedGroundHitstunExit, dto.ProtectGroundBlockstunExit,
-                dto.HoldGroundBlockstunExitPosition),
+                dto.HoldGroundBlockstunExitPosition, dto.ResetPauseClockOnCrouchEntry),
             sourceName, "<definition>");
         return new FighterDataResult(fighterId, displayName, definition);
     }
@@ -253,7 +253,8 @@ public static class FighterDataLoader
             matchCompletedMotion: dto.MatchCompletedMotion, reserveOnEdgeDirection: dto.ReserveOnEdgeDirection,
             groundReservationTarget: dto.GroundReservationTarget is { } target
                 ? new GroundReservationTarget(Fraction(target.MaximumBodyDistance, source,
-                    path + ".groundReservationTarget.maximumBodyDistance"), target.RequiresGroundedNonHitstun) : null),
+                    path + ".groundReservationTarget.maximumBodyDistance"), target.RequiresGroundedNonHitstun) : null,
+            matchInitialCardinalRelease: dto.MatchInitialCardinalRelease),
         source, path);
 
     private static MoveDefinition BuildMove(MoveDto dto, string source, string path) => Guard(
@@ -281,7 +282,9 @@ public static class FighterDataLoader
                 ? BuildArray(reserved, source, path + ".reservedCancels", BuildReservedCancel) : null,
             walkOnCrouchRecovery: dto.WalkOnCrouchRecovery,
             positionSteps: dto.PositionSteps is { } steps
-                ? BuildArray(steps, source, path + ".positionSteps", BuildMovePositionStep) : null),
+                ? BuildArray(steps, source, path + ".positionSteps", BuildMovePositionStep) : null,
+            faceOpponentOnStart: dto.FaceOpponentOnStart,
+            deferCrouchOnNaturalExit: dto.DeferCrouchOnNaturalExit),
         source, path);
 
     private static MovePositionStep BuildMovePositionStep(MovePositionStepDto dto, string source, string path) =>
@@ -332,7 +335,8 @@ public static class FighterDataLoader
             rejectsFallingTargets: dto.RejectsFallingTargets,
             retainsGroundGuardOnFollowup: dto.RetainsGroundGuardOnFollowup,
             groundGuardOnly: dto.GroundGuardOnly,
-            respectsAirFollowupRestriction: dto.RespectsAirFollowupRestriction),
+            respectsAirFollowupRestriction: dto.RespectsAirFollowupRestriction,
+            launchOnAirborneOnly: dto.LaunchOnAirborneOnly),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>
@@ -374,7 +378,8 @@ public static class FighterDataLoader
             allowSameMove: dto.AllowSameMove,
             standingInputOnly: dto.StandingInputOnly,
             maximumInputAge: dto.MaximumInputAge,
-            retainBufferedMotionHelper: dto.RetainBufferedMotionHelper),
+            retainBufferedMotionHelper: dto.RetainBufferedMotionHelper,
+            maximumContactAge: dto.MaximumContactAge),
         source, path);
 
     private static ReservedCancelDefinition BuildReservedCancel(ReservedCancelDto dto, string source, string path) => Guard(
@@ -383,7 +388,8 @@ public static class FighterDataLoader
             RequiredInt(dto.WindowFirstFrame, source, path + ".windowFirstFrame"),
             RequiredInt(dto.WindowLastFrame, source, path + ".windowLastFrame"),
             ParseFlags(RequiredString(dto.Phases, source, path + ".phases"),
-                source, path + ".phases", MoveCancelPhases.Active | MoveCancelPhases.Recovery)),
+                source, path + ".phases", MoveCancelPhases.Active | MoveCancelPhases.Recovery),
+            dto.RequiresHitConfirm, dto.RequiresBlockConfirm, dto.MaximumContactAge),
         source, path);
 
     private static ThrowDefinition BuildThrow(ThrowDto dto, string source, string path) => Guard(

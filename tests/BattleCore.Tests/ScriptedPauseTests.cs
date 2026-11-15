@@ -115,7 +115,29 @@ public sealed class ScriptedPauseTests
         Assert.Equal((18, FixedPoint.FromInt(12), FixedPoint.FromFraction(11, 2)), heights[1]);
     }
 
-    private static (BattleSimulation Simulation, BattleState State) Setup(bool dualLaunch = false)
+    [Theory]
+    [InlineData(true, FighterLogicState.Standing, InputBits.Down, true)]
+    [InlineData(false, FighterLogicState.Standing, InputBits.Down, false)]
+    [InlineData(true, FighterLogicState.Standing, InputBits.None, false)]
+    [InlineData(true, FighterLogicState.Crouching, InputBits.Down, false)]
+    public void CrouchEntryCanResetThePauseClockBeforeTheNewCommand(bool resetClock, FighterLogicState posture,
+        InputBits directions, bool shouldPause)
+    {
+        var (simulation, start) = Setup(resetPauseClockOnCrouchEntry: resetClock);
+        BattleState previous = new(0,
+            [start.Fighter(0) with { LogicState = posture, LogicStateTicks = 1 }, start.Fighter(1)],
+            start.StateVersion, scriptedPause: new ScriptedPauseState(2, 0, false));
+        BattleStepResult newMove = simulation.Step(previous, new FrameInput(0, directions | InputBits.LightPunch, InputBits.None));
+        Assert.Equal("Wave", newMove.State.Fighter(0).MoveId);
+        Assert.Equal(0, newMove.State.Fighter(0).MoveElapsedFrames);
+        Assert.Equal(shouldPause, newMove.State.ScriptedPause.IsActive);
+
+        BattleStepResult next = simulation.Step(newMove.State, FrameInput.Empty(1));
+        Assert.Equal(shouldPause ? 0 : 1, next.State.Fighter(0).MoveElapsedFrames);
+    }
+
+    private static (BattleSimulation Simulation, BattleState State) Setup(bool dualLaunch = false,
+        bool resetPauseClockOnCrouchEntry = false)
     {
         AttackDefinition hit = new(0, 30, 25, 20, 0, 0, AttackHeight.Mid, 76, 5, 4,
             launchVelocityX: dualLaunch ? FixedPoint.FromFraction(9, 2) : FixedPoint.Zero,
@@ -136,7 +158,8 @@ public sealed class ScriptedPauseTests
         var definition = new FighterDefinition("PauseProbe",
             new[] { new CommandDefinition("5A", Array.Empty<CommandDirection>(), InputBits.LightPunch) },
             new[] { new MoveDefinition("Wave", "5A", 1, 1, 58, projectiles: new[] { wave }) },
-            damageRules: new DynamicDamageRules(DamageRatio.One, DamageRatio.One, DamageRatio.One, DamageRatio.One, 2, 2));
+            damageRules: new DynamicDamageRules(DamageRatio.One, DamageRatio.One, DamageRatio.One, DamageRatio.One, 2, 2),
+            resetPauseClockOnCrouchEntry: resetPauseClockOnCrouchEntry);
         var simulation = new BattleSimulation(new FightRoster(definition, dualLaunch ? definition : FightRoster.CreateEmpty().Player2));
         return (simulation, new BattleState(0,
             new[] { FighterState.Create(0, 1000, -40, Facing.Right), FighterState.Create(1, 1000, 40, Facing.Left) },

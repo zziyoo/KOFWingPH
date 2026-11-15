@@ -6,6 +6,22 @@ namespace NewKOF.BattleCore.Tests;
 public class SpriteBindingTests
 {
     [Fact]
+    public void AuthoredLaunchStartsAtVisualTickZeroWithoutChangingOtherReactions()
+    {
+        SpriteBinding binding = SpriteBinding.Parse("""
+            {"clips":{"shake":5002,"slide":5007},
+             "hitReactions":{
+               "Authored":{"initial":"shake","followup":"slide","followupTick":4,"zeroBasedLaunchClock":true},
+               "Existing":{"initial":"shake","followup":"slide","followupTick":4}
+             }}
+            """, "x");
+        Assert.Equal(0, binding.ResolveLaunchTick("Authored", 1));
+        Assert.Equal(3, binding.ResolveLaunchTick("Authored", 4));
+        Assert.Equal(4, binding.ResolveLaunchTick("Existing", 4));
+        Assert.Equal(4, binding.ResolveLaunchTick(null, 4));
+    }
+
+    [Fact]
     public void OptionalClipAppearanceDoesNotAffectLegacyClips()
     {
         var binding = SpriteBinding.Parse("""
