@@ -18,22 +18,21 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def stop_run(process):
+def stop_run(process, descendants=()):
     """The Windows console launcher owns a graphical child holding the DLLs."""
-    if process.poll() is not None:
-        return
+    owned = {child.pid: child for child in descendants}
     try:
         parent = psutil.Process(process.pid)
-        owned = parent.children(recursive=True) + [parent]
+        owned.update((child.pid, child) for child in parent.children(recursive=True))
+        owned[parent.pid] = parent
     except psutil.NoSuchProcess:
-        process.wait()
-        return
-    for child in owned:
+        pass
+    for child in owned.values():
         try:
             child.terminate()
         except psutil.NoSuchProcess:
             pass
-    _, alive = psutil.wait_procs(owned, timeout=5)
+    _, alive = psutil.wait_procs(list(owned.values()), timeout=5)
     for child in alive:
         try:
             child.kill()
@@ -107,13 +106,18 @@ def main():
                 begin = time.monotonic()
                 with (lane / 'duel.log').open('wb') as output:
                     process = subprocess.Popen(run, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT)
+                    descendants = {}
                     try:
                         while process.poll() is None:
+                            try:
+                                descendants.update((p.pid, p) for p in psutil.Process(process.pid).children(recursive=True))
+                            except psutil.NoSuchProcess:
+                                pass
                             record['samples'].append({'seconds': time.monotonic() - begin, 'cpuPercent': psutil.cpu_percent(interval=0.5)})
                             if time.monotonic() - begin > 90:
                                 raise TimeoutError(str(lane))
                     finally:
-                        stop_run(process)
+                        stop_run(process, descendants.values())
                 lines = (lane / 'duel.log').read_text(encoding='utf-8-sig', errors='replace').splitlines()
                 record.update(exitCode=process.returncode, seconds=time.monotonic() - begin, after=system_snapshot(),
                               fps=[int(m[1]) for line in lines if (m := re.match(r'Project FPS: (\d+)', line))],
@@ -126,10 +130,12 @@ def main():
                 results.append(record)
                 print(f'{lane.name}: exit={process.returncode}, fps={record["fps"]}, backlog={len(record["backlog"])}', flush=True)
     finally:
-        (args.output / 'summary.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
-        for name in DLLS:
-            shutil.copy2(saved / name, installed / name)
-        assert all(digest(installed / name) == digest(saved / name) for name in DLLS)
+        try:
+            (args.output / 'summary.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
+        finally:
+            for name in DLLS:
+                shutil.copy2(saved / name, installed / name)
+            assert all(digest(installed / name) == digest(saved / name) for name in DLLS)
 
 
 if __name__ == '__main__':
