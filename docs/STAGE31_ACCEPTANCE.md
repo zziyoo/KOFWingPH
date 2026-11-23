@@ -28,14 +28,14 @@
 
 ## 2026-11-23 救援轮：修复候选与证据边界
 
-当前仍为 WIP，等待本轮最终门禁。已在本地 `wip/stage31-recovery` 保存原始检查点 `9bc743ce787d687985e13182732d9ff7b24ea250`（65 个路径；暂存区原为空），不推送。原文件、旧 DLL、指纹和关键失败证据独立备份在 `C:/Users/32360/Desktop/NewKOF_backups/stage31-recovery-20261123`。Git 直连查询连接重置；GitHub 连接器读取 main 确认为阶段 30 `a96233e43d35671b9dd70a476888ce1b3ac08a79`。
+当前仍为 WIP，等待本轮最终门禁。已在本地 `wip/stage31-recovery` 保存原始检查点 `9bc743ce787d687985e13182732d9ff7b24ea250`（65 个路径；暂存区原为空），不推送。原文件、旧 DLL、指纹和关键失败证据独立备份在 仓库外相邻的 `NewKOF_backups/stage31-recovery-20261123`。Git 直连查询连接重置；GitHub 连接器读取 main 确认为阶段 30 `a96233e43d35671b9dd70a476888ce1b3ac08a79`。
 
 两项失败在旧 DLL 上各复现两次（`stage31-recovery-repro-r1/r2.log`），未覆盖旧证据、输入或原版记录。
 
-- **205-window-23 根因**：第二次接触属于 State 200，不是 1200。205 对站姿目标采用原版 Action 5000 的反应，旧配置对 `CrouchingLight` 的站姿分支没有时间线，回退到 ±30、高 120 的通用框。F26/L40 原版主框最高 72，200 攻击最低 73，另一块头框在攻击横向范围外，故不接触；原回退框提前重叠。新增可选 `standingLightHitstun`，从冻结 ZIP 的 AIR 5000 生成。首元素完整时长之外包含 NewKOF 接触当帧的原子反应提交（原版在碰撞后才 ChangeState），然后按 AIR 播放、接入既有恢复框。F27/L41/S42 恢复形状才接触。修复前 L40，修复后 L41，伤害 52；初次 205 的 L22/30 伤害不变。没有延后 1200，也没有调整输入或比较容差。
+- **205-window-23 根因**：第二次接触属于 State 200，不是 1200。205 对站姿目标采用原版 Action 5000 的反应，旧配置对 `CrouchingLight` 的站姿分支没有时间线，回退到 ±30、高 120 的通用框。F26/L40 原版主框最高 72，200 攻击最低 73，另一块头框在攻击横向范围外，故不接触；原回退框提前重叠。新增可选 `standingLightHitstun`，从冻结 ZIP 的 AIR 5000 生成。首元素完整时长之外包含 NewKOF 接触当帧的原子反应提交（原版在碰撞后才 ChangeState），然后按 AIR 播放、接入既有恢复框；生成的 2/4/6 时间线与原有 205 站姿视觉绑定 followupTick=6 相符。F27/L41/S42 恢复形状才接触。修复前 L40，修复后 L41，伤害 52；初次 205 仍于 L22 接触、伤害 30。没有延后 1200，也没有调整输入或比较容差。
 - **air-held-back 根因**：首次接触 F14/L28 的目标是原版小跳 State 55，`ctrl=0`，虽然持后且实际 HitDef 的 guardflag=MA，仍无防御资格。后续原版处于受击状态。新增角色可选 `movement.shortHopCanGuard`，旧配置默认为 true，阶段 31 根据源 State 55 明确写 false；并恢复共享 `CanGuard` 仅接受普通 `Airborne` 的状态资格，排除 AirHitstun、动作中和 AirBlockstun 被 `IsAirborne` 扩大纳入的错误分支。新配置小跳不能防；反例覆盖高跳 MA 仍可防及旧小跳默认资格。近战、Helper 共用同一条件。修复后 L28/34/41/48 四次均 Hit，伤害 30/29/15/22；旧候选为前三次 Blocked。
 
-`stage31-recovery-fix-r2` 两项固定 Vulkan 双视觉分别 2,219/2,343 条权威记录通过，涵盖后续伤害、停顿和恢复。`stage31-recovery-phases-{205,air}.json` 保存 F/L/S、原版 before-command/after-collision/end 与前后运行日志，入口 `tools/Stage31Validation/recovery_phases.py`。
+`stage31-recovery-fix-r2` 两项固定 Vulkan 双视觉分别 2,219/2,343 条权威记录通过，涵盖后续伤害、停顿和恢复。`stage31-recovery-phases-{205,air}-v2.json` 保存 F/L/S、原版 before-command/after-collision/end 与前后运行日志，入口 `tools/Stage31Validation/recovery_phases.py`。旧 v1 导出将 SpriteRenderAudit.logic 误按 L 归组，保留但不作相位依据；v2 按 S 归组并保存 FrameCapture 的实际 render、S 与 PNG SHA-256。两处新接触分别为 F27/L41/S42/render51 与 F14/L28/S29/render38。
 
 性能旧归因不能直接定为硬件或豁免。`stage31-recovery-perf-ab-r1` 串行阶段 30 DLL+配置与修复前批处理的阶段 31 DLL+配置，audit ON/OFF 各 A/B/A/B，固定同一 320x180 Vulkan、30 FPS、输入、输出磁盘和电源方案。ON 四次均有波动（31 最低 19/20），OFF 四次各 13 个样本全 30、零积压。每次有 DLL/配置/输入哈希、退出码、GPU/驱动/温度/频率、进程清单与 CPU 采样。GPU 约 65°C，CPU 温度不可读取；未测原生文件系统 write/flush 次数，不将 GD.Print 调用数冒充系统调用数。
 

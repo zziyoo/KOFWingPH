@@ -25,10 +25,21 @@ def main():
         frame.setdefault('native', {})[row['phase']] = row['chars']
     for key in ('before', 'after'):
         for line in getattr(args, key).read_text(encoding='utf-8-sig').splitlines():
+            if line.startswith('[FrameCapture]'):
+                capture = re.search(r'render=(\d+) state=(\d+) path=(.*?) result=(\w+)', line)
+                if capture and (f := int(capture[2]) - 15) in report['frames']:
+                    path = Path(capture[3])
+                    report['frames'][f].setdefault(key + 'Submissions', []).append({
+                        'render': int(capture[1]), 'S': int(capture[2]), 'path': str(path),
+                        'result': capture[4], 'pngSha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+                continue
             if not line.startswith(('[MoveAudit]', '[ReentryAudit]', '[SpriteFrameAudit]', '[SpriteRenderAudit]', '[VisualAudit]', '[CommandAudit]')):
                 continue
             match = re.search(r'(?:logic|frame)=(\d+)', line)
-            if match and (f := int(match[1]) - 14) in report['frames']:
+            # Render projection receives BattleState.Frame (S); ObserveFrame and
+            # settlement diagnostics receive PresentationFrame.LogicFrame (L).
+            offset = 15 if line.startswith('[SpriteRenderAudit]') else 14
+            if match and (f := int(match[1]) - offset) in report['frames']:
                 report['frames'][f].setdefault(key, []).append(line)
     # Exclusive creation keeps prior failure evidence intact.
     with args.output.open('x', encoding='utf-8') as output:
