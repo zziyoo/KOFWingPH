@@ -7,7 +7,7 @@ $godot = 'C:/Users/32360/Desktop/Godot_v4.7.2-stable_mono_win64/Godot_v4.7.2-sta
 $env:PYTHONPATH = 'tools/MugenImporter'
 $refs = @('pilot','input','audit','audit-more','edges') |
     ForEach-Object { '--reference'; "local-mugen/stage31-native-$_/results" }
-$profile = 'data/imported-characters/terry98-stage31-final'
+$profile = 'data/imported-characters/terry98-stage31-recovery-r2'
 py -3.11 -m mugen_importer.state_rising_tackle local-mugen/terry.zip `
     data/imported-characters/terry98/manifest.json --base data/imported-characters/terry98-stage30-final `
     @refs --output $profile
@@ -42,3 +42,11 @@ py -I $driver @fixed @audit --output local-mugen/stage31-repro-repeat `
 - Godot 可选 `--audit-cost-probe` 记录 GD.Print/参数读取总耗时和调用数；`--sprite-audit-unbatched` 使用原逐行输出，供相同构建等价比较。系统 write/flush 次数未作推断。
 
 当前修复原理和验收状态以 `docs/STAGE31_ACCEPTANCE.md` 最新救援轮章节为准；记录的旧阶段成功不能跨核心 DLL 指纹沿用。
+
+### 已删除历史归档的保留参考
+
+`verified_mirror_replay.py --verify-only --output <新目录>` 核验固定旧候选成功证明、13 个 Matched、1,084 个参考变体、冻结配置/输入哈希和精确总数。执行新候选时使用 `--godot <Mono exe>`；可分别用 `--resume` 指向同候选的原 r1 和镜像续跑目录，仅核对成功项后复用。输出清楚区分参考旧构建与当前候选，原图形目录不伪造、不还原。所有字段、行筛选器、时机和数量保持原契约。
+
+`mirror_regressions.py --verify-only --output <新目录>` 核验阶段30正式候选保存的 Stage29/旧Wave参考链；`--godot <Mono exe> --output <新目录>` 重新运行当前候选，保持 7/9473 和 13/1965/19218 的完整比较。当前脚本固定本轮候选与正式阶段30来源指纹，参考审计不计为当前回放通过。依赖 psutil；子进程超时或中断必须等待本脚本拥有的 Godot 进程树退出后再记录和继续。
+
+阶段30全局暂停复验仅选 `stage30-native-input/results` 的 F120 长签名；`audit-more` 同名 F105 短采集不足以核对恢复，不应按通用优先顺序误选。保留短轨迹失败记录，选择较长的同物理输入签名不改变任何输入、规则或比较口径。

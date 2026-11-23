@@ -44,3 +44,9 @@
 批处理构建指纹：`NewKOF.dll=5e6cebb79211ed7ca4e757476695ec733d67a2f901cc0af70a2fd76cfc36f02b`，`NewKOF.BattleCore.dll=76198dd2173b6688856103ef49b196eb4ec04462365b9a9d7d23093710e342de`。完整审计实时 30 FPS 样本 `[30,29,30]`、60 FPS `[57,60,60]`，两档均零积压并通过原验收脚本（`stage31-recovery-realtime{30,60}-batch-r1`）。早期 60 档误选 render=552 未拍到动作，失败存档 `stage31-recovery-realtime60-r1` 保留，不计验收；正确入口沿用既有 60 档 render=294。
 
 本轮 C# 1,606/1,606、Python 141/141；核心 DLL 与上述批处理构建相同。Godot 构建 0 警告 0 错误。六份 JSON 在 `terry98-stage31-recovery-r2/r3` 两轮生成逐字节一致（`stage31-recovery-determinism.log`）。当前应使用 recovery-r2 新目录，旧 `stage31-final` 原配置保留未覆写。原版 69 个签名重新校验完成（`stage31-recovery-native-check.log`）。全矩阵与最终历史门禁结果将在本节后续补齐；旧 542 对成功证据只代表旧核心 DLL，不替代本轮回归。
+
+独立核心构建补充：后续 `dotnet build core/BattleCore/BattleCore.csproj` 产生 `cf8f3359…`，信息版本带提交 `3ed196a`；候选与 C# 测试目录的核心仍为 `76198dd2…`，信息版本为构建时的 WIP `9bc743c`。2,959 个方法体 IL 逐字节一致，证据 `stage31-recovery-core-il-comparison.json`。独立构建用于证明核心可单独构建，不将其日志冒充候选指纹；未替换正在回放的候选 DLL。
+
+原 D:/阶段26与29归档删除已由用户确认；已使用保留的、旧候选完整验证过的 headless 权威副本恢复参考链，不伪造原截图。参考完整性核验和当前重放区分为 `stage31-recovery-mirror-audit-r1`（参考审计）与 `stage31-recovery-mirror-replay-r1`（当前候选严格重放）。阶段29及旧Wave同理由官方阶段30副本建立逐条相等链，当前结果 `stage31-recovery-directed-mirror-r1/mirror-report.json` 为 new-runs-passed：7 对/9,473 行和 13 对/1,965 帧/19,218 完整行。新验证器8项测试通过，另有错误参考头、缺变体、改总数、改输入时机的拒绝实验；不改原有行筛选器、总数、容差或样本。
+
+最终 69/69 固定 Vulkan 已完成（default 67，mode2 2），13C 323＋69 与阶段28 6/6、2,412行通过。同DLL控制输出批处理 A/B/A/B 位于 `stage31-recovery-batch-abab-r1`：非批处理前1200行耗时3454/3379ms、打印1200次，批处理约1200行耗时1420/1401ms、打印480/481次；非批处理60档出现32/36低点，批处理对应最低59/56并回到60。四次均保存DLL/配置/物理输入哈希。这里统计应用GD.Print调用数，不伪称系统磁盘flush次数。

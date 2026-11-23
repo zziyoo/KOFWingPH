@@ -23,7 +23,7 @@ from power_wave_duel import (
 from compare_damage import committed_damage, damage_roll, raw_damage
 
 
-PROFILE = 'data/imported-characters/terry98-stage31-final'
+PROFILE = 'data/imported-characters/terry98-stage31-recovery-r2'
 FAMILY = 'standing-heavy-kick'
 TACKLE = 'TerryRisingTackle1200'
 PRIMARY = 1200

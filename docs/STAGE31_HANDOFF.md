@@ -60,3 +60,15 @@
 ## 2026-11-23 救援轮接续
 
 原始 WIP 已在本地 `wip/stage31-recovery` 保存 `9bc743c`，不推送。两处规则分歧的修复候选、同步日志输出性能根因、批处理输出等价证明和 30/60 FPS 新实测见 STAGE31_ACCEPTANCE.md 的救援轮章节。使用 `data/imported-characters/terry98-stage31-recovery-r2`，不要覆写旧 final 配置。当前批处理 DLL 为 `5e6cebb7…` / `76198dd2…`；全矩阵与最终历史门禁正在补齐，阶段仍 WIP。
+
+## 2026-11-23 中途快照：删除归档后的严格补跑
+
+候选 DLL 仍为 `5e6cebb7… / 76198dd2…`；不要重新构建或替换正在验收的 DLL。新配置目录为 `terry98-stage31-recovery-r2`，六份 JSON 两轮一致。69/69 固定 Vulkan 已全部通过，13C 323 角色/实体帧＋69 取消、阶段 28 六组 2,412 行、阶段 29 镜像参考七组 9,473 行、旧 Wave 十三组 19,218 完整行均已在此候选通过。完整审计实时 30/60 已通过，采样为 30/29/30 与 57/60/60，均无积压。
+
+用户确认删除了原 D:/NewKOF-stage26-* 与 stage29-delivery-*。第一次新核心历史回放 `stage31-recovery-frozen-r1` 在阶段 18 只枚举到 27/53 对，未出现结算差异；保留其成功单项和失败日志。`verified_mirror_replay.py` 已核验旧成功记录 `stage31-frozen-resume-final.log` 的全部 1,084 个参考变体（固定旧 DLL 02f2/8cb、13 个 Matched、542 对/65,069 帧/538,586 行）。旧记录仅作为参考副本，绝不冒充新候选 PASS。当前新跑 `stage31-recovery-mirror-replay-r1` 严格比较每条记录，复用同候选 r1 的已验证项，继续补缺；必须等 13 个 Matched 和最终退出码 0 后才可称整个冻结门禁通过。
+
+续跑命令：`py -X utf8 -u tools/Stage31Validation/verified_mirror_replay.py --godot <Mono控制台exe> --resume local-mugen/stage31-recovery-frozen-r1 --resume local-mugen/stage31-recovery-mirror-replay-r1 --output local-mugen/<新目录>`。两个来源均须保留，当前脚本核候选指纹、完整输入参数、输入审计与权威行后才复用。`--verify-only` 只核参考，不计新构建通过。
+
+阶段 29/旧 Wave 的已验证参考保留在 D:/NewKOF-stage30-delivery-r3-{stage29,old-wave}；`mirror_regressions.py` 对旧 Stage29 headless→Stage30 Vulkan 的链逐条复核，再用新核心/新配置重新跑，结果在 `stage31-recovery-directed-mirror-r1/mirror-report.json`（new-runs-passed）。所有原版输入、JSON、参考日志和 PNG 未覆写。参考集 2,369 个文件（约 213 MB）以及原版阶段31的145个来源文件/ZIP/Manifest（约195MB）已在仓库外相邻 NewKOF_backups/stage31-recovery-20261123 独立复制并核哈希。
+
+剩余图形门禁由本机脚本 `local-mugen/stage31-recovery-remaining-native-r2.ps1` 顺序运行：阶段30暂停、延后接触、追击，245/440原版对照，像素；随后队列中的 `1200-hit` 同种子复跑。观察 `stage31-recovery-remaining-exits.log`、各 lane 的 trace/日志和 `stage31-recovery-repeat-hit-r1.log`，只能计成功条目。暂停 r1 错选 audit-more 的 F105 短轨迹导致校验截断，r2 明确只选 input 的 F120 长签名，与阶段30正式来源相同，旧失败保留。尚未全部完成前仍 WIP，不推送。
