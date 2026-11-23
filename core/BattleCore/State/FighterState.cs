@@ -80,7 +80,9 @@ public readonly record struct FighterState(
     int CrouchReturnTicks = 0,
     GroundHitReactionState GroundReaction = default,
     bool? GroundGuardCrouching = null,
-    int? LastContactMoveTick = null)
+    int? LastContactMoveTick = null,
+    ReversalConfirmation? ReversedStrike = null,
+    bool AuthoredAirMotion = false)
 {
     public int LightGroundReactionTick => GroundReaction.Kind == GroundHitReaction.Light ? GroundReaction.Tick : 0;
     public static FighterState Create(int id, int maxHealth, int positionX, Facing facing) =>
@@ -137,6 +139,8 @@ public readonly record struct FighterState(
         LogicState is FighterLogicState.Startup
             or FighterLogicState.Active
             or FighterLogicState.Recovery;
+
+    public bool IsAirborne => LogicState.IsAirborneLike() || (IsInMove && PositionY > FixedPoint.Zero);
 
     /// <summary>校验基础不变式。用于尽早暴露非法初态，而不是让错误无声传播。</summary>
     public void Validate()
@@ -217,6 +221,9 @@ public readonly record struct FighterState(
         //   因此允许 Y == 0 但要求垂直速度为正；不携带跳跃类型（击飞不是跳跃）；
         // - 地面状态一律 Y == 0、VelocityY == 0；除受击/防御硬直的击退外速度必须为零。
         // 新增枚举值不能绕过校验：Enum.IsDefined 通过后仍按状态逐项检查（D62 的延伸）。
+        if (AuthoredAirMotion && !(IsInMove && PositionY > FixedPoint.Zero ||
+            LogicState is FighterLogicState.Airborne or FighterLogicState.AirBlockstun))
+            throw new InvalidOperationException($"角色 {Id} 的脚本空中运动标记与当前状态不匹配。");
         if (LogicState is FighterLogicState.Airborne or FighterLogicState.AirHitstun or FighterLogicState.AirBlockstun)
         {
             if (LogicState is FighterLogicState.Airborne or FighterLogicState.AirBlockstun)
@@ -224,7 +231,7 @@ public readonly record struct FighterState(
                 if (PositionY <= FixedPoint.Zero)
                     throw new InvalidOperationException(
                         $"角色 {Id} 处于空中但高度为 {PositionY}（空中状态必须 Y > 0；触地在同一帧内完成修正）。");
-                if (JumpKind == Combat.JumpKind.None)
+                if (JumpKind == Combat.JumpKind.None && !AuthoredAirMotion)
                     throw new InvalidOperationException($"角色 {Id} 处于空中但没有跳跃类型。");
             }
             else
@@ -244,6 +251,11 @@ public readonly record struct FighterState(
             if (KnockbackFriction != FixedPoint.Zero)
                 throw new InvalidOperationException(
                     $"角色 {Id} 处于空中状态 {LogicState} 但携带地面击退摩擦 {KnockbackFriction}。");
+        }
+        else if (IsInMove && PositionY > FixedPoint.Zero)
+        {
+            if (JumpKind != Combat.JumpKind.None || KnockbackFriction != FixedPoint.Zero || !AuthoredAirMotion)
+                throw new InvalidOperationException($"角色 {Id} 的招式空中运动携带跳跃或地面摩擦。");
         }
         else
         {
@@ -386,6 +398,9 @@ public readonly record struct FighterState(
             (!IsInMove || contactTick < 0 || contactTick > MoveElapsedFrames ||
              HitConfirmFrame < 0 && BlockConfirmFrame < 0))
             throw new InvalidOperationException($"角色 {Id} 的接触动作 tick {contactTick} 与当前攻击实例不符。");
+        if (ReversedStrike is { } reversal && (!IsInMove || reversal.Frame < MoveStartedFrame ||
+            reversal.MoveTick < 0 || reversal.MoveTick > MoveElapsedFrames || reversal.Group is < 0 or > 31))
+            throw new InvalidOperationException($"角色 {Id} 的被反制记录与当前攻击实例不符。");
 
         if (IsInMove)
         {
@@ -404,3 +419,6 @@ public readonly record struct FighterState(
         }
     }
 }
+
+/// <summary>A disabled strike group and its confirmation on the effective clock of the owning move.</summary>
+public readonly record struct ReversalConfirmation(int Frame, int MoveTick, int Group);

@@ -31,6 +31,16 @@ public class CombatEventTests
     private static FighterState P1(BattleState s) => s.Fighter(0);
     private static FighterState P2(BattleState s) => s.Fighter(1);
 
+    [Fact]
+    public void AuthorityEventTextOnlyIncludesProjectileIdWhenPresent()
+    {
+        var move = new BattleEvent(19, 304, BattleEventType.MoveStarted, 0, 0, "TerryStandLightPunch200", 0);
+        Assert.Equal("BattleEvent { Frame = 19, EventId = 304, Type = MoveStarted, SourceFighterId = 0, " +
+            "TargetFighterId = 0, MoveId = TerryStandLightPunch200, Amount = 0, ThrowId =  }", move.ToString());
+        Assert.EndsWith("ProjectileId = 1 }",
+            (move with { Type = BattleEventType.ProjectileReversed, ProjectileId = 1 }).ToString());
+    }
+
     // ─────────────────────────────────────────────────────────────
     // D81：同一攻击实例只结算一次
     // ─────────────────────────────────────────────────────────────

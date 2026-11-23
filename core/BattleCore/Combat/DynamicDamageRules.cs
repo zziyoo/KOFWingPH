@@ -22,7 +22,7 @@ public readonly record struct DamageRatio
 /// <summary>可选的近战 HitDef 伤害参数，按招式和接触组配置。</summary>
 public sealed class DynamicAttackDamage
 {
-    public DynamicAttackDamage(int normalBase, int counterBase, bool useContactDivisor)
+    public DynamicAttackDamage(int normalBase, int counterBase, bool useContactDivisor, bool useVariance = true)
     {
         if (normalBase is < 0 or > 1_000_000)
             throw new ArgumentOutOfRangeException(nameof(normalBase), "基础伤害必须在 0..1000000 内。");
@@ -31,11 +31,13 @@ public sealed class DynamicAttackDamage
         NormalBase = normalBase;
         CounterBase = counterBase;
         UseContactDivisor = useContactDivisor;
+        UseVariance = useVariance;
     }
 
     public int NormalBase { get; }
     public int CounterBase { get; }
     public bool UseContactDivisor { get; }
+    public bool UseVariance { get; }
 }
 
 /// <summary>普通技脚本伤害的角色级参数与运算顺序。</summary>
@@ -71,7 +73,7 @@ public sealed class DynamicDamageRules
     {
         int basis = script.CounterAge > 0 ? attack.CounterBase : attack.NormalBase;
         int divisor = attack.UseContactDivisor ? script.ContactDivisor : 1;
-        int quotient = (basis - script.Variance) / divisor;
+        int quotient = (basis - (attack.UseVariance ? script.Variance : 0)) / divisor;
         Int128 raw = (Int128)quotient * BaseScale.Numerator / BaseScale.Denominator;
         if (raw == 0 || AttackMultiplier.Numerator == 0)
             return 0;
@@ -83,7 +85,7 @@ public sealed class DynamicDamageRules
         DynamicDamageRules? defenderRules, bool defenderInHitReaction)
     {
         int basis = owner.CounterAge > 0 ? attack.CounterBase : attack.NormalBase;
-        Int128 raw = (Int128)(basis - owner.Variance) * BaseScale.Numerator * AttackMultiplier.Numerator
+        Int128 raw = (Int128)(basis - (attack.UseVariance ? owner.Variance : 0)) * BaseScale.Numerator * AttackMultiplier.Numerator
             / ((Int128)BaseScale.Denominator * AttackMultiplier.Denominator);
         if (raw <= 0)
             return 0;

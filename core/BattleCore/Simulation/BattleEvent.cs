@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace NewKOF.BattleCore.Simulation;
 
 /// <summary>战斗事件类型（阶段 06C，D82）。</summary>
@@ -16,7 +18,7 @@ public enum BattleEventType
     /// <summary>命中：Amount = 实扣伤害（已应用 max(0, …) 钳制）。DamageApplied 并入本类型。</summary>
     Hit = 2,
 
-    /// <summary>被防御：不掉血，Amount = 防御硬直帧数。</summary>
+    /// <summary>被防御：Amount = 实扣削血，未配置削血的攻击为 0。</summary>
     Blocked = 3,
 
     /// <summary>受击硬直开始：Amount = 硬直帧数。</summary>
@@ -98,6 +100,12 @@ public enum BattleEventType
     TimeOver = 16,
 
     ThrowTech = 17,
+
+    /// <summary>Clsn1 reverses an eligible strike. No ordinary hit, guard or damage is implied.</summary>
+    Reversed = 18,
+
+    /// <summary>A live Helper HitDef was reversed; ProjectileId identifies the independently frozen entity.</summary>
+    ProjectileReversed = 19,
 }
 
 /// <summary>
@@ -128,6 +136,17 @@ public readonly record struct BattleEvent(
 {
     /// <summary>每帧事件数上限（EventId 帧内 4 位空间）。</summary>
     public string? ThrowId { get; init; }
+    public int? ProjectileId { get; init; }
+
+    // VisualAudit serializes these events into frozen authority logs.
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"Frame = {Frame}, EventId = {EventId}, Type = {Type}, SourceFighterId = {SourceFighterId}, ");
+        builder.Append($"TargetFighterId = {TargetFighterId}, MoveId = {MoveId}, Amount = {Amount}, ThrowId = {ThrowId}");
+        if (ProjectileId is { } id)
+            builder.Append($", ProjectileId = {id}");
+        return true;
+    }
 
     public const int MaxEventsPerFrame = 16;
 

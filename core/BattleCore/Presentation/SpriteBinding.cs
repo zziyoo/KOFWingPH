@@ -20,6 +20,7 @@ public sealed class SpriteBinding
 {
     private sealed record ReactionClips(string Initial, string Followup, int FollowupTick);
     private sealed record HitReactionBinding(ReactionClips Standing, ReactionClips? Crouching, bool ZeroBasedLaunchClock);
+    private sealed record MoveClipSegment(int StartTick, string Clip);
 
     public string VisualId { get; private init; } = "";
     public double Scale { get; private init; }
@@ -28,11 +29,23 @@ public sealed class SpriteBinding
     public string? Fallback { get; private init; }
     public IReadOnlyDictionary<string, SpriteClipBinding> Clips { get; private init; } = null!;
     private Dictionary<string, Dictionary<string, string>> _moves = new(StringComparer.Ordinal);
+    private Dictionary<string, IReadOnlyList<MoveClipSegment>> _moveTimelines = new(StringComparer.Ordinal);
     private Dictionary<string, HitReactionBinding> _hitReactions = new(StringComparer.Ordinal);
     private Dictionary<string, string> _states = new(StringComparer.Ordinal);
     public string ResolveClip(string defaultClip, string? moveId, string phase) =>
         moveId is not null && _moves.TryGetValue(moveId, out var stages) && stages.TryGetValue(phase, out var clip)
             ? clip : defaultClip;
+
+    public (string Clip, int Tick) ResolveMoveClip(string defaultClip, string? moveId, string phase, int elapsed)
+    {
+        int tick = Math.Max(0, elapsed);
+        if (moveId is not null && _moveTimelines.TryGetValue(moveId, out var timeline))
+        {
+            MoveClipSegment? selected = timeline.LastOrDefault(segment => segment.StartTick <= tick);
+            if (selected is not null) return (selected.Clip, tick - selected.StartTick);
+        }
+        return (ResolveClip(defaultClip, moveId, phase), tick);
+    }
 
     public string ResolveStateClip(string defaultClip, string state) =>
         _states.TryGetValue(state, out string? clip) ? clip : defaultClip;
@@ -113,6 +126,29 @@ public sealed class SpriteBinding
                 moves.Add(move.Name, stages);
             }
         }
+        var moveTimelines = new Dictionary<string, IReadOnlyList<MoveClipSegment>>(StringComparer.Ordinal);
+        if (root.TryGetProperty("moveTimelines", out var timelineData))
+        {
+            foreach (var move in timelineData.EnumerateObject())
+            {
+                if (string.IsNullOrWhiteSpace(move.Name) || move.Value.ValueKind != JsonValueKind.Array)
+                    throw new ArgumentException($"Invalid move timeline for {move.Name}.");
+                var segments = new List<MoveClipSegment>();
+                foreach (JsonElement item in move.Value.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object ||
+                        !item.TryGetProperty("startTick", out var startValue) || !startValue.TryGetInt32(out int startTick) ||
+                        !item.TryGetProperty("clip", out var clipValue) || clipValue.GetString() is not string clipName ||
+                        startTick < 0 || !clips.ContainsKey(clipName) ||
+                        (segments.Count == 0 ? startTick != 0 : startTick <= segments[^1].StartTick))
+                        throw new ArgumentException($"Invalid move timeline segment for {move.Name}.");
+                    segments.Add(new MoveClipSegment(startTick, clipName));
+                    if (segments.Count > 32) throw new ArgumentException($"Too many move timeline segments for {move.Name}.");
+                }
+                if (segments.Count == 0) throw new ArgumentException($"Empty move timeline for {move.Name}.");
+                moveTimelines.Add(move.Name, Array.AsReadOnly(segments.ToArray()));
+            }
+        }
         var reactions = new Dictionary<string, HitReactionBinding>(StringComparer.Ordinal);
         if (root.TryGetProperty("hitReactions", out var reactionData))
         {
@@ -140,7 +176,8 @@ public sealed class SpriteBinding
             }
         }
         return new SpriteBinding { VisualId = id, Scale = scale, OffsetX = x, OffsetY = y, Clips = clips,
-            Fallback = fallback, _moves = moves, _hitReactions = reactions, _states = states };
+            Fallback = fallback, _moves = moves, _moveTimelines = moveTimelines,
+            _hitReactions = reactions, _states = states };
     }
 
     private static ReactionClips ParseReactionClips(JsonElement reaction,

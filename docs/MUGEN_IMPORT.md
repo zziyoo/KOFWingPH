@@ -427,3 +427,7 @@ if ($LASTEXITCODE) { throw 'Stage 30 conversion failed' }
 ```
 
 新预设用 `RisingUpper` 替换 310 占位，保留 DF+y 的识别期方向门与根／Helper 两路时钟。两模式的真实 310 使用独立视觉别名 `terry98-stage30-default`／`terry98-stage30-mode2`。默认弱 Wave 复用 State 1000 与 Helper 1020，较早的弱 Rising Tackle 只保留竞争资格。模式 2 的 1050 独立保留输入。图集安装、二次生成哈希和 Vulkan 验收方法见验证说明。 [导入图集和执行](../tools/Stage30Validation/README.md)
+
+## 阶段 31 弱 Rising Tackle（State 1200／1205）
+
+`state_rising_tackle` 校验阶段 30 六份父 JSON、原版 ZIP 和 AIR 对应 Manifest，以及带独立输入和实体反制控制的签名轨迹。默认预设将保留命令接入 55 tick 的招式，按 41／14 tick 切换两个原版 Action。九个普通技源窗口从原版共享控制器取得，已有 Wave 配置提供相同窗口的交叉核对。独立的 Mode 2 预设维持 1050 占位。输出配置和图集使用本地忽略目录。 [生成与回放](../tools/Stage31Validation/README.md)

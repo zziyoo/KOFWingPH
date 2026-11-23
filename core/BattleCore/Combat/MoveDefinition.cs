@@ -74,7 +74,10 @@ public MoveDefinition(
     bool walkOnCrouchRecovery = false,
     IReadOnlyList<MovePositionStep>? positionSteps = null,
     bool faceOpponentOnStart = false,
-    bool deferCrouchOnNaturalExit = false)
+    bool deferCrouchOnNaturalExit = false,
+    MoveAirMotion? airMotion = null,
+    int invulnerableFrames = 0,
+    IReadOnlyList<MoveReversal>? reversals = null)
     {
         if (string.IsNullOrWhiteSpace(moveId))
             throw new ArgumentException("招式 ID 不能为空。", nameof(moveId));
@@ -118,6 +121,13 @@ public MoveDefinition(
         MinimumStartDistance = minimumStartDistance;
         MaximumStartBodyDistance = maximumStartBodyDistance;
         GuardThreatFrames = guardThreatFrames;
+        long moveLength = (long)startupFrames + activeFrames + recoveryFrames;
+        if (airMotion is not null && airMotion.LandingFrame >= moveLength)
+            throw new ArgumentException("The landing must precede the natural action exit.", nameof(airMotion));
+        AirMotion = airMotion;
+        if (invulnerableFrames < 0 || invulnerableFrames > moveLength)
+            throw new ArgumentOutOfRangeException(nameof(invulnerableFrames));
+        InvulnerableFrames = invulnerableFrames;
         if (hurtboxTimeline is not null)
         {
             MoveHurtboxSpan[] spans = hurtboxTimeline.ToArray();
@@ -152,6 +162,17 @@ public MoveDefinition(
         }
 
         Attacks = Array.AsReadOnly(attackCopy);
+        MoveReversal[] reversalCopy = (reversals ?? Array.Empty<MoveReversal>()).OrderBy(reversal => reversal.FirstFrame).ToArray();
+        for (int i = 0; i < reversalCopy.Length; i++)
+        {
+            MoveReversal reversal = reversalCopy[i];
+            if (reversal.LastFrame >= moveLength || (i > 0 && reversalCopy[i - 1].LastFrame >= reversal.FirstFrame) ||
+                attackCopy.Any(attack => attack.FirstActiveFrame < activeFrames &&
+                    (long)startupFrames + attack.FirstActiveFrame <= reversal.LastFrame &&
+                    (long)startupFrames + Math.Min(activeFrames - 1, attack.LastActiveFrame) >= reversal.FirstFrame))
+                throw new ArgumentException("A reversal needs a distinct window within the move's single attack slot.", nameof(reversals));
+        }
+        Reversals = Array.AsReadOnly(reversalCopy);
 
         // 取消规则（D91）：防御复制；目标是否存在/是否自身由 FighterDefinition 校验（它知道全表）。
         Cancels = Array.AsReadOnly((cancels ?? Array.Empty<CancelDefinition>()).ToArray());
@@ -218,6 +239,9 @@ public MoveDefinition(
     public bool WalkOnCrouchRecovery { get; }
     public bool FaceOpponentOnStart { get; }
     public bool DeferCrouchOnNaturalExit { get; }
+    public MoveAirMotion? AirMotion { get; }
+    public int InvulnerableFrames { get; }
+    public IReadOnlyList<MoveReversal> Reversals { get; }
     internal bool TracksContactAge { get; }
 
     public FixedPoint MinimumStartDistance { get; }

@@ -209,7 +209,8 @@ public static class FighterBoxes
         for (int i = 0; i < move.Attacks.Count; i++)
         {
             AttackDefinition attack = move.Attacks[i];
-            if (elapsed < attack.FirstActiveFrame || elapsed > attack.LastActiveFrame)
+            if (elapsed < attack.FirstActiveFrame || elapsed > attack.LastActiveFrame ||
+                fighter.ReversedStrike?.Group == attack.ContactGroup)
                 continue;
 
             FixedPoint centerX = fighter.PositionX + forwardSign * attack.OffsetForward;

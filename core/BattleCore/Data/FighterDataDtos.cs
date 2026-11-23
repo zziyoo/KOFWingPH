@@ -113,6 +113,9 @@ public sealed class DynamicAttackDamageDto
 
     [JsonPropertyName("useContactDivisor")]
     public bool UseContactDivisor { get; set; }
+
+    [JsonPropertyName("useVariance")]
+    public bool? UseVariance { get; set; }
 }
 
 public sealed class GroundBodyWidthsDto
@@ -373,6 +376,15 @@ public sealed class MoveDto
     [JsonPropertyName("deferCrouchOnNaturalExit")]
     public bool DeferCrouchOnNaturalExit { get; set; }
 
+    [JsonPropertyName("airMotion")]
+    public MoveAirMotionDto? AirMotion { get; set; }
+
+    [JsonPropertyName("invulnerableFrames")]
+    public int InvulnerableFrames { get; set; }
+
+    [JsonPropertyName("reversals")]
+    public List<MoveReversalDto>? Reversals { get; set; }
+
     [JsonPropertyName("attacks")]
     public List<AttackDto>? Attacks { get; set; }
 
@@ -387,6 +399,45 @@ public sealed class MoveDto
 
     [JsonPropertyName("projectiles")]
     public List<ProjectileDto>? Projectiles { get; set; }
+}
+
+public sealed class MoveAirMotionDto
+{
+    [JsonPropertyName("takeoffFrame")]
+    public int? TakeoffFrame { get; set; }
+
+    [JsonPropertyName("landingFrame")]
+    public int? LandingFrame { get; set; }
+
+    [JsonPropertyName("forwardVelocity")]
+    public FractionDto? ForwardVelocity { get; set; }
+
+    [JsonPropertyName("upwardVelocity")]
+    public FractionDto? UpwardVelocity { get; set; }
+
+    [JsonPropertyName("gravity")]
+    public FractionDto? Gravity { get; set; }
+
+    [JsonPropertyName("horizontalRetention")]
+    public FractionDto? HorizontalRetention { get; set; }
+}
+
+public sealed class MoveReversalDto
+{
+    [JsonPropertyName("firstFrame")]
+    public int? FirstFrame { get; set; }
+
+    [JsonPropertyName("lastFrame")]
+    public int? LastFrame { get; set; }
+
+    [JsonPropertyName("boxes")]
+    public List<HurtboxDto>? Boxes { get; set; }
+
+    [JsonPropertyName("sourceHitstop")]
+    public int? SourceHitstop { get; set; }
+
+    [JsonPropertyName("targetHitstop")]
+    public int? TargetHitstop { get; set; }
 }
 
 public sealed class MoveHurtboxSpanDto
@@ -511,6 +562,12 @@ public sealed class AttackDto
 
     [JsonPropertyName("dynamicDamage")]
     public DynamicAttackDamageDto? DynamicDamage { get; set; }
+
+    [JsonPropertyName("guardDamage")]
+    public int GuardDamage { get; set; }
+
+    [JsonPropertyName("dynamicGuardDamage")]
+    public DynamicAttackDamageDto? DynamicGuardDamage { get; set; }
 }
 
 public sealed class HitstopByOutcomeDto
@@ -552,6 +609,9 @@ public sealed class CancelDto
     [JsonPropertyName("requiresBlockConfirm")]
     public bool? RequiresBlockConfirm { get; set; }
 
+    [JsonPropertyName("requiresReversalConfirm")]
+    public bool RequiresReversalConfirm { get; set; }
+
     [JsonPropertyName("allowWhiff")]
     public bool? AllowWhiff { get; set; }
 
@@ -590,6 +650,9 @@ public sealed class ReservedCancelDto
 
     [JsonPropertyName("requiresBlockConfirm")]
     public bool RequiresBlockConfirm { get; set; }
+
+    [JsonPropertyName("requiresReversalConfirm")]
+    public bool RequiresReversalConfirm { get; set; }
 
     [JsonPropertyName("maximumContactAge")]
     public int? MaximumContactAge { get; set; }

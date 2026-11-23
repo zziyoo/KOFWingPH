@@ -106,7 +106,8 @@ public static class FighterStateMachine
         int crouchReturnTicks = 0,
         bool crouchingHitReaction = false,
         bool opponentGroundedNonHitstun = true,
-        int? lastContactMoveTick = null)
+        int? lastContactMoveTick = null,
+        ReversalConfirmation? reversed = null)
     {
         ArgumentNullException.ThrowIfNull(recognition);
         ArgumentNullException.ThrowIfNull(definition);
@@ -136,10 +137,10 @@ public static class FighterStateMachine
             // 否则「Recovery 首帧」会被推进成「剩余帧减一」，窗口语义随实现漂移。
             // 取消窗口用<b>动作有效经过帧数</b>（D96）：Hitstop 冻结帧不推进它，
             // 因此停顿期间窗口不会悄悄过期（无 Hitstop 时它恒等于 frame − moveStartedFrame）。
-            FighterActionTick? cancel = TryCancel(
+            FighterActionTick? cancel = move.AirMotion?.InFlight(moveElapsedFrames - 1) == true ? null : TryCancel(
                 state, move, definition, ref recognition, resolvedInput, frame,
                 moveStartedFrame, moveElapsedFrames, hitConfirmFrame, blockConfirmFrame,
-                opponentDistance, opponentBodyDistance, opponentGroundedNonHitstun, lastContactMoveTick);
+                opponentDistance, opponentBodyDistance, opponentGroundedNonHitstun, lastContactMoveTick, reversed);
             if (cancel is FighterActionTick cancelled)
                 return cancelled;
 
@@ -385,7 +386,8 @@ public static class FighterStateMachine
         FixedPoint opponentDistance,
         FixedPoint opponentBodyDistance,
         bool opponentGroundedNonHitstun,
-        int? lastContactMoveTick)
+        int? lastContactMoveTick,
+        ReversalConfirmation? reversed)
     {
         if ((move.Cancels.Count == 0 && move.ReservedCancels.Count == 0) || moveStartedFrame < 0)
             return null;
@@ -398,7 +400,7 @@ public static class FighterStateMachine
         if (definition.UseCommandPriority)
             return TryPriorityCancel(state, move, definition, ref recognition, input, frame, moveStartedFrame,
                 elapsed, hitConfirmFrame, blockConfirmFrame, opponentDistance, opponentBodyDistance,
-                opponentGroundedNonHitstun, lastContactMoveTick);
+                opponentGroundedNonHitstun, lastContactMoveTick, reversed);
 
         HashSet<int>? rejectedStandingInputs = null;
         foreach (CancelDefinition cancel in move.Cancels)
@@ -406,7 +408,7 @@ public static class FighterStateMachine
             if (!IsWindowOpen(cancel, state, elapsed))
                 continue;
             if (!cancel.ConfirmSatisfied(frame, hitConfirmFrame, blockConfirmFrame, moveStartedFrame,
-                elapsed, lastContactMoveTick))
+                elapsed, lastContactMoveTick, reversed))
                 continue;
 
             MoveDefinition? target = definition.FindMoveById(cancel.TargetMoveId);
@@ -463,7 +465,7 @@ public static class FighterStateMachine
         FighterDefinition definition, ref RecognitionState recognition, RelativeInput input, int frame,
         int moveStartedFrame, int elapsed, int hitConfirmFrame, int blockConfirmFrame,
         FixedPoint opponentDistance, FixedPoint opponentBodyDistance, bool opponentGroundedNonHitstun,
-        int? lastContactMoveTick)
+        int? lastContactMoveTick, ReversalConfirmation? reversed)
     {
         HashSet<int>? rejectedStandingInputs = null;
         foreach (BufferedResult result in CommandCandidates(recognition, definition))
@@ -475,7 +477,7 @@ public static class FighterStateMachine
                 AllowsReservation(recognition, reservation, result, opponentBodyDistance, opponentGroundedNonHitstun) &&
                 move.ReservedCancels.Any(rule => rule.CommandId == match.CommandId && rule.IsOpen(state, elapsed) &&
                     rule.ConfirmSatisfied(frame, hitConfirmFrame, blockConfirmFrame, moveStartedFrame,
-                        elapsed, lastContactMoveTick)))
+                        elapsed, lastContactMoveTick, reversed)))
             {
                 IReadOnlyList<MoveDefinition> reservedTargets = definition.FindMoves(match.CommandId);
                 if (reservedTargets.Count == 0)
@@ -498,7 +500,7 @@ public static class FighterStateMachine
             {
                 if (!IsWindowOpen(cancel, state, elapsed) ||
                     !cancel.ConfirmSatisfied(frame, hitConfirmFrame, blockConfirmFrame, moveStartedFrame,
-                        elapsed, lastContactMoveTick))
+                        elapsed, lastContactMoveTick, reversed))
                     continue;
                 MoveDefinition? target = definition.FindMoveById(cancel.TargetMoveId);
                 if (target is null || !string.Equals(match.CommandId, target.CommandId, StringComparison.Ordinal) ||

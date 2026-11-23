@@ -284,8 +284,26 @@ public static class FighterDataLoader
             positionSteps: dto.PositionSteps is { } steps
                 ? BuildArray(steps, source, path + ".positionSteps", BuildMovePositionStep) : null,
             faceOpponentOnStart: dto.FaceOpponentOnStart,
-            deferCrouchOnNaturalExit: dto.DeferCrouchOnNaturalExit),
+            deferCrouchOnNaturalExit: dto.DeferCrouchOnNaturalExit,
+            airMotion: dto.AirMotion is { } motion ? BuildMoveAirMotion(motion, source, path + ".airMotion") : null,
+            invulnerableFrames: dto.InvulnerableFrames,
+            reversals: dto.Reversals is { } reversals ? BuildArray(reversals, source, path + ".reversals", BuildMoveReversal) : null),
         source, path);
+
+    private static MoveAirMotion BuildMoveAirMotion(MoveAirMotionDto dto, string source, string path) =>
+        new(RequiredInt(dto.TakeoffFrame, source, path + ".takeoffFrame"),
+            RequiredInt(dto.LandingFrame, source, path + ".landingFrame"),
+            Fraction(dto.ForwardVelocity, source, path + ".forwardVelocity"),
+            Fraction(dto.UpwardVelocity, source, path + ".upwardVelocity"),
+            Fraction(dto.Gravity, source, path + ".gravity"),
+            Fraction(dto.HorizontalRetention, source, path + ".horizontalRetention"));
+
+    private static MoveReversal BuildMoveReversal(MoveReversalDto dto, string source, string path) =>
+        new(RequiredInt(dto.FirstFrame, source, path + ".firstFrame"),
+            RequiredInt(dto.LastFrame, source, path + ".lastFrame"),
+            BuildArray(dto.Boxes, source, path + ".boxes", BuildHurtbox),
+            RequiredInt(dto.SourceHitstop, source, path + ".sourceHitstop"),
+            RequiredInt(dto.TargetHitstop, source, path + ".targetHitstop"));
 
     private static MovePositionStep BuildMovePositionStep(MovePositionStepDto dto, string source, string path) =>
         new(RequiredInt(dto.Frame, source, path + ".frame"), Fraction(dto.X, source, path + ".x"));
@@ -336,13 +354,16 @@ public static class FighterDataLoader
             retainsGroundGuardOnFollowup: dto.RetainsGroundGuardOnFollowup,
             groundGuardOnly: dto.GroundGuardOnly,
             respectsAirFollowupRestriction: dto.RespectsAirFollowupRestriction,
-            launchOnAirborneOnly: dto.LaunchOnAirborneOnly),
+            launchOnAirborneOnly: dto.LaunchOnAirborneOnly,
+            guardDamage: dto.GuardDamage,
+            dynamicGuardDamage: BuildDynamicDamage(dto.DynamicGuardDamage, source, path + ".dynamicGuardDamage")),
         source, path);
 
     private static DynamicAttackDamage? BuildDynamicDamage(DynamicAttackDamageDto? damage, string source, string path) =>
         damage is null ? null : new DynamicAttackDamage(
             RequiredInt(damage.NormalBase, source, path + ".normalBase"),
-            RequiredInt(damage.CounterBase, source, path + ".counterBase"), damage.UseContactDivisor);
+            RequiredInt(damage.CounterBase, source, path + ".counterBase"), damage.UseContactDivisor,
+            damage.UseVariance ?? true);
 
     private static HitstopPair BuildHitstopPair(HitstopPairDto? dto, string source, string path)
     {
@@ -379,7 +400,8 @@ public static class FighterDataLoader
             standingInputOnly: dto.StandingInputOnly,
             maximumInputAge: dto.MaximumInputAge,
             retainBufferedMotionHelper: dto.RetainBufferedMotionHelper,
-            maximumContactAge: dto.MaximumContactAge),
+            maximumContactAge: dto.MaximumContactAge,
+            requiresReversalConfirm: dto.RequiresReversalConfirm),
         source, path);
 
     private static ReservedCancelDefinition BuildReservedCancel(ReservedCancelDto dto, string source, string path) => Guard(
@@ -389,7 +411,7 @@ public static class FighterDataLoader
             RequiredInt(dto.WindowLastFrame, source, path + ".windowLastFrame"),
             ParseFlags(RequiredString(dto.Phases, source, path + ".phases"),
                 source, path + ".phases", MoveCancelPhases.Active | MoveCancelPhases.Recovery),
-            dto.RequiresHitConfirm, dto.RequiresBlockConfirm, dto.MaximumContactAge),
+            dto.RequiresHitConfirm, dto.RequiresBlockConfirm, dto.MaximumContactAge, dto.RequiresReversalConfirm),
         source, path);
 
     private static ThrowDefinition BuildThrow(ThrowDto dto, string source, string path) => Guard(

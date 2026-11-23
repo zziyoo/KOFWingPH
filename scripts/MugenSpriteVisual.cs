@@ -33,11 +33,14 @@ internal sealed class MugenSpriteVisual
     // Read-only projection for correlating committed battle frames with AIR data.
     public string Describe(string clip, int visualFrame, int moveFrame, bool inMove, string? moveId, string phase)
     {
-        if (inMove) clip = _binding.ResolveClip(clip, moveId, phase);
+        (string Clip, int Tick) selection = inMove
+            ? _binding.ResolveMoveClip(clip, moveId, phase, moveFrame)
+            : (clip, visualFrame);
+        clip = selection.Clip;
         if (!_clips.TryGetValue(clip, out var mapped) &&
             (_binding.Fallback is null || !_clips.TryGetValue(_binding.Fallback, out mapped)))
             return $"clip={clip} fallback=geometry";
-        int elapsed = inMove && mapped.Clip.MoveClock ? moveFrame : visualFrame;
+        int elapsed = inMove && mapped.Clip.MoveClock ? selection.Tick : visualFrame;
         int tick = (int)Math.Min(int.MaxValue, (long)Math.Max(0, elapsed) + mapped.Clip.StartTick);
         int index = mapped.Clip.FrameAt(mapped.Timeline, tick, mapped.Action.Frames.Length);
         JsonElement frame = mapped.Action.Frames[index];
@@ -153,13 +156,16 @@ internal sealed class MugenSpriteVisual
 
     public bool Apply(string clip, int visualFrame, int moveFrame, bool inMove, bool facingLeft, string? moveId = null, string phase = "")
     {
-        if (inMove) clip = _binding.ResolveClip(clip, moveId, phase);
+        (string Clip, int Tick) selection = inMove
+            ? _binding.ResolveMoveClip(clip, moveId, phase, moveFrame)
+            : (clip, visualFrame);
+        clip = selection.Clip;
         if (!_clips.TryGetValue(clip, out var mapped) &&
             (_binding.Fallback is null || !_clips.TryGetValue(_binding.Fallback, out mapped)))
             return Missing($"unmapped clip or missing action: {clip}");
         try
         {
-            int elapsed = inMove && mapped.Clip.MoveClock ? moveFrame : visualFrame;
+            int elapsed = inMove && mapped.Clip.MoveClock ? selection.Tick : visualFrame;
             long shifted = (long)Math.Max(0, elapsed) + mapped.Clip.StartTick;
             JsonElement frame = mapped.Action.Frames[mapped.Clip.FrameAt(mapped.Timeline, (int)Math.Min(int.MaxValue, shifted), mapped.Action.Frames.Length)];
             var index = frame.GetProperty("sprite_index");

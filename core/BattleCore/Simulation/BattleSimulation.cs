@@ -87,7 +87,7 @@ public sealed class BattleSimulation
         int facing = fighter.Facing == Facing.Right ? 1 : -1;
         int opponentFacing = opponent.Facing == Facing.Right ? 1 : -1;
         Int128 distance = ((Int128)opponentX.RawValue - fighter.PositionX.RawValue) * facing;
-        GroundBodyWidths? other = opponent.LogicState.IsAirborneLike()
+        GroundBodyWidths? other = opponent.IsAirborne
             ? opponentDefinition.AirBodyWidths ?? opponentDefinition.GroundBodyWidths
             : opponentDefinition.GroundBodyWidths;
         bool opponentFront = (distance >= 0) == (facing != opponentFacing);
@@ -123,6 +123,7 @@ public sealed class BattleSimulation
         public FixedPoint GuardWalkMomentum;
         public FixedPoint VelocityY;
         public JumpKind JumpKind;
+        public bool AuthoredAirMotion;
         public Facing Facing;
         public bool UpHeld;
         public bool BackHeld;
@@ -239,6 +240,7 @@ public sealed class BattleSimulation
                     GuardWalkMomentum = fighter.GuardWalkMomentum,
                     VelocityY = fighter.VelocityY,
                     JumpKind = fighter.JumpKind,
+                    AuthoredAirMotion = fighter.AuthoredAirMotion,
                     Facing = fighter.Facing,
                     UpHeld = fighter.UpHeldLastFrame,
                     // 防御资格仍按本帧输入解析（停顿不额外授予/剥夺防御）。
@@ -329,9 +331,10 @@ public sealed class BattleSimulation
                 opponentDistance,
                 OpponentBodyDistance(fighter, opponent, opponentX, definition, _roster.Fighter(opponentSeat)),
                 fighter.CrouchReturnTicks, fighter.GroundReaction.Crouching,
-                !opponent.LogicState.IsAirborneLike() && (!HasHitMoveType(opponent.LogicState) ||
+                !opponent.IsAirborne && (!HasHitMoveType(opponent.LogicState) ||
                     opponent.LaunchReaction?.Phase == LaunchReactionPhase.Wakeup),
-                fighter.LastContactMoveTick);
+                fighter.LastContactMoveTick,
+                fighter.ReversedStrike);
 
             // 3) 运动（D65 地面步行 / D69 空中积分）。
             FixedPoint x = fighter.PositionX;
@@ -341,6 +344,7 @@ public sealed class BattleSimulation
             FixedPoint vy = FixedPoint.Zero;
             FighterLogicState logic = tick.State;
             JumpKind jumpKind = JumpKind.None;
+            bool authoredAirMotion = fighter.AuthoredAirMotion;
             Facing facing = fighter.Facing;
 
             if (tick.MoveId is { } runningMove && definition.FindMoveById(runningMove) is { } authoredMove)
@@ -352,6 +356,24 @@ public sealed class BattleSimulation
                 FixedPoint step = authoredMove.PositionStepAt(tick.MoveElapsedFrames);
                 Int128 offset = (Int128)step.RawValue * (facing == Facing.Right ? 1 : -1);
                 x = FixedPoint.FromRaw((long)Int128.Clamp((Int128)x.RawValue + offset, long.MinValue, long.MaxValue));
+                if (authoredMove.AirMotion is { } flight)
+                {
+                    if (flight.InFlight(tick.MoveElapsedFrames))
+                    {
+                        authoredAirMotion = true;
+                        bool takingOff = tick.MoveElapsedFrames == flight.TakeoffFrame;
+                        vx = takingOff ? (facing == Facing.Right ? flight.ForwardVelocity : -flight.ForwardVelocity)
+                            : fighter.VelocityX * flight.HorizontalRetention;
+                        vy = takingOff ? flight.UpwardVelocity : fighter.VelocityY - flight.Gravity;
+                        x += vx;
+                        y += vy;
+                    }
+                    else if (tick.MoveElapsedFrames == flight.LandingFrame)
+                    {
+                        y = FixedPoint.Zero;
+                        authoredAirMotion = false;
+                    }
+                }
             }
 
             // 落地计划（D93）：只有空中受击会消耗它们，落地后立即清空。
@@ -385,10 +407,12 @@ public sealed class BattleSimulation
                     vx = FixedPoint.Zero;
                     vy = FixedPoint.Zero;
                     jumpKind = JumpKind.None;
+                    authoredAirMotion = false;
                 }
             }
             else if (tick.State == FighterLogicState.AirHitstun)
             {
+                authoredAirMotion = false;
                 // 空中受击（D93）：与跳跃共用同一套定点积分；落地转倒地 / 起身 / 站立。
                 FixedPoint? scriptedGravity = fighter.HitLaunchGravity;
                 AirborneTick air = AirborneMovement.Integrate(
@@ -493,6 +517,7 @@ public sealed class BattleSimulation
                 GuardWalkMomentum = guardWalkMomentum,
                 VelocityY = vy,
                 JumpKind = jumpKind,
+                AuthoredAirMotion = authoredAirMotion,
                 Facing = facing,
                 UpHeld = resolved.Up,
                 BackHeld = resolved.Back,
@@ -530,8 +555,7 @@ public sealed class BattleSimulation
         // ── 第 4 阶段：双人最小间距（D71 修订：帧开始顺序约束 + 墙角残差再分配）。
         // 「双方都在地面」= 双方都不是空中状态（D94 统一判定：Airborne | AirHitstun）。
         bool bothGroundAtFrameStart =
-            !state.Fighters[0].LogicState.IsAirborneLike() &&
-            !state.Fighters[1].LogicState.IsAirborneLike();
+            !state.Fighters[0].IsAirborne && !state.Fighters[1].IsAirborne;
         ApplySeparation(candidates, bothGroundAtFrameStart,
             state.Fighters[0].PositionX, state.Fighters[1].PositionX, frozenThisFrame);
 
@@ -553,6 +577,7 @@ public sealed class BattleSimulation
                 GuardWalkMomentum = candidates[i].GuardWalkMomentum,
                 VelocityY = candidates[i].VelocityY,
                 JumpKind = candidates[i].JumpKind,
+                AuthoredAirMotion = candidates[i].AuthoredAirMotion,
                 Facing = candidates[i].Facing,
                 UpHeldLastFrame = candidates[i].UpHeld,
                 Health = candidates[i].Health,
@@ -562,6 +587,7 @@ public sealed class BattleSimulation
                 LandingKnockdownFrames = candidates[i].LandingKnockdownFrames,
                 LandingWakeupFrames = candidates[i].LandingWakeupFrames,
                 MoveElapsedFrames = candidates[i].MoveElapsedFrames,
+                ReversedStrike = candidates[i].MoveStartedFrame == fighter.MoveStartedFrame ? fighter.ReversedStrike : null,
                 CrouchReturnTicks = candidates[i].CrouchReturnTicks,
                 GroundReaction = candidates[i].GroundReaction,
                 HitstopRemainingFrames = candidates[i].HitstopRemainingFrames,
@@ -587,18 +613,28 @@ public sealed class BattleSimulation
 
         AdvanceDamageScripts(state, nextFighters);
 
+        AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster, frozenThisFrame);
+        string? reversingMoveId = null;
+        MoveReversalContact? reversed = state.PendingThrow is null ? FindMoveReversal(nextFighters) : null;
+        if (reversed is { } reversal)
+        {
+            reversingMoveId = nextFighters[reversal.SourceId].MoveId;
+            ApplyMoveReversal(state.Frame, nextFighters, reversal);
+        }
+
         // ── 第 6 阶段：命中结算（D78/D79/D80/D81）——接触检测 + 双方同时判定（互不先手）
         //    + 攻击实例去重（同一发动对同一目标只结算一次，被防御亦算已结算）。
         IReadOnlyList<AttackContact> contacts = state.PendingThrow is not null ? Array.Empty<AttackContact>() : HitDetection.Detect(
             nextFighters[0], nextFighters[1], _roster.Fighter(0), _roster.Fighter(1),
             state.Fighters[0].LogicState, state.Fighters[1].LogicState,
-            candidates[0].ProtectStrike, candidates[1].ProtectStrike,
+            candidates[0].ProtectStrike || IsMoveInvulnerable(0, nextFighters[0]),
+            candidates[1].ProtectStrike || IsMoveInvulnerable(1, nextFighters[1]),
             state.Fighters[0].LaunchReaction, state.Fighters[1].LaunchReaction);
 
         // ── 第 6a 阶段：攻击相杀（D98）——两个攻击实例的攻击框正面积重叠，
         //    且双方都<b>没有</b>打中对方受击框（攻击在空中对撞）。任一方真正命中的帧
         //    按 D80 正常结算（互中/单方命中），不判相杀：同一帧不能既相杀又命中。
-        bool strikeClash = state.PendingThrow is null && contacts.Count == 0
+        bool strikeClash = state.PendingThrow is null && reversed is null && contacts.Count == 0
             && _roster.Player1.AllowStrikeClash && _roster.Player2.AllowStrikeClash
             && FighterBoxes.HitboxesOverlap(
                 nextFighters[0], _roster.Fighter(0), nextFighters[1], _roster.Fighter(1));
@@ -606,7 +642,6 @@ public sealed class BattleSimulation
         // 结算前事件快照必须早于<b>任何</b>状态改写（D87 / D102）：ApplyStrikeClash 会把双方
         // 从 Active 直接改成 Recovery，若先改写再采集，首个 Active 帧相杀时两条 AttackActive
         // （以及投技尝试）会全部丢失。事件组装只读这两份快照，绝不回读改写后的状态。
-        AttackActiveSnapshot[] attackActive = CollectAttackActive(nextFighters, _roster, frozenThisFrame);
         ThrowAttempt[] throwAttempts = CollectThrowAttempts(nextFighters, _roster, frozenThisFrame, candidates);
 
         if (strikeClash)
@@ -672,6 +707,10 @@ public sealed class BattleSimulation
         {
             FighterState fighter = NormalizeLandingPlan(NormalizeSpawnMask(
                 nextFighters[i], state.Fighters[i].MoveStartedFrame));
+            if (!fighter.IsInMove && fighter.ReversedStrike is not null)
+                fighter = fighter with { ReversedStrike = null };
+            if (fighter.LogicState == FighterLogicState.AirHitstun && fighter.AuthoredAirMotion)
+                fighter = fighter with { AuthoredAirMotion = false };
             if (fighter.LastContactMoveTick.HasValue)
                 fighter = NormalizeConfirms(fighter);
             if (fighter.DamageScript.RandomState != 0 && !fighter.IsInMove)
@@ -738,7 +777,7 @@ public sealed class BattleSimulation
         IReadOnlyList<BattleEvent> events = CollectEvents(
             state.Frame, nextFighters, candidates, outcomes, attackActive,
             throwAttempts, throwResolution, strikeClash,
-            projectileStep.Events, state.Round, nextRound, timeOverThisFrame, tech);
+            projectileStep.Events, state.Round, nextRound, timeOverThisFrame, tech, reversed, reversingMoveId);
 
         // ── 第 9 阶段：朝向更新（D72）——基于结算后的最终状态与位置；
         //    被命中进入硬直的角色朝向冻结（非待机不转向）。
@@ -759,7 +798,8 @@ public sealed class BattleSimulation
         if (_hasScriptedPause)
             UpdateScriptedStateClocks(state, nextFighters);
 
-        var nextState = new BattleState(frameAfter, nextFighters, state.StateVersion, nextRound,
+        int snapshotVersion = reversed.HasValue ? Math.Max(state.StateVersion, BattleState.CurrentStateVersion) : state.StateVersion;
+        var nextState = new BattleState(frameAfter, nextFighters, snapshotVersion, nextRound,
             nextRound.IsFinished ? projectileStep.Projectiles.Where(p => p.SpawnFacing is null).ToArray()
                 : projectileStep.Projectiles,
             projectileStep.NextProjectileId, timerAfter, nextRound.IsFinished ? null : pending,
@@ -774,6 +814,58 @@ public sealed class BattleSimulation
                 clashPositions[i].AnchorX!.Value, clashPositions[i].AnchorY!.Value);
         return new BattleStepResult(state.Frame, frameAfter, input, nextState, contacts, events, anchors);
     }
+
+    private MoveReversalContact? FindMoveReversal(FighterState[] fighters)
+    {
+        IReadOnlyList<MoveReversal> Reversals(int seat) =>
+            _roster.Fighter(seat).FindMoveById(fighters[seat].MoveId ?? "")?.Reversals ?? Array.Empty<MoveReversal>();
+        IReadOnlyList<MoveReversal> p1 = Reversals(0);
+        IReadOnlyList<MoveReversal> p2 = Reversals(1);
+        if (p1.Count == 0 && p2.Count == 0)
+            return null;
+
+        IReadOnlyList<ActiveHitbox> LiveStrikes(int seat)
+        {
+            FighterState source = fighters[seat];
+            FighterState target = fighters[1 - seat];
+            FighterDefinition definition = _roster.Fighter(seat);
+            return FighterBoxes.GetActiveHitboxesWithIndex(source, definition).Where(box =>
+            {
+                AttackDefinition attack = definition.FindMoveById(source.MoveId!)!.Attacks[box.AttackIndex];
+                return !(attack.RespectsAirFollowupRestriction && target.LaunchReaction?.RestrictsAirFollowupFrom(seat) == true) &&
+                    (source.MoveStartedFrame != target.LastHitAttackStartFrame || attack.ContactGroup > 0 &&
+                        (target.LastHitContactGroups & (1u << (attack.ContactGroup - 1))) == 0);
+            }).ToArray();
+        }
+
+        MoveReversalContact? contact = MoveReversalResolver.Detect(fighters[0], fighters[1], p1, p2,
+            p2.Count == 0 ? Array.Empty<ActiveHitbox>() : LiveStrikes(0),
+            p1.Count == 0 ? Array.Empty<ActiveHitbox>() : LiveStrikes(1));
+        if (contact is not { } reversal)
+            return null;
+        int sourceSeat = fighters[0].Id == reversal.SourceId ? 0 : 1;
+        return reversal with { SourceId = sourceSeat, TargetId = 1 - sourceSeat };
+    }
+
+    private void ApplyMoveReversal(int frame, FighterState[] fighters, MoveReversalContact reversal)
+    {
+        int source = reversal.SourceId;
+        int target = reversal.TargetId;
+        FighterState victim = fighters[target];
+        MoveDefinition move = _roster.Fighter(target).FindMoveById(victim.MoveId!)!;
+        int group = move.Attacks[reversal.TargetAttackIndex].ContactGroup;
+        fighters[source] = ConfirmReversal(frame, fighters[source], reversal.SourceHitstop);
+        fighters[target] = victim with { ReversedStrike = new(frame, victim.MoveElapsedFrames, group),
+            HitstopRemainingFrames = Math.Max(victim.HitstopRemainingFrames, reversal.TargetHitstop) };
+    }
+
+    private static FighterState ConfirmReversal(int frame, FighterState source, int freeze) => source with
+    {
+        HitConfirmFrame = frame,
+        HitstopRemainingFrames = Math.Max(source.HitstopRemainingFrames, freeze),
+        DamageScript = source.DamageScript.RandomState == 0 ? source.DamageScript
+            : source.DamageScript with { Pause = Math.Max(source.DamageScript.Pause, freeze) },
+    };
 
     private static void UpdateScriptedStateClocks(BattleState state, FighterState[] fighters)
     {
@@ -973,18 +1065,21 @@ public sealed class BattleSimulation
 
             if (settled.Blocked)
             {
+                int blockHealth = Math.Max(0, defenderState.Health - settled.Damage);
+                int chipDamage = defenderState.Health - blockHealth;
                 fighters[defender] = defenderState with
                 {
-                    LogicState = defenderState.LogicState.IsAirborneLike() ? FighterLogicState.AirBlockstun : FighterLogicState.Blockstun,
+                    LogicState = defenderState.IsAirborne ? FighterLogicState.AirBlockstun : FighterLogicState.Blockstun,
                     GroundGuardCrouching = settled.FollowupGuardCrouching ??
                         ResolveGroundGuard(defenderState, _roster.Fighter(defender)),
                     MoveId = null,
                     PhaseRemainingFrames = 0,
                     StunRemainingFrames = settled.StunFrames,
+                    Health = blockHealth,
                     // 防御击退（D92）：独立配置，默认 0；仍然遵守「速度与摩擦同时存在」不变式。
-                    VelocityX = defenderState.LogicState.IsAirborneLike() ? defenderState.VelocityX : settled.KnockbackX,
-                    VelocityY = defenderState.LogicState.IsAirborneLike() ? defenderState.VelocityY : FixedPoint.Zero,
-                    KnockbackFriction = defenderState.LogicState.IsAirborneLike() ? FixedPoint.Zero : settled.KnockbackFriction,
+                    VelocityX = defenderState.IsAirborne ? defenderState.VelocityX : settled.KnockbackX,
+                    VelocityY = defenderState.IsAirborne ? defenderState.VelocityY : FixedPoint.Zero,
+                    KnockbackFriction = defenderState.IsAirborne ? FixedPoint.Zero : settled.KnockbackFriction,
                     // 被防御亦视为该攻击实例已结算（D81）：记录发动帧，抑制后续帧重复结算。
                     LastHitAttackStartFrame = settled.AttackStartFrame,
                     LastHitContactGroups = settled.ContactGroups,
@@ -997,6 +1092,7 @@ public sealed class BattleSimulation
                     BlockConfirmFrame = -1,
                     ComboRecord = comboAfter,
                 };
+                outcomes[defender] = settled with { Damage = chipDamage };
                 continue; // 防御不会击飞：到此为止。
             }
 
@@ -1431,6 +1527,15 @@ public sealed class BattleSimulation
         for (int i = 0; i < incoming.Count; i++)
         {
             ProjectileState projectile = incoming[i];
+            if (projectile.EntityHitstopRemainingFrames > 0)
+            {
+                alive.Add(projectile with
+                {
+                    EntityHitstopRemainingFrames = projectile.EntityHitstopRemainingFrames - 1,
+                });
+                definitions.Add(ResolveProjectile(projectile));
+                continue;
+            }
             int life = projectile.RemainingLifetime - 1;
             if (life <= 0)
                 continue;
@@ -1498,6 +1603,61 @@ public sealed class BattleSimulation
             }
         }
 
+        // ReversalDef matches a live entity HitDef before it can settle against a fighter.
+        // The Helper keeps its own lifetime/position clock and pause; its owner is not frozen.
+        for (int source = 0; source < fighters.Length; source++)
+        {
+            FighterState reverser = fighters[source];
+            MoveDefinition? move = reverser.MoveId is { } moveId
+                ? _roster.Fighter(source).FindMoveById(moveId) : null;
+            if (!reverser.IsInMove || move is null || move.Reversals.Count == 0)
+                continue;
+
+            var candidatesForReversal = new List<ProjectileReversalCandidate>();
+            for (int i = 0; i < alive.Count; i++)
+            {
+                ProjectileState entity = alive[i];
+                if (entity.OwnerFighterId == source || entity.Reversed || entity.EntityHitstopRemainingFrames > 0)
+                    continue;
+
+                ProjectileDefinition definition = definitions[i];
+                // This controller targets Helper HitDefs. Ordinary engine projectiles have no Helper state.
+                if (entity.SpawnFacing is null || entity.HasContact ||
+                    definition.Timeline?.HitAt(definition.LifetimeFrames - entity.RemainingLifetime) is not { } span)
+                    continue;
+                candidatesForReversal.Add(new ProjectileReversalCandidate(entity.ProjectileId, EntityHitbox(entity, span)));
+            }
+
+            ProjectileReversalContact? contact = MoveReversalResolver.DetectProjectile(
+                reverser, move.Reversals, candidatesForReversal);
+            if (contact is not { } reversal)
+                continue;
+
+            int entityIndex = alive.FindIndex(entity => entity.ProjectileId == reversal.ProjectileId);
+            if (entityIndex < 0)
+                throw new InvalidOperationException($"Reversed entity {reversal.ProjectileId} disappeared during resolution.");
+            ProjectileState reversedEntity = alive[entityIndex] with
+            {
+                Reversed = true,
+                EntityHitstopRemainingFrames = Math.Max(alive[entityIndex].EntityHitstopRemainingFrames,
+                    reversal.TargetHitstop),
+            };
+            alive[entityIndex] = reversedEntity;
+
+            int owner = reversedEntity.OwnerFighterId;
+            fighters[source] = reverser with
+            {
+                HitstopRemainingFrames = Math.Max(reverser.HitstopRemainingFrames, reversal.SourceHitstop),
+                DamageScript = reverser.DamageScript.RandomState == 0 ? reverser.DamageScript
+                    : reverser.DamageScript with
+                    {
+                        Pause = Math.Max(reverser.DamageScript.Pause, reversal.SourceHitstop),
+                    },
+            };
+            events.Add(new ProjectileEvent(BattleEventType.ProjectileReversed, source, owner,
+                reverser.MoveId, 0, ProjectileId: reversal.ProjectileId));
+        }
+
         // ③ 投掷物 × 角色：每名目标每帧至多一枚（按 ID 升序先到先得）。
         var survivors = new List<ProjectileState>(alive.Count);
         var alreadyHit = new bool[fighters.Length];
@@ -1511,7 +1671,12 @@ public sealed class BattleSimulation
 
             ProjectileState projectile = alive[i];
             int target = 1 - projectile.OwnerFighterId;
-            if (alreadyHit[target] || candidates[target].ProtectStrike)
+            if (projectile.Reversed || projectile.EntityHitstopRemainingFrames > 0)
+            {
+                survivors.Add(projectile);
+                continue;
+            }
+            if (alreadyHit[target] || candidates[target].ProtectStrike || IsMoveInvulnerable(target, fighters[target]))
             {
                 survivors.Add(projectile); // 本帧该目标已被另一枚命中：这枚继续飞（不消失）。
                 continue;
@@ -1689,10 +1854,10 @@ public sealed class BattleSimulation
     {
         int target = 1 - projectile.OwnerFighterId;
         FighterState defender = fighters[target];
-        bool defenderAirborne = defender.LogicState.IsAirborneLike();
+        bool defenderAirborne = defender.IsAirborne;
 
         AttackDefinition hit = span?.Hit ?? definition.Hit;
-        bool guarding = CanGuard(defender.LogicState, backHeld, hit.Height, hit.GroundGuardOnly) ||
+        bool guarding = CanGuard(defender, backHeld, hit.Height, hit.GroundGuardOnly) ||
             (span is not null && hit.Height == AttackHeight.Mid && _roster.Fighter(target).RetainProjectileGuard &&
              (defender.LogicState == FighterLogicState.Blockstun || defender.ProjectileGuardRecoveryRemaining > 0));
         HitstopByOutcome? stop = hit.HitstopByOutcome;
@@ -1964,7 +2129,7 @@ public sealed class BattleSimulation
             ? downHeld : null;
         bool guarding = followupGuardCrouching is { } crouching
             ? GuardCovers(attack.Height, crouching ? FighterLogicState.Crouching : FighterLogicState.Standing)
-            : CanGuard(defenderState.LogicState, backHeld, attack.Height, attack.GroundGuardOnly) ||
+            : CanGuard(defenderState, backHeld, attack.Height, attack.GroundGuardOnly) ||
                 (priorGroups != 0 && defenderState.LogicState == FighterLogicState.Blockstun && attack.Height == AttackHeight.Mid);
 
         // 击退/击飞方向（D92/D93）：按<b>命中时双方的权威相对位置</b>决定「远离攻击者」；
@@ -1981,8 +2146,12 @@ public sealed class BattleSimulation
 
         if (guarding)
         {
+            int chipDamage = attack.DynamicGuardDamage is { } dynamicGuard
+                ? attackerRules!.Compute(dynamicGuard, attackerState.DamageScript, defenderRules,
+                    HasHitMoveType(defenderState.LogicState))
+                : attack.GuardDamage;
             return new CombatSettlement(
-                Blocked: true, Damage: 0, StunFrames: attack.BlockstunFrames,
+                Blocked: true, Damage: chipDamage, StunFrames: attack.BlockstunFrames,
                 MoveId: moveId, AttackStartFrame: attackerState.MoveStartedFrame,
                 ContactGroups: priorGroups | group,
                 UsesContactDivisor: attack.DynamicDamage?.UseContactDivisor == true,
@@ -1993,7 +2162,7 @@ public sealed class BattleSimulation
                 Hitstop: attack.ResolveMeleeHitstop(blocked: true), FollowupGuardCrouching: followupGuardCrouching);
         }
 
-        bool airborne = defenderState.LogicState.IsAirborneLike();
+        bool airborne = defenderState.IsAirborne;
         bool launches = attack.LaunchesAgainst(airborne);
         bool counterHit = attack.DynamicDamage is not null ? attackerState.DamageScript.CounterAge > 0
             : IsAttacking(defenderState.LogicState);
@@ -2034,16 +2203,17 @@ public sealed class BattleSimulation
     }
 
     private static bool? ResolveGroundGuard(FighterState defender, FighterDefinition definition) =>
-        definition.GroundHurtboxes?.StandingGuard is null || defender.LogicState.IsAirborneLike() ? null
+        definition.GroundHurtboxes?.StandingGuard is null || defender.IsAirborne ? null
             : defender.LogicState == FighterLogicState.Blockstun
                 ? defender.GroundGuardCrouching ?? false
                 : defender.LogicState == FighterLogicState.Crouching;
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
-    private static bool CanGuard(FighterLogicState state, bool backHeld, AttackHeight height, bool groundGuardOnly) =>
-        backHeld && (state == FighterLogicState.Airborne
+    private static bool CanGuard(FighterState defender, bool backHeld, AttackHeight height, bool groundGuardOnly) =>
+        backHeld && (defender.IsAirborne
             ? !groundGuardOnly && height is (AttackHeight.High or AttackHeight.Mid)
-            : state is FighterLogicState.Standing or FighterLogicState.Crouching && GuardCovers(height, state));
+            : defender.LogicState is FighterLogicState.Standing or FighterLogicState.Crouching &&
+              GuardCovers(height, defender.LogicState));
 
     private static bool GuardCovers(AttackHeight height, FighterLogicState guardState) => height switch
     {
@@ -2081,7 +2251,8 @@ public sealed class BattleSimulation
         int Amount,
         FixedPoint? AnchorX = null,
         FixedPoint? AnchorY = null,
-        bool RequestPauseOnHit = false);
+        bool RequestPauseOnHit = false,
+        int? ProjectileId = null);
 
     /// <summary>本帧飞行道具阶段的输出（D99）：存活实体、事件、下一个可分配 ID。</summary>
     private readonly record struct ProjectileStep(
@@ -2173,7 +2344,9 @@ public sealed class BattleSimulation
         RoundState previousRound,
         RoundState nextRound,
         bool timeOverThisFrame,
-        bool throwTech = false)
+        bool throwTech = false,
+        MoveReversalContact? reversed = null,
+        string? reversingMoveId = null)
     {
         List<BattleEvent>? events = null;
         int seq = 0;
@@ -2223,6 +2396,9 @@ public sealed class BattleSimulation
         }
 
         // ④ 逐被击者：命中/防御 + 硬直开始。
+        if (reversed is { } reversal)
+            Add(BattleEventType.Reversed, reversal.SourceId, reversal.TargetId, reversingMoveId, 0);
+
         for (int defender = 0; defender < fighters.Length; defender++)
         {
             if (outcomes[defender] is not CombatSettlement settled)
@@ -2231,7 +2407,7 @@ public sealed class BattleSimulation
             int attacker = 1 - defender;
             if (settled.Blocked)
             {
-                Add(BattleEventType.Blocked, attacker, defender, settled.MoveId, 0);
+                Add(BattleEventType.Blocked, attacker, defender, settled.MoveId, settled.Damage);
                 Add(BattleEventType.BlockstunStarted, attacker, defender, settled.MoveId, settled.StunFrames);
             }
             else
@@ -2263,6 +2439,8 @@ public sealed class BattleSimulation
         {
             ProjectileEvent e = projectileEvents[i];
             Add(e.Type, e.Source, e.Target, e.MoveId, e.Amount);
+            if (e.ProjectileId is { } projectileId)
+                events![^1] = events[^1] with { ProjectileId = projectileId };
         }
 
         // ⑧ 回合终局（D89 / 09B D109）：只在「本帧刚结束」时产生一次。
@@ -2297,7 +2475,7 @@ public sealed class BattleSimulation
     }
 
     /// <summary>单次命中的结算结果（不可变）。</summary>
-    /// <param name="Blocked">是否被防御（true = Blockstun 不掉血；false = 命中扣血 + Hitstun）。</param>
+    /// <param name="Blocked">是否被防御。防御使用削血和 Blockstun，命中使用命中伤害和 Hitstun。</param>
     /// <param name="Damage">本次<b>实扣</b>伤害（已应用 max(0, …) 钳制；被防御时为 0）。
     /// 事件流直接使用该值，绝不再用配置伤害重新计算。</param>
     /// <param name="StunFrames">硬直帧数（命中硬直或防御硬直）。</param>
@@ -2381,6 +2559,7 @@ public sealed class BattleSimulation
         // 仅双方候选都非空中时强制（有一方在空中 → 不推挤，允许越身）。
         // D94：空中状态 = Airborne | AirHitstun（击飞当帧 Y 可能为 0，不能靠高度判断）。
         if (candidates[0].LogicState.IsAirborneLike() || candidates[1].LogicState.IsAirborneLike() ||
+            candidates[0].PositionY > FixedPoint.Zero || candidates[1].PositionY > FixedPoint.Zero ||
             candidates[0].LaunchReaction?.Phase == LaunchReactionPhase.Tech ||
             candidates[1].LaunchReaction?.Phase == LaunchReactionPhase.Tech)
             return;
@@ -2484,4 +2663,8 @@ public sealed class BattleSimulation
         candidates[lo].PositionX = loFinal;
         candidates[hi].PositionX = hiFinal;
     }
+
+    private bool IsMoveInvulnerable(int seat, FighterState fighter) => fighter.IsInMove &&
+        _roster.Fighter(seat).FindMoveById(fighter.MoveId!) is { } move &&
+        fighter.MoveElapsedFrames < move.InvulnerableFrames;
 }

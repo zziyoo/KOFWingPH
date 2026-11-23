@@ -12,6 +12,8 @@ namespace NewKOF.BattleCore.State;
 /// </summary>
 public sealed record BattleState
 {
+    public const int CurrentStateVersion = 17;
+    private const int ReversalStateVersion = 16;
     /// <summary>下一个待模拟的逻辑帧号。初始为 0。</summary>
     public int Frame { get; }
 
@@ -110,7 +112,12 @@ public sealed record BattleState
         RoundTimerRemainingFrames = roundTimerRemainingFrames;
 
         foreach (FighterState fighter in Fighters)
+        {
             fighter.Validate();
+            if (fighter.ReversedStrike is { } reversal && (stateVersion < ReversalStateVersion || reversal.Frame >= frame))
+                throw new ArgumentException("Reversal confirmation requires snapshot version 16 and an already committed frame.",
+                    nameof(stateVersion));
+        }
         if (PendingThrow is { } grab &&
             (!Fighters[grab.Thrower].IsInMove ||
              Fighters[grab.Thrower].MoveStartedFrame != grab.AttackStartFrame ||
@@ -128,13 +135,13 @@ public sealed record BattleState
 
     /// <summary>
     /// 创建默认对局状态：两名满血角色面对面站立（动作待机，无识别历史）。
-    /// 状态格式版本 15 = 阶段 11（新增 PendingThrow；14 版扩展空中防御状态）。
+    /// 状态格式版本 16 加入招式实例反制确认。15 = 阶段 11（新增 PendingThrow；14 版扩展空中防御状态）。
     /// 13 = 阶段 09B（新增权威回合计时器 RoundTimerRemainingFrames；
     /// 08D 的 12 版新增了 Projectiles 实体集合与 NextProjectileId）。
     /// 项目尚无序列化快照，无迁移负担，版本号只标记格式边界。
     /// <b>默认不启用计时</b>（null），保持旧单回合 API 逐位兼容。
     /// </summary>
-    public static BattleState CreateDefault(int stateVersion = 15) => new(
+    public static BattleState CreateDefault(int stateVersion = CurrentStateVersion) => new(
         frame: 0,
         fighters: new[]
         {

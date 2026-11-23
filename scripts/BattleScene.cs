@@ -59,6 +59,7 @@ public partial class BattleScene : Node2D
     private bool _diagnostics;
     private bool _moveAudit;
     private bool _commandAudit;
+    private bool _reversalAudit;
     internal bool CaptureInputOnly { get; private set; }
 
     private Node2D? _fighter1Node;
@@ -115,6 +116,7 @@ public partial class BattleScene : Node2D
         _diagnostics = HasArg("--inputdiag");
         _moveAudit = HasArg("--move-audit");
         _commandAudit = HasArg("--command-audit");
+        _reversalAudit = HasArg("--reversal-audit");
         CaptureInputOnly = HasArg("--capture-input-only") && ArgValue("--shot") is not null;
         _trace.Enabled = _diagnostics;
 
@@ -1420,6 +1422,8 @@ public partial class BattleScene
                 PrintMoveAudit(frame, roster);
             if (_commandAudit && !TeamActive && _duelRoster is { } commandRoster)
                 PrintCommandAudit(frame, commandRoster);
+            if (_reversalAudit && !TeamActive && _duelRoster is { } reversalRoster)
+                PrintReversalAudit(frame, reversalRoster);
             if (HasArg("--reentry-audit"))
                 for (int seat = 0; seat < 2; seat++)
                 {
@@ -1486,6 +1490,24 @@ public partial class BattleScene
             }
             _shakeOffset = _shake.Tick();
         }
+    }
+
+    private static void PrintReversalAudit(in PresentationFrame frame, FightRoster roster)
+    {
+        for (int seat = 0; seat < 2; seat++)
+        {
+            FighterState fighter = frame.StateAfter.Fighter(seat);
+            ReversalConfirmation? confirmation = fighter.ReversedStrike;
+            MoveAirMotion? motion = fighter.MoveId is { } id ? roster.Fighter(seat).FindMoveById(id)?.AirMotion : null;
+            GD.Print($"[ReversalAudit] logic={frame.LogicFrame} fighter={seat} reversed={confirmation?.Frame ?? -1} " +
+                $"tick={confirmation?.MoveTick ?? -1} group={confirmation?.Group ?? -1}");
+            GD.Print($"[MovePhaseAudit] logic={frame.LogicFrame} fighter={seat} airborne={fighter.IsAirborne} " +
+                $"landing={motion is not null && fighter.MoveElapsedFrames >= motion.LandingFrame}");
+        }
+        foreach (ProjectileState entity in frame.StateAfter.Projectiles)
+            if (entity.Reversed)
+                GD.Print($"[ProjectileReversalAudit] logic={frame.LogicFrame} id={entity.ProjectileId} " +
+                    $"owner={entity.OwnerFighterId} stop={entity.EntityHitstopRemainingFrames}");
     }
 
     private static void PrintMoveAudit(in PresentationFrame frame, FightRoster roster)

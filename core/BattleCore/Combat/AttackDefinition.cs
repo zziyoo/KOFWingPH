@@ -113,7 +113,9 @@ public sealed class AttackDefinition
         bool retainsGroundGuardOnFollowup = false,
         bool groundGuardOnly = false,
         bool respectsAirFollowupRestriction = false,
-        bool launchOnAirborneOnly = false)
+        bool launchOnAirborneOnly = false,
+        int guardDamage = 0,
+        DynamicAttackDamage? dynamicGuardDamage = null)
     {
         if (halfWidth <= FixedPoint.Zero)
             throw new ArgumentOutOfRangeException(nameof(halfWidth), halfWidth, "攻击框半宽必须为正。");
@@ -133,6 +135,8 @@ public sealed class AttackDefinition
             throw new ArgumentOutOfRangeException(nameof(contactGroup), "接触组必须在 0..31 内。");
         if (damageAfterPriorContact < 0 || (damageAfterPriorContact.HasValue && contactGroup == 0))
             throw new ArgumentException("接触后的伤害必须非负且仅用于显式接触组。", nameof(damageAfterPriorContact));
+        if (guardDamage < 0 || (guardDamage > 0 && dynamicGuardDamage is not null))
+            throw new ArgumentOutOfRangeException(nameof(guardDamage), "Guard chip must be nonnegative and cannot be both fixed and dynamic.");
         if (dynamicDamage is not null && (damage != 0 || counterDamage.HasValue || damageAfterPriorContact.HasValue ||
             dynamicDamage.UseContactDivisor && contactGroup == 0))
             throw new ArgumentException("动态伤害不能与固定伤害混用，分段伤害必须配置接触组。", nameof(dynamicDamage));
@@ -219,6 +223,8 @@ public sealed class AttackDefinition
         ContactGroup = contactGroup;
         DamageAfterPriorContact = damageAfterPriorContact;
         DynamicDamage = dynamicDamage;
+        GuardDamage = guardDamage;
+        DynamicGuardDamage = dynamicGuardDamage;
     }
 
     /// <summary>攻击框中心沿面向的前向偏移（世界单位；朝向镜像在查询时按权威 Facing 施加）。</summary>
@@ -297,6 +303,8 @@ public sealed class AttackDefinition
     public int ContactGroup { get; }
     public int? DamageAfterPriorContact { get; }
     public DynamicAttackDamage? DynamicDamage { get; }
+    public int GuardDamage { get; }
+    public DynamicAttackDamage? DynamicGuardDamage { get; }
 
     public HitstopPair ResolveMeleeHitstop(bool blocked) => HitstopByOutcome is { } outcome
         ? (blocked ? outcome.Block : outcome.Hit)

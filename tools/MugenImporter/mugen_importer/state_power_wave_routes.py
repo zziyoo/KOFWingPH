@@ -141,7 +141,9 @@ def verify_native_references(directories, audit, *, reference_stage=20, include_
     source_hashes = {member['name']: member['sha256'] for member in audit['members'].values()}
     references, cases = [], {}
     with redirect_stdout(io.StringIO()):
-        for directory in directories:
+        reference_priority = checker.get('reference_priority')
+        ordered = sorted(directories, key=reference_priority) if reference_priority else directories
+        for directory in ordered:
             metadata_path = directory / 'run-metadata.json'
             metadata = state200.load_json(metadata_path)
             require(metadata['terry_archive_sha256'] == audit['zipSha256'], 'native reference archive mismatch')
@@ -152,7 +154,7 @@ def verify_native_references(directories, audit, *, reference_stage=20, include_
             names = []
             superseded = checker.get('SUPERSEDED_CASES', {})
             for case, data in checker['read_cases'](directory):
-                require(case not in cases, f'duplicate native case {case}')
+                require(case not in cases or reference_priority is not None, f'duplicate native case {case}')
                 cases[case] = data
                 names.append(case)
             expected = [case for case in metadata['executed_cases']

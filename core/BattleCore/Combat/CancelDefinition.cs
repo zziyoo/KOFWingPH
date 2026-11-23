@@ -1,3 +1,5 @@
+using NewKOF.BattleCore.State;
+
 namespace NewKOF.BattleCore.Combat;
 
 /// <summary>允许发动取消的阶段（阶段 07B，D91）。</summary>
@@ -60,7 +62,8 @@ public sealed class CancelDefinition
         bool standingInputOnly = false,
         int? maximumInputAge = null,
         bool retainBufferedMotionHelper = false,
-        int? maximumContactAge = null)
+        int? maximumContactAge = null,
+        bool requiresReversalConfirm = false)
     {
         if (string.IsNullOrWhiteSpace(targetMoveId))
             throw new ArgumentException("取消目标招式 ID 不能为空。", nameof(targetMoveId));
@@ -72,7 +75,7 @@ public sealed class CancelDefinition
                 $"取消窗口非法（first={windowFirstFrame} > last={windowLastFrame}）。", nameof(windowLastFrame));
         if (phases == MoveCancelPhases.None || (phases & ~(MoveCancelPhases.Active | MoveCancelPhases.Recovery)) != 0)
             throw new ArgumentException($"取消阶段只能是 Active/Recovery 的组合，收到 {phases}。", nameof(phases));
-        if (!requiresHitConfirm && !requiresBlockConfirm && !allowWhiff)
+        if (!requiresHitConfirm && !requiresBlockConfirm && !requiresReversalConfirm && !allowWhiff)
             throw new ArgumentException(
                 "取消规则必须至少配置一种确认条件（命中确认 / 防御确认 / 空挥取消），否则永远无法触发。",
                 nameof(allowWhiff));
@@ -88,6 +91,7 @@ public sealed class CancelDefinition
         Phases = phases;
         RequiresHitConfirm = requiresHitConfirm;
         RequiresBlockConfirm = requiresBlockConfirm;
+        RequiresReversalConfirm = requiresReversalConfirm;
         AllowWhiff = allowWhiff;
         AllowSameMove = allowSameMove;
         StandingInputOnly = standingInputOnly;
@@ -113,6 +117,7 @@ public sealed class CancelDefinition
 
     /// <summary>是否需要防御确认（更早帧的确认）。</summary>
     public bool RequiresBlockConfirm { get; }
+    public bool RequiresReversalConfirm { get; }
 
     /// <summary>是否允许空挥取消（无需确认）。</summary>
     public bool AllowWhiff { get; }
@@ -139,23 +144,25 @@ public sealed class CancelDefinition
     /// <param name="frame">当前逻辑帧号。</param>
     /// <param name="attackStartFrame">当前攻击实例的发动帧（确认必须属于同一实例）。</param>
     public bool ConfirmSatisfied(int frame, int hitConfirmFrame, int blockConfirmFrame, int attackStartFrame,
-        int elapsed = 0, int? lastContactMoveTick = null) => AllowWhiff ||
-        ContactConfirmation.Allows(RequiresHitConfirm, RequiresBlockConfirm, MaximumContactAge,
-            frame, hitConfirmFrame, blockConfirmFrame, attackStartFrame, elapsed, lastContactMoveTick);
+        int elapsed = 0, int? lastContactMoveTick = null, ReversalConfirmation? reversed = null) => AllowWhiff ||
+        ContactConfirmation.Allows(RequiresHitConfirm, RequiresBlockConfirm, RequiresReversalConfirm, MaximumContactAge,
+            frame, hitConfirmFrame, blockConfirmFrame, attackStartFrame, elapsed, lastContactMoveTick, reversed);
 }
 
 /// <summary>A source window for a reserved command, whether or not its target is loaded.</summary>
 public sealed class ReservedCancelDefinition
 {
     public ReservedCancelDefinition(string commandId, int windowFirstFrame, int windowLastFrame, MoveCancelPhases phases,
-        bool requiresHitConfirm = false, bool requiresBlockConfirm = false, int? maximumContactAge = null)
+        bool requiresHitConfirm = false, bool requiresBlockConfirm = false, int? maximumContactAge = null,
+        bool requiresReversalConfirm = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(commandId);
         if (windowFirstFrame < 0 || windowLastFrame < windowFirstFrame)
             throw new ArgumentOutOfRangeException(nameof(windowFirstFrame), "Reserved cancel requires a valid action window.");
         if (phases == MoveCancelPhases.None || (phases & ~(MoveCancelPhases.Active | MoveCancelPhases.Recovery)) != 0)
             throw new ArgumentOutOfRangeException(nameof(phases), "Reserved cancel requires an active or recovery phase.");
-        if (maximumContactAge is <= 0 || maximumContactAge.HasValue && !requiresHitConfirm && !requiresBlockConfirm)
+        if (maximumContactAge is <= 0 || maximumContactAge.HasValue &&
+            !requiresHitConfirm && !requiresBlockConfirm && !requiresReversalConfirm)
             throw new ArgumentOutOfRangeException(nameof(maximumContactAge),
                 "Contact age requires a confirmed contact and at least one effective tick.");
         CommandId = commandId;
@@ -164,6 +171,7 @@ public sealed class ReservedCancelDefinition
         Phases = phases;
         RequiresHitConfirm = requiresHitConfirm;
         RequiresBlockConfirm = requiresBlockConfirm;
+        RequiresReversalConfirm = requiresReversalConfirm;
         MaximumContactAge = maximumContactAge;
     }
 
@@ -173,22 +181,28 @@ public sealed class ReservedCancelDefinition
     public MoveCancelPhases Phases { get; }
     public bool RequiresHitConfirm { get; }
     public bool RequiresBlockConfirm { get; }
+    public bool RequiresReversalConfirm { get; }
     public int? MaximumContactAge { get; }
 
     internal bool IsOpen(FighterLogicState state, int elapsed) =>
         elapsed >= WindowFirstFrame && elapsed <= WindowLastFrame && CancelDefinition.AllowsPhase(Phases, state);
 
     internal bool ConfirmSatisfied(int frame, int hitConfirmFrame, int blockConfirmFrame, int attackStartFrame,
-        int elapsed, int? lastContactMoveTick) => !RequiresHitConfirm && !RequiresBlockConfirm ||
-        ContactConfirmation.Allows(RequiresHitConfirm, RequiresBlockConfirm, MaximumContactAge,
-            frame, hitConfirmFrame, blockConfirmFrame, attackStartFrame, elapsed, lastContactMoveTick);
+        int elapsed, int? lastContactMoveTick, ReversalConfirmation? reversed) =>
+        !RequiresHitConfirm && !RequiresBlockConfirm && !RequiresReversalConfirm ||
+        ContactConfirmation.Allows(RequiresHitConfirm, RequiresBlockConfirm, RequiresReversalConfirm, MaximumContactAge,
+            frame, hitConfirmFrame, blockConfirmFrame, attackStartFrame, elapsed, lastContactMoveTick, reversed);
 }
 
 internal static class ContactConfirmation
 {
-    internal static bool Allows(bool requiresHit, bool requiresBlock, int? maximumAge,
-        int frame, int hitFrame, int blockFrame, int startFrame, int elapsed, int? lastContactMoveTick)
+    internal static bool Allows(bool requiresHit, bool requiresBlock, bool requiresReversal, int? maximumAge,
+        int frame, int hitFrame, int blockFrame, int startFrame, int elapsed, int? lastContactMoveTick,
+        ReversalConfirmation? reversed)
     {
+        if (reversed is { } reversal && reversal.Frame >= startFrame && reversal.Frame >= Math.Max(hitFrame, blockFrame))
+            return requiresReversal && frame > reversal.Frame && (maximumAge is not int age ||
+                elapsed - reversal.MoveTick >= 1 && elapsed - reversal.MoveTick <= age);
         bool hit = requiresHit && hitFrame >= startFrame && frame > hitFrame;
         bool block = requiresBlock && blockFrame >= startFrame && frame > blockFrame;
         if (maximumAge is not int limit)

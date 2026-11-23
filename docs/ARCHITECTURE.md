@@ -784,3 +784,9 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - `maximumContactAge` 为真实和保留取消增加可选的有效接触年龄。结算在启用该能力的攻击实例快照中保存最近一次命中／格挡所在的动作 tick，冻结期保持。换招、打断和退出会随确认清除。窗口继续由现有取消执行器检查。310 只允许接触后的第一个有效 tick，旧配置维持原确认窗口语义。
 - `matchInitialCardinalRelease` 在可选的独立按键手势中允许从包含该分量的斜方向释放，手势时钟从释放时起算。默认预设用它保留 1200 对同帧弱 Wave 的原版优先级。1200 没有可执行本体。
 - `launchOnAirborneOnly` 在空中命中时使用已有击飞参数，地面命中仍读取地面硬直和击退。310 接触检测沿用 250 的帧开始禁追快照及反击例外。`zeroBasedLaunchClock` 可按造成击飞的招式声明受击 AIR 采样从相位第 0 tick 开始，投影层从权威反应状态读时钟。 [原版参数](STAGE30_REFERENCE.md) · [验收边界](STAGE30_ACCEPTANCE.md)
+
+### 阶段 31 动作内起落和反制
+
+- `MoveDefinition.AirMotion` 给出起跳、落地、速度与重力。起跳属于现有攻击实例。动作时钟受 HitPause 冻结，落地清除权威空中位移，动作可以进入自己的落地收招。`SpriteBinding.moveTimelines` 由同一有效 tick 选择表现段，换图不重新计发攻击实例或驱动战斗结算。
+- `MoveReversal` 在配置窗口匹配对手生效攻击框。结算先保存共同碰撞视图，再取消本次被反制的接触组并提交反制事件及双方停顿。`ReversedStrike` 随攻击实例保存帧、有效 tick 和接触组，供显式选择 `requiresReversalConfirm` 的取消读取，换招和中断时清除。Helper 有各自的实体 ID 和停顿，所有者照常运行。
+- 格挡削血使用可选固定或动态伤害，`Blocked.Amount` 记录实扣。历史未配置削血的事件继续为 0。快照版本 17 收录动作内空中状态、反制记录和实体停顿。普通事件的权威日志结构维持原格式，只有携带实体 ID 的新事件追加该字段。 [原版规则](STAGE31_REFERENCE.md)

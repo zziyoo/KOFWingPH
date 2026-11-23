@@ -234,10 +234,10 @@ public sealed class FighterDefinition
 
             foreach (AttackDefinition attack in move.Attacks)
             {
-                if (attack.DynamicDamage is not { } damage)
-                    continue;
-                if (damageRules is null || Math.Min(damage.NormalBase, damage.CounterBase) < damageRules.VarianceMaximum)
-                    throw new ArgumentException($"招式 {move.MoveId} 的动态伤害需要 damageRules，且基数必须覆盖波动上限。", nameof(moves));
+                foreach (DynamicAttackDamage? damage in new[] { attack.DynamicDamage, attack.DynamicGuardDamage })
+                    if (damage is not null && (damageRules is null || damage.UseVariance &&
+                        Math.Min(damage.NormalBase, damage.CounterBase) < damageRules.VarianceMaximum))
+                        throw new ArgumentException($"招式 {move.MoveId} 的动态伤害需要 damageRules，且启用波动时基数必须覆盖波动上限。", nameof(moves));
             }
             foreach (ProjectileDefinition projectile in move.Projectiles)
             {
@@ -245,8 +245,9 @@ public sealed class FighterDefinition
                     continue;
                 foreach (ProjectileHitSpan span in timeline.HitSpans)
                     if (span.DynamicDamage is { } damage &&
-                        (damageRules is null || Math.Min(damage.NormalBase, damage.CounterBase) < damageRules.VarianceMaximum))
-                        throw new ArgumentException($"实体 {projectile.ProjectileTypeId} 的动态伤害需要有效的 damageRules 与基数。", nameof(moves));
+                        (damageRules is null || damage.UseVariance &&
+                            Math.Min(damage.NormalBase, damage.CounterBase) < damageRules.VarianceMaximum))
+                        throw new ArgumentException($"实体 {projectile.ProjectileTypeId} 的动态伤害需要有效的 damageRules 与启用波动时足够的基数。", nameof(moves));
             }
         }
 

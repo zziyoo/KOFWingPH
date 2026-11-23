@@ -109,6 +109,38 @@ public class SpriteBindingTests
     }
 
     [Fact]
+    public void MoveTimelineSwitchesSourceActionAtExplicitMoveTickAndKeepsLegacyResolution()
+    {
+        var binding = SpriteBinding.Parse("""
+            {"schemaVersion":2,"visualId":"x","clips":{
+              "idle":{"action":0},"tackle":{"action":1200,"loop":false},
+              "landing":{"action":1205,"loop":false}},
+             "moves":{"RisingTackle":{"Active":"tackle","Recovery":"idle"}},
+             "moveTimelines":{"RisingTackle":[
+               {"startTick":0,"clip":"tackle"},{"startTick":41,"clip":"landing"}]}}
+            """, "x");
+
+        Assert.Equal(("tackle", 0), binding.ResolveMoveClip("idle", "RisingTackle", "Active", 0));
+        Assert.Equal(("tackle", 40), binding.ResolveMoveClip("idle", "RisingTackle", "Recovery", 40));
+        Assert.Equal(("landing", 0), binding.ResolveMoveClip("idle", "RisingTackle", "Recovery", 41));
+        Assert.Equal(("landing", 13), binding.ResolveMoveClip("idle", "RisingTackle", "Recovery", 54));
+        Assert.Equal(("idle", 54), binding.ResolveMoveClip("idle", "other", "Recovery", 54));
+    }
+
+    [Theory]
+    [InlineData("[{\"startTick\":1,\"clip\":\"a\"},{\"startTick\":1,\"clip\":\"b\"}]")]
+    [InlineData("[{\"startTick\":2,\"clip\":\"a\"},{\"startTick\":1,\"clip\":\"b\"}]")]
+    [InlineData("[{\"startTick\":0,\"clip\":\"missing\"}]")]
+    public void InvalidMoveTimelineIsRejected(string timeline)
+    {
+        string json = """
+            {"schemaVersion":2,"visualId":"x","clips":{"a":1,"b":2},
+             "moveTimelines":{"Move":__timeline__}}
+            """.Replace("__timeline__", timeline, StringComparison.Ordinal);
+        Assert.Throws<ArgumentException>(() => SpriteBinding.Parse(json, "x"));
+    }
+
+    [Fact]
     public void CrouchingHitReactionSelectsItsOwnClipsAndSharesTheAuthoredClock()
     {
         var binding = SpriteBinding.Parse("""
