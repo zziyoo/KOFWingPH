@@ -879,6 +879,7 @@ public partial class BattleScene : Node2D
                 RenderBattle(_team.CurrentBattleState);
                 break;
         }
+        SpriteAuditCost.Flush();
     }
 
     private void RenderSelection(FighterState? p1, FighterState? p2)
@@ -1418,6 +1419,7 @@ public partial class BattleScene
             _projectileVisuals.Observe(frame.StateAfter);
             _visual1?.ObserveFrame(frame, 0);
             _visual2?.ObserveFrame(frame, 1);
+            SpriteAuditCost.Flush();
             if (_moveAudit && !TeamActive && _duelRoster is { } roster)
                 PrintMoveAudit(frame, roster);
             if (_commandAudit && !TeamActive && _duelRoster is { } commandRoster)

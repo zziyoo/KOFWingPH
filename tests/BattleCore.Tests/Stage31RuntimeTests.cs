@@ -72,9 +72,9 @@ public sealed class Stage31RuntimeTests
     }
 
     [Theory]
-    [InlineData(false, FighterLogicState.AirBlockstun)]
+    [InlineData(false, FighterLogicState.AirHitstun)]
     [InlineData(true, FighterLogicState.AirHitstun)]
-    public void AuthoredMoveAboveGroundUsesAirGuardEligibility(bool groundGuardOnly, FighterLogicState expected)
+    public void AuthoredMoveAboveGroundCannotGuardWithoutControl(bool groundGuardOnly, FighterLogicState expected)
     {
         AttackDefinition hit = ProjectileHit(height: AttackHeight.Mid, groundGuardOnly: groundGuardOnly);
         var projectileMove = new MoveDefinition("Wave", "Wave", 1, 2, 4,
@@ -115,6 +115,44 @@ public sealed class Stage31RuntimeTests
         Assert.Equal(expected, result.State.Fighter(1).LogicState);
         Assert.Equal(expected == FighterLogicState.AirBlockstun ? 1000 : 1000 - hit.Damage,
             result.State.Fighter(1).Health);
+    }
+
+    [Theory]
+    [InlineData(false, JumpKind.ShortHop, false)]
+    [InlineData(false, JumpKind.HighJump, true)]
+    [InlineData(true, JumpKind.ShortHop, true)]
+    public void JumpControlConfigurationPreservesOrdinaryAirGuard(bool hopGuard, JumpKind kind, bool blocked)
+    {
+        var defaults = MovementDefinition.CreateDefault();
+        var movement = new MovementDefinition(defaults.WalkForwardSpeed, defaults.WalkBackwardSpeed,
+            defaults.PreJumpFrames, defaults.ShortHopInitialVelocity, defaults.HighJumpInitialVelocity,
+            defaults.JumpGravity, defaults.HorizontalJumpSpeed, shortHopCanGuard: hopGuard);
+        var attack = new AttackDefinition(20, 50, 30, 40, damage: 10, hitstopFrames: 0);
+        var move = new MoveDefinition("Strike", "Strike", 1, 3, 1, attacks: [attack]);
+        var definition = new FighterDefinition("Fighter", [new CommandDefinition("Strike", [], InputBits.LightPunch)],
+            [move], movement);
+        var sim = new BattleSimulation(new FightRoster(definition, definition));
+        var attacker = FighterState.Create(0, 1000, 0, Facing.Right) with {
+            LogicState = FighterLogicState.Active, MoveId = "Strike", MoveStartedFrame = 0,
+            MoveElapsedFrames = 1, PhaseRemainingFrames = 3 };
+        var target = FighterState.Create(1, 1000, 30, Facing.Left) with {
+            LogicState = FighterLogicState.Airborne, JumpKind = kind, PositionY = 20, VelocityY = 1 };
+        var result = sim.Step(new BattleState(0, [attacker, target], BattleState.CurrentStateVersion),
+            new FrameInput(0, InputBits.None, InputBits.Right));
+        Assert.Contains(result.Events, e => e.Type == (blocked ? BattleEventType.Blocked : BattleEventType.Hit));
+    }
+
+    [Fact]
+    public void StandingLightReactionUsesAuthoredBoxesInsteadOfGenericFallback()
+    {
+        FixedRect box = new(-20, 19, 1, 88);
+        var ground = new GroundHurtboxes([box], [box],
+            standingLightHitstun: [new MoveHurtboxSpan(11, [box])]);
+        var definition = new FighterDefinition("Fighter", [], [], groundHurtboxes: ground);
+        var target = FighterState.Create(1, 1000, 0, Facing.Left) with {
+            LogicState = FighterLogicState.Hitstun,
+            GroundReaction = new GroundHitReactionState(GroundHitReaction.CrouchingLight, false, 4) };
+        Assert.Equal(new FixedRect(-19, 20, 1, 88), Assert.Single(FighterBoxes.GetHurtboxes(target, definition)));
     }
 
     [Fact]

@@ -56,3 +56,7 @@
 
 
 本轮没有开始下一阶段。
+
+## 2026-11-23 救援轮接续
+
+原始 WIP 已在本地 `wip/stage31-recovery` 保存 `9bc743c`，不推送。两处规则分歧的修复候选、同步日志输出性能根因、批处理输出等价证明和 30/60 FPS 新实测见 STAGE31_ACCEPTANCE.md 的救援轮章节。使用 `data/imported-characters/terry98-stage31-recovery-r2`，不要覆写旧 final 配置。当前批处理 DLL 为 `5e6cebb7…` / `76198dd2…`；全矩阵与最终历史门禁正在补齐，阶段仍 WIP。

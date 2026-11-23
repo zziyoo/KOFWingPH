@@ -76,7 +76,7 @@ public sealed class MovementDefinition
         FixedPoint highJumpInitialVelocity,
         FixedPoint jumpGravity,
         FixedPoint horizontalJumpSpeed,
-        GroundReactionMovement? groundReaction = null)
+        GroundReactionMovement? groundReaction = null, bool shortHopCanGuard = true)
     {
         ValidateSpeed(walkForwardSpeed, nameof(walkForwardSpeed), MaxWalkSpeedPerFrameUnits);
         ValidateSpeed(walkBackwardSpeed, nameof(walkBackwardSpeed), MaxWalkSpeedPerFrameUnits);
@@ -108,6 +108,7 @@ public sealed class MovementDefinition
         JumpGravity = jumpGravity;
         HorizontalJumpSpeed = horizontalJumpSpeed;
         GroundReaction = groundReaction;
+        ShortHopCanGuard = shortHopCanGuard;
     }
 
     /// <summary>前向步行速度（大小，世界单位/帧）。</summary>
@@ -121,6 +122,7 @@ public sealed class MovementDefinition
 
     /// <summary>小跳垂直初速度（世界单位/帧，向上）。</summary>
     public FixedPoint ShortHopInitialVelocity { get; }
+    public bool ShortHopCanGuard { get; }
 
     /// <summary>大跳垂直初速度（世界单位/帧，向上；构造期保证 &gt; 小跳初速度）。</summary>
     public FixedPoint HighJumpInitialVelocity { get; }

@@ -122,7 +122,9 @@ public static class FighterDataLoader
                 GuardBoxes(boxes.StandingGuard, "standingGuard"), GuardBoxes(boxes.CrouchingGuard, "crouchingGuard"),
                 GuardBoxes(boxes.StandingGuardReady, "standingGuardReady"), GuardBoxes(boxes.CrouchingGuardReady, "crouchingGuardReady"),
                 boxes.TripFall is null ? null : BuildArray(boxes.TripFall, sourceName, "groundHurtboxes.tripFall", BuildMoveHurtboxSpan),
-                GuardBoxes(boxes.LaunchAir, "launchAir")),
+                GuardBoxes(boxes.LaunchAir, "launchAir"),
+                boxes.StandingLightHitstun is null ? null : BuildArray(boxes.StandingLightHitstun, sourceName,
+                    "groundHurtboxes.standingLightHitstun", BuildMoveHurtboxSpan)),
                 sourceName, "groundHurtboxes")
             : null;
 
@@ -225,7 +227,7 @@ public static class FighterDataLoader
                     reaction.CrouchHitVelocityRetention is { } crouchHit
                         ? Fraction(crouchHit, source, "movement.groundReaction.crouchHitVelocityRetention") : null),
                     source, "movement.groundReaction")
-                : null),
+                : null, shortHopCanGuard: dto.ShortHopCanGuard),
         source, "movement");
 
     private static CommandDefinition BuildCommand(CommandDto dto, string source, string path) => Guard(

@@ -31,7 +31,8 @@ public sealed class GroundHurtboxes
         IReadOnlyList<MoveHurtboxSpan>? crouchingLightHitstun = null, IReadOnlyList<MoveHurtboxSpan>? lowHeavyHitstun = null,
         IReadOnlyList<FixedRect>? standingGuard = null, IReadOnlyList<FixedRect>? crouchingGuard = null,
         IReadOnlyList<FixedRect>? standingGuardReady = null, IReadOnlyList<FixedRect>? crouchingGuardReady = null,
-        IReadOnlyList<MoveHurtboxSpan>? tripFall = null, IReadOnlyList<FixedRect>? launchAir = null)
+        IReadOnlyList<MoveHurtboxSpan>? tripFall = null, IReadOnlyList<FixedRect>? launchAir = null,
+        IReadOnlyList<MoveHurtboxSpan>? standingLightHitstun = null)
     {
         Standing = Copy(standing, nameof(standing));
         Crouching = Copy(crouching, nameof(crouching));
@@ -42,6 +43,7 @@ public sealed class GroundHurtboxes
         Hitstun = hitstun is null ? null : Copy(hitstun, nameof(hitstun));
         HitstunRecoveryFrames = hitstunRecoveryFrames;
         CrouchRise = CopyTimeline(crouchRise, nameof(crouchRise));
+        StandingLightHitstun = CopyTimeline(standingLightHitstun, nameof(standingLightHitstun));
         LightHitstun = CopyTimeline(lightHitstun, nameof(lightHitstun));
         HeavyHitstun = CopyTimeline(heavyHitstun, nameof(heavyHitstun));
         CrouchingHeavyHitstun = CopyTimeline(crouchingHeavyHitstun, nameof(crouchingHeavyHitstun));
@@ -67,6 +69,7 @@ public sealed class GroundHurtboxes
     public int HitstunRecoveryFrames { get; }
     public IReadOnlyList<MoveHurtboxSpan>? CrouchRise { get; }
     public IReadOnlyList<MoveHurtboxSpan>? LightHitstun { get; }
+    public IReadOnlyList<MoveHurtboxSpan>? StandingLightHitstun { get; }
     public IReadOnlyList<MoveHurtboxSpan>? HeavyHitstun { get; }
     public IReadOnlyList<MoveHurtboxSpan>? CrouchingHeavyHitstun { get; }
     public IReadOnlyList<MoveHurtboxSpan>? CrouchingLightHitstun { get; }
@@ -84,7 +87,7 @@ public sealed class GroundHurtboxes
         {
             GroundHitReaction.Light => LightHitstun,
             GroundHitReaction.Heavy => crouching ? CrouchingHeavyHitstun : HeavyHitstun,
-            GroundHitReaction.CrouchingLight => crouching ? CrouchingLightHitstun : null,
+            GroundHitReaction.CrouchingLight => crouching ? CrouchingLightHitstun : StandingLightHitstun,
             GroundHitReaction.HeavyLow => crouching ? CrouchingHeavyHitstun : LowHeavyHitstun,
             GroundHitReaction.LightLow => crouching ? CrouchingLightHitstun : LightHitstun,
             _ => null,

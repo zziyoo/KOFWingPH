@@ -1857,7 +1857,7 @@ public sealed class BattleSimulation
         bool defenderAirborne = defender.IsAirborne;
 
         AttackDefinition hit = span?.Hit ?? definition.Hit;
-        bool guarding = CanGuard(defender, backHeld, hit.Height, hit.GroundGuardOnly) ||
+        bool guarding = CanGuard(defender, backHeld, hit.Height, hit.GroundGuardOnly, _roster.Fighter(target).Movement.ShortHopCanGuard) ||
             (span is not null && hit.Height == AttackHeight.Mid && _roster.Fighter(target).RetainProjectileGuard &&
              (defender.LogicState == FighterLogicState.Blockstun || defender.ProjectileGuardRecoveryRemaining > 0));
         HitstopByOutcome? stop = hit.HitstopByOutcome;
@@ -2114,14 +2114,15 @@ public sealed class BattleSimulation
             if (sameInstance && (group == 0 || (priorGroups & group) != 0))
                 continue;
             return ResolveAttack(attack, moveId, attackerState, defenderState, backHeld, downHeld, priorGroups, group,
-                _roster.Fighter(1 - defender).DamageRules, _roster.Fighter(defender).DamageRules);
+                _roster.Fighter(1 - defender).DamageRules, _roster.Fighter(defender).DamageRules,
+                _roster.Fighter(defender).Movement.ShortHopCanGuard);
         }
         return null;
     }
 
     private static CombatSettlement ResolveAttack(AttackDefinition attack, string moveId,
         FighterState attackerState, FighterState defenderState, bool backHeld, bool downHeld, uint priorGroups, uint group,
-        DynamicDamageRules? attackerRules, DynamicDamageRules? defenderRules)
+        DynamicDamageRules? attackerRules, DynamicDamageRules? defenderRules, bool shortHopCanGuard)
     {
         // 防御资格（D79）：站立/蹲下待机 + 按住「后」（帧开始朝向解析的相对输入）。
         // D131：正常 Airborne 可防 High/Mid，AirHitstun 与动作状态没有防御资格。
@@ -2129,7 +2130,7 @@ public sealed class BattleSimulation
             ? downHeld : null;
         bool guarding = followupGuardCrouching is { } crouching
             ? GuardCovers(attack.Height, crouching ? FighterLogicState.Crouching : FighterLogicState.Standing)
-            : CanGuard(defenderState, backHeld, attack.Height, attack.GroundGuardOnly) ||
+            : CanGuard(defenderState, backHeld, attack.Height, attack.GroundGuardOnly, shortHopCanGuard) ||
                 (priorGroups != 0 && defenderState.LogicState == FighterLogicState.Blockstun && attack.Height == AttackHeight.Mid);
 
         // 击退/击飞方向（D92/D93）：按<b>命中时双方的权威相对位置</b>决定「远离攻击者」；
@@ -2209,9 +2210,10 @@ public sealed class BattleSimulation
                 : defender.LogicState == FighterLogicState.Crouching;
 
     /// <summary>防御高度表（D77）：High 只能站防、Low 只能蹲防、Mid 皆可。</summary>
-    private static bool CanGuard(FighterState defender, bool backHeld, AttackHeight height, bool groundGuardOnly) =>
-        backHeld && (defender.IsAirborne
-            ? !groundGuardOnly && height is (AttackHeight.High or AttackHeight.Mid)
+    private static bool CanGuard(FighterState defender, bool backHeld, AttackHeight height, bool groundGuardOnly, bool shortHopCanGuard) =>
+        backHeld && (defender.LogicState == FighterLogicState.Airborne
+            ? !groundGuardOnly && (shortHopCanGuard || defender.JumpKind != JumpKind.ShortHop) &&
+              height is (AttackHeight.High or AttackHeight.Mid)
             : defender.LogicState is FighterLogicState.Standing or FighterLogicState.Crouching &&
               GuardCovers(height, defender.LogicState));
 

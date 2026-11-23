@@ -15,9 +15,9 @@ internal sealed partial class ProjectileVisualLayer : Node2D
 
     public void Apply(BattleState state, FighterVisual? p1, FighterVisual? p2, Vector2 origin)
     {
-        bool audit = OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit");
+        bool audit = SpriteAuditCost.Enabled();
         if (audit)
-            GD.Print($"[ProjectileSetAudit] state={state.Frame} count={state.Projectiles.Count}");
+            SpriteAuditCost.Print($"[ProjectileSetAudit] state={state.Frame} count={state.Projectiles.Count}");
         foreach (int id in _entries.Keys.ToArray())
             if (!state.Projectiles.Any(p => p.ProjectileId == id))
                 Remove(id);
@@ -38,7 +38,7 @@ internal sealed partial class ProjectileVisualLayer : Node2D
             entry.Fallback.Visible = !sprite;
             entry.Fallback.Scale = new Vector2(left ? -1 : 1, 0.85f + 0.05f * (age % 4));
             if (audit)
-                GD.Print($"[ProjectileRenderAudit] state={state.Frame} id={projectile.ProjectileId} owner={projectile.OwnerFighterId} " +
+                SpriteAuditCost.Print($"[ProjectileRenderAudit] state={state.Frame} id={projectile.ProjectileId} owner={projectile.OwnerFighterId} " +
                     $"age={age} left={left} x={projectile.PositionX.RawValue} y={projectile.PositionY.RawValue} sprite={sprite} " +
                     (entry.Sprite?.Describe(entry.Clip, age, 0, false, null, "") ?? "fallback=geometry"));
         }

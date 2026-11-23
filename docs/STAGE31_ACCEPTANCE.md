@@ -25,3 +25,22 @@
 - **实时帧率 · 未通过，已定位归因。** 隔离、空闲机器上重测仍失败：30 FPS 请求档 `before [30,30,30,30,30,30,18,26,24]`、`after [16,20,26,24,27,27]`（`local-mugen/stage31-realtime30-r12`），复测 `before [30,30,30,30,30,19,23,27,22]`、`after [17,25,26,22,20,23]`（`r13`）。两次都在战斗开始约 5 s 后从 30 掉到 17–27，采集前后均有掉帧，不能判 PASS。
 - **归因证据（不变更门禁、不改采样口径）。** 同一组渲染参数下：①关闭逐帧精灵审计 `--sprite-frame-audit` 后 13 个 FPS 样本全为 30、零帧积压，且战斗与招式事件正常（`local-mugen/stage31-rt-diag/visual-only.log`、`noaudit.log`）；②打开该审计即掉帧，且与输出目标是管道还是文件无关（`file-redirect.log`）；③用阶段 30 封存配置和同一参数重跑同样掉到 17–27（`curDLL-stage30cfg-1/-2.log`），用阶段 30 基线 DLL 构建（`git worktree` 临时构建，已删除）首次运行能维持 30（`baseDLL-stage30cfg.log`）；④临时切到高性能电源方案并降温后重测仍失败（`r12`/`r13`），电源方案已恢复为「平衡」。结论：本机在持续负载下的帧预算不足，逐帧精灵审计的固定开销把 30 FPS 推到 25 以下；该现象不局限于阶段 31 内容，不构成阶段 31 的代码回归，但也不能据此改写门禁。
 - 实时档失败日志按新目录保留：`stage31-realtime30-r10`（审计全开）、`r11`（曾尝试在实时档移除精灵审计，校验器缺 `[SpriteFrameAudit]` 立刻暴露依赖，改动已回退，不再使用）、`r12`/`r13`。驱动脚本与阶段 30 一致，未做任何放宽带宽或跳过采样的修改。
+
+## 2026-11-23 救援轮：修复候选与证据边界
+
+当前仍为 WIP，等待本轮最终门禁。已在本地 `wip/stage31-recovery` 保存原始检查点 `9bc743ce787d687985e13182732d9ff7b24ea250`（65 个路径；暂存区原为空），不推送。原文件、旧 DLL、指纹和关键失败证据独立备份在 `C:/Users/32360/Desktop/NewKOF_backups/stage31-recovery-20261123`。Git 直连查询连接重置；GitHub 连接器读取 main 确认为阶段 30 `a96233e43d35671b9dd70a476888ce1b3ac08a79`。
+
+两项失败在旧 DLL 上各复现两次（`stage31-recovery-repro-r1/r2.log`），未覆盖旧证据、输入或原版记录。
+
+- **205-window-23 根因**：第二次接触属于 State 200，不是 1200。205 对站姿目标采用原版 Action 5000 的反应，旧配置对 `CrouchingLight` 的站姿分支没有时间线，回退到 ±30、高 120 的通用框。F26/L40 原版主框最高 72，200 攻击最低 73，另一块头框在攻击横向范围外，故不接触；原回退框提前重叠。新增可选 `standingLightHitstun`，从冻结 ZIP 的 AIR 5000 生成。首元素完整时长之外包含 NewKOF 接触当帧的原子反应提交（原版在碰撞后才 ChangeState），然后按 AIR 播放、接入既有恢复框。F27/L41/S42 恢复形状才接触。修复前 L40，修复后 L41，伤害 52；初次 205 的 L22/30 伤害不变。没有延后 1200，也没有调整输入或比较容差。
+- **air-held-back 根因**：首次接触 F14/L28 的目标是原版小跳 State 55，`ctrl=0`，虽然持后且实际 HitDef 的 guardflag=MA，仍无防御资格。后续原版处于受击状态。新增角色可选 `movement.shortHopCanGuard`，旧配置默认为 true，阶段 31 根据源 State 55 明确写 false；并恢复共享 `CanGuard` 仅接受普通 `Airborne` 的状态资格，排除 AirHitstun、动作中和 AirBlockstun 被 `IsAirborne` 扩大纳入的错误分支。新配置小跳不能防；反例覆盖高跳 MA 仍可防及旧小跳默认资格。近战、Helper 共用同一条件。修复后 L28/34/41/48 四次均 Hit，伤害 30/29/15/22；旧候选为前三次 Blocked。
+
+`stage31-recovery-fix-r2` 两项固定 Vulkan 双视觉分别 2,219/2,343 条权威记录通过，涵盖后续伤害、停顿和恢复。`stage31-recovery-phases-{205,air}.json` 保存 F/L/S、原版 before-command/after-collision/end 与前后运行日志，入口 `tools/Stage31Validation/recovery_phases.py`。
+
+性能旧归因不能直接定为硬件或豁免。`stage31-recovery-perf-ab-r1` 串行阶段 30 DLL+配置与修复前批处理的阶段 31 DLL+配置，audit ON/OFF 各 A/B/A/B，固定同一 320x180 Vulkan、30 FPS、输入、输出磁盘和电源方案。ON 四次均有波动（31 最低 19/20），OFF 四次各 13 个样本全 30、零积压。每次有 DLL/配置/输入哈希、退出码、GPU/驱动/温度/频率、进程清单与 CPU 采样。GPU 约 65°C，CPU 温度不可读取；未测原生文件系统 write/flush 次数，不将 GD.Print 调用数冒充系统调用数。
+
+`stage31-recovery-cost-probe-r1` 在输出路径内计时，1,200 次审计 GD.Print 共 3,718.385 ms，1,200 次参数读取共 44.0066 ms。瓶颈主要落在同步逐行输出。将相邻 Observe 两行、Render 两席及实体行批量提交，遇到其他审计前立即 Flush，不跨逻辑帧缓冲。保留全部行、字段、顺序和每帧采样。`--audit-cost-probe` 只加独立诊断，`--sprite-audit-unbatched` 可做相同构建下的旧输出对照。`stage31-recovery-batch-contract-r1` 与未批处理的 `fix-r2` 权威记录各 2,219/2,343 条逐条一致；精灵与实体审计行各 877/880 条逐字节及顺序一致。
+
+批处理构建指纹：`NewKOF.dll=5e6cebb79211ed7ca4e757476695ec733d67a2f901cc0af70a2fd76cfc36f02b`，`NewKOF.BattleCore.dll=76198dd2173b6688856103ef49b196eb4ec04462365b9a9d7d23093710e342de`。完整审计实时 30 FPS 样本 `[30,29,30]`、60 FPS `[57,60,60]`，两档均零积压并通过原验收脚本（`stage31-recovery-realtime{30,60}-batch-r1`）。早期 60 档误选 render=552 未拍到动作，失败存档 `stage31-recovery-realtime60-r1` 保留，不计验收；正确入口沿用既有 60 档 render=294。
+
+本轮 C# 1,606/1,606、Python 141/141；核心 DLL 与上述批处理构建相同。Godot 构建 0 警告 0 错误。六份 JSON 在 `terry98-stage31-recovery-r2/r3` 两轮生成逐字节一致（`stage31-recovery-determinism.log`）。当前应使用 recovery-r2 新目录，旧 `stage31-final` 原配置保留未覆写。原版 69 个签名重新校验完成（`stage31-recovery-native-check.log`）。全矩阵与最终历史门禁结果将在本节后续补齐；旧 542 对成功证据只代表旧核心 DLL，不替代本轮回归。

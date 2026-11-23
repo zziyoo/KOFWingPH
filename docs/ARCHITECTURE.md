@@ -790,3 +790,9 @@ CurrentState.Frame - 初始帧号  ==  Scheduler.TotalSteps
 - `MoveDefinition.AirMotion` 给出起跳、落地、速度与重力。起跳属于现有攻击实例。动作时钟受 HitPause 冻结，落地清除权威空中位移，动作可以进入自己的落地收招。`SpriteBinding.moveTimelines` 由同一有效 tick 选择表现段，换图不重新计发攻击实例或驱动战斗结算。
 - `MoveReversal` 在配置窗口匹配对手生效攻击框。结算先保存共同碰撞视图，再取消本次被反制的接触组并提交反制事件及双方停顿。`ReversedStrike` 随攻击实例保存帧、有效 tick 和接触组，供显式选择 `requiresReversalConfirm` 的取消读取，换招和中断时清除。Helper 有各自的实体 ID 和停顿，所有者照常运行。
 - 格挡削血使用可选固定或动态伤害，`Blocked.Amount` 记录实扣。历史未配置削血的事件继续为 0。快照版本 17 收录动作内空中状态、反制记录和实体停顿。普通事件的权威日志结构维持原格式，只有携带实体 ID 的新事件追加该字段。 [原版规则](STAGE31_REFERENCE.md)
+
+### 阶段 31 救援轮配置及审计
+
+`movement.shortHopCanGuard` 为可选角色规则，缺省 true 保留冻结配置；原版 State 55 ctrl=0 的新配置写 false。空防结算要求普通 Airborne，不能仅凭几何腾空状态为受击、动作中或 AirBlockstun 赋予防御资格。近战和 Helper 共用防御表。`groundHurtboxes.standingLightHitstun` 为 CrouchingLight 攻击命中站姿目标时的可选源 AIR 时间线，缺省保持旧行为。接触帧原子提交与原版碰撞后 ChangeState 的相位须计入首元素。
+
+精灵审计只合并相邻的文本行；在 Observe 的其他审计前及 Render 返回引擎前刷新，保留每帧每字段和行顺序。诊断开关不改变战斗规则。性能对照和字节等价记录见 STAGE31_ACCEPTANCE.md。

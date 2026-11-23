@@ -431,3 +431,7 @@ if ($LASTEXITCODE) { throw 'Stage 30 conversion failed' }
 ## 阶段 31 弱 Rising Tackle（State 1200／1205）
 
 `state_rising_tackle` 校验阶段 30 六份父 JSON、原版 ZIP 和 AIR 对应 Manifest，以及带独立输入和实体反制控制的签名轨迹。默认预设将保留命令接入 55 tick 的招式，按 41／14 tick 切换两个原版 Action。九个普通技源窗口从原版共享控制器取得，已有 Wave 配置提供相同窗口的交叉核对。独立的 Mode 2 预设维持 1050 占位。输出配置和图集使用本地忽略目录。 [生成与回放](../tools/Stage31Validation/README.md)
+
+### 阶段 31 救援轮
+
+生成器核对 common_kof.cns State 55 的 ctrl=0，并导入 AIR 5000 作为站姿轻受击时间线。新输出位于 `terry98-stage31-recovery-r2/r3`，不覆写阶段 30 或旧 final。首帧包含接触提交，然后播放源 AIR 时长，恢复框沿用已签名父级。小跳空防资格为可选数据字段，旧配置缺省值保持兼容。两轮六份 JSON 的哈希见 `local-mugen/stage31-recovery-determinism.log`。

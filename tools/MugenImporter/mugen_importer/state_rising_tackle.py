@@ -95,6 +95,9 @@ def inspect_source(archive, manifest):
     with zipfile.ZipFile(archive) as source:
         cns = state200.archive_member(source, members['Terry-S.cns']['name'])
     sections = state_reentry.script_sections(cns)
+    common = state_reentry.script_sections(contents['stcommon'])
+    hop, _ = move_scope(common, 55)
+    require(normalized(hop.one('ctrl')) == '0', 'State 55 short hop control changed')
     state1200, controls1200 = move_scope(sections, 1200)
     state1205, controls1205 = move_scope(sections, 1205)
     required1200 = {'type': 's', 'movetype': 'a', 'physics': 'n', 'juggle': '0', 'anim': '1200',
@@ -256,6 +259,10 @@ def inspect_source(archive, manifest):
 
     return {
         **{key: base[key] for key in ('zipSha256', 'manifestSha256', 'damageRules', 'groundMovement')},
+        'shortHopCanGuard': False,
+        'standingLightHitstun': state210.hurtbox_timeline({
+            'durations': [frame['time'] for frame in next(a for a in actions if a['action'] == 5000)['frames']],
+            'clsn2': state200.collision_boxes(next(a for a in actions if a['action'] == 5000), 2, normalize_edges=True)}),
         'members': members,
         'state1200': {'line': state1200.line, 'definition': required1200, 'duration': sum(durations),
                       'durations': durations, 'invulnerableFrames': invulnerable_window[1] + 1,
@@ -330,6 +337,7 @@ def build_profile(audit, native, base_fighter, base_binding, mode):
             'signed native State 1200 timing differs from source and AIR')
     fighter, binding = deepcopy((base_fighter, base_binding))
     fighter['fighterId'], binding['visualId'] = PRESETS[mode]
+    fighter['movement']['shortHopCanGuard'] = audit['shortHopCanGuard']
     fighter['displayName'] = f'Terry Rising Tackle ({mode})'
     if mode == 'mode2':
         require(not any(move['moveId'] == MOVE_ID for move in fighter['moves']) and
@@ -337,6 +345,14 @@ def build_profile(audit, native, base_fighter, base_binding, mode):
                 any(command['commandId'] == 'ReservedMode2Wave' for command in fighter['commands']),
                 'Mode 2 must retain the State 1050 isolation')
         return fighter, binding
+
+    fighter['groundHurtboxes']['standingLightHitstun'] = [
+        *deepcopy(audit['standingLightHitstun']),
+        {'frames': fighter['groundHurtboxes']['hitstunRecoveryFrames'],
+         'boxes': deepcopy(fighter['groundHurtboxes']['hitstun'])}]
+    # NewKOF commits the reaction on contact; the native ChangeState runs after collision,
+    # then plays the full first AIR duration on the next update. Include that contact commit.
+    fighter['groundHurtboxes']['standingLightHitstun'][0]['frames'] += 1
 
     require(not any(move['moveId'] == MOVE_ID for move in fighter['moves']), 'State 1200 already exists in base profile')
     commands = {command['commandId']: command for command in fighter['commands']}

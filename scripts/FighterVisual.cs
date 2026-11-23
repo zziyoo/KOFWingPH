@@ -170,10 +170,10 @@ public sealed class FighterVisual
             after.MoveId,
             frozen,
             clip);
-        if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
+        if (_sprite is not null && SpriteAuditCost.Enabled())
         {
             bool resolveMove = _throwVisual?.Clip(after) != clip;
-            GD.Print($"[SpriteFrameAudit] fighter={fighterIndex} logic={frame.LogicFrame} state={after.LogicState} move={after.MoveId ?? "-"} frozen={frozen} facing={after.Facing} " +
+            SpriteAuditCost.Print($"[SpriteFrameAudit] fighter={fighterIndex} logic={frame.LogicFrame} state={after.LogicState} move={after.MoveId ?? "-"} frozen={frozen} facing={after.Facing} " +
                 _sprite.Describe(clip, tick ?? _clock.VisualFrame, after.MoveElapsedFrames, after.IsInMove, resolveMove ? after.MoveId : null, after.LogicState.ToString()));
         }
     }
@@ -194,8 +194,8 @@ public sealed class FighterVisual
         string? moveId = _throwVisual?.Clip(fighter) == spriteClip ? null : fighter.MoveId;
         bool usedSprite = _sprite?.Apply(spriteClip, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, facingLeft,
             moveId, fighter.LogicState.ToString()) == true;
-        if (_sprite is not null && OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit"))
-            GD.Print($"[SpriteRenderAudit] fighter={fighter.Id} logic={logicFrame} state={fighter.LogicState} sprite_selected={usedSprite} " +
+        if (_sprite is not null && SpriteAuditCost.Enabled())
+            SpriteAuditCost.Print($"[SpriteRenderAudit] fighter={fighter.Id} logic={logicFrame} state={fighter.LogicState} sprite_selected={usedSprite} " +
                 _sprite.Describe(spriteClip, visualFrame, fighter.MoveElapsedFrames, fighter.IsInMove, moveId, fighter.LogicState.ToString()));
         _sprite?.SetFlash(_flash.ActiveAt(logicFrame));
         _body.Visible = !usedSprite;
@@ -215,5 +215,49 @@ public sealed class FighterVisual
             ? Colors.White
             : Color.FromHtml(frame.Color);
         _root.RotationDegrees = facingLeft ? -frame.RotationDegrees : frame.RotationDegrees;
+    }
+}
+
+// Batch adjacent audit rows; callers flush before any other output or returning to Godot.
+internal static class SpriteAuditCost
+{
+    private static readonly bool Probe = OS.GetCmdlineUserArgs().Contains("--audit-cost-probe");
+    private static readonly bool Unbatched = OS.GetCmdlineUserArgs().Contains("--sprite-audit-unbatched");
+    private static readonly System.Text.StringBuilder Pending = new();
+    private static long _argumentTicks, _printTicks, _argumentCalls, _printCalls, _rows, _reported;
+    public static bool Enabled()
+    {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        bool enabled = OS.GetCmdlineUserArgs().Contains("--sprite-frame-audit");
+        if (Probe) { _argumentTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start; _argumentCalls++; }
+        return enabled;
+    }
+    public static void Print(string line)
+    {
+        _rows++;
+        if (Unbatched) { Write(line); return; }
+        if (Pending.Length > 0) Pending.Append('\n');
+        Pending.Append(line);
+    }
+    public static void Flush()
+    {
+        if (Pending.Length == 0) return;
+        string lines = Pending.ToString();
+        Pending.Clear();
+        Write(lines);
+    }
+    private static void Write(string lines)
+    {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        GD.Print(lines);
+        if (!Probe) return;
+        _printTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
+        _printCalls++;
+        if (_rows / 600 > _reported)
+        {
+            _reported = _rows / 600;
+            GD.Print($"[AuditCostProbe] rows={_rows} printCalls={_printCalls} printMs={1000d * _printTicks / System.Diagnostics.Stopwatch.Frequency} " +
+                $"argumentCalls={_argumentCalls} argumentMs={1000d * _argumentTicks / System.Diagnostics.Stopwatch.Frequency}");
+        }
     }
 }

@@ -129,6 +129,9 @@ public sealed class GroundBodyWidthsDto
 
 public sealed class GroundHurtboxesDto
 {
+    [JsonPropertyName("standingLightHitstun")]
+    public List<MoveHurtboxSpanDto>? StandingLightHitstun { get; set; }
+
     [JsonPropertyName("tripFall")]
     public List<MoveHurtboxSpanDto>? TripFall { get; set; }
 
@@ -209,6 +212,9 @@ public sealed class FractionDto
 /// <summary>运动配置（7 个定点分数，全部必填）。</summary>
 public sealed class MovementDto
 {
+    [JsonPropertyName("shortHopCanGuard")]
+    public bool ShortHopCanGuard { get; set; } = true;
+
     [JsonPropertyName("walkForwardSpeed")]
     public FractionDto? WalkForwardSpeed { get; set; }
 

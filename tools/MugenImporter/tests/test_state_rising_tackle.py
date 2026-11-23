@@ -14,6 +14,8 @@ class OriginalRisingTackleTests(unittest.TestCase):
                                           cls.root / 'data/imported-characters/terry98/manifest.json')
 
     def test_original_state_and_air_timing(self):
+        self.assertFalse(self.audit['shortHopCanGuard'])
+        self.assertEqual([1, 4], [row['frames'] for row in self.audit['standingLightHitstun']])
         body = self.audit['state1200']
         self.assertEqual([2, 3, 4, 1, 2, 2, 2, 2, 2, 1, 5, 6, 9], body['durations'])
         self.assertEqual((41, 14, 55), (body['duration'], body['recoveryDuration'],
@@ -41,6 +43,8 @@ class OriginalRisingTackleTests(unittest.TestCase):
         proof['move1200'] = {'durations': body['durations'], 'reversalFrames': body['reversalWindow'],
                              'attackGroups': [[row['first'], row['last']] for row in body['attackWindows']]}
         profile, sprites = tackle.build_profile(self.audit, proof, fighter, binding, 'default')
+        self.assertFalse(profile['movement']['shortHopCanGuard'])
+        self.assertEqual([2, 4, 6], [row['frames'] for row in profile['groundHurtboxes']['standingLightHitstun']])
         move = next(row for row in profile['moves'] if row['moveId'] == tackle.MOVE_ID)
         self.assertEqual(55, sum(move[key] for key in ('startupFrames', 'activeFrames', 'recoveryFrames')))
         self.assertEqual(55, sum(row['frames'] for row in move['hurtboxTimeline']))
